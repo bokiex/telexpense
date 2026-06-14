@@ -1,0 +1,31 @@
+# Architecture
+
+## Surfaces
+
+- Telegram bot webhook: fast capture and budget feedback at `/api/telegram/webhook`.
+- Telegram Mini App: mobile dashboard at `/`.
+- Supabase Postgres: master list for expenses, income, investments, transfers, and budgets.
+- Vercel: one Next.js project hosting both the Mini App frontend and serverless bot/API routes.
+
+## Data Flow
+
+1. User sends a transaction message to the bot.
+2. `/api/telegram/webhook` receives Telegram updates.
+3. `lib/parser` converts comma-separated text into a normalized transaction.
+4. `lib/repository` stores the transaction in Supabase as integer cents.
+5. `lib/budget` checks current monthly category spend against budgets.
+6. Bot replies with a save confirmation and optional warning.
+7. Mini App calls `/api/summary` with `X-Telegram-Init-Data`.
+8. Backend validates Telegram init data and returns only that user's dashboard data.
+
+## Telegram Mini App Notes
+
+Telegram's Mini App docs describe multiple launch paths, including main app/profile button, inline keyboard button, keyboard button, and menu button. This project supports menu or inline button launch by returning an inline `web_app` button in bot replies. BotFather should also be used to configure the main Mini App or menu button for a one-tap dashboard.
+
+The Mini App must run on HTTPS outside Telegram's test environment. In production, never disable `initData` validation because it is the boundary that maps a dashboard API call to a Telegram user.
+
+## Supabase Security
+
+The frontend does not query Supabase directly for private finance data. It calls Next.js API routes with Telegram `initData`; the route validates Telegram's HMAC signature, then uses the server-side Supabase secret/service-role key to query only that Telegram user's rows.
+
+Row Level Security is enabled in [supabase/schema.sql](../supabase/schema.sql), with no anon policies required for this server-mediated flow.
