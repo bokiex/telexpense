@@ -29,12 +29,12 @@ export async function POST(request: NextRequest) {
   const text = String(message.text).trim();
 
   try {
-    await upsertTelegramUser(user);
-
     if (text.startsWith("/start")) {
       await sendTelegramMessage(chatId, "Send expenses like: food, debit card, lunch, $4.20", dashboardKeyboard());
       return NextResponse.json({ ok: true });
     }
+
+    await upsertTelegramUser(user);
 
     if (text.startsWith("/budget")) {
       const reply = await handleBudgetCommand(user.id, text);
@@ -53,8 +53,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "Could not save transaction.";
-    await sendTelegramMessage(chatId, `${messageText}\nExample: food, debit card, lunch, $4.20`, dashboardKeyboard());
+    console.error("Telegram webhook handler failed", error);
+    await safeSendTelegramMessage(chatId, `${messageText}\nExample: food, debit card, lunch, $4.20`);
     return NextResponse.json({ ok: true });
+  }
+}
+
+async function safeSendTelegramMessage(chatId: number, text: string) {
+  try {
+    await sendTelegramMessage(chatId, text);
+  } catch (error) {
+    console.error("Could not send fallback Telegram message", error);
   }
 }
 
@@ -72,4 +81,3 @@ async function handleBudgetCommand(telegramUserId: number, text: string) {
 function money(cents: number) {
   return `$${(cents / 100).toFixed(2)}`;
 }
-

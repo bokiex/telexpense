@@ -39,9 +39,12 @@ export function validateTelegramInitData(initData: string, botToken: string, max
 
 export async function sendTelegramMessage(chatId: number, text: string, replyMarkup?: unknown) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return;
+  if (!token) {
+    console.error("TELEGRAM_BOT_TOKEN is not configured; cannot send Telegram message.");
+    throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+  }
 
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -50,13 +53,18 @@ export async function sendTelegramMessage(chatId: number, text: string, replyMar
       reply_markup: replyMarkup
     })
   });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.ok) {
+    console.error("Telegram sendMessage failed", result);
+    throw new Error(result?.description || "Telegram sendMessage failed");
+  }
 }
 
 export function dashboardKeyboard() {
   const baseUrl = process.env.APP_BASE_URL || process.env.VERCEL_PROJECT_PRODUCTION_URL || "";
+  if (!baseUrl || baseUrl.includes("your-public-domain.example")) return undefined;
   const normalized = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
   return {
     inline_keyboard: [[{ text: "Open dashboard", web_app: { url: normalized } }]]
   };
 }
-

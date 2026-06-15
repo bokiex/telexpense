@@ -69,6 +69,28 @@ Configure the Mini App or menu button in BotFather to point to:
 $APP_BASE_URL/
 ```
 
+Check the active webhook:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+`result.url` must be your deployed Vercel webhook URL. If it is empty, Telegram is not sending messages to your app.
+
+Before setting the webhook, confirm the deployment is alive:
+
+```bash
+curl "$APP_BASE_URL/api/health"
+```
+
+Expected response:
+
+```json
+{"ok":true}
+```
+
+If the bot receives messages but does not reply, check the Vercel function logs for `/api/telegram/webhook`. The webhook logs Telegram `sendMessage` failures and Supabase errors.
+
 ## Message Formats
 
 ```text
