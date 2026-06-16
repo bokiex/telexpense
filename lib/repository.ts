@@ -39,6 +39,24 @@ export type BudgetHealth = {
   projectedSpendCents: number;
 };
 
+export type BudgetGroup = "Needs" | "Wants" | "Savings";
+
+export type StoredSubcategory = {
+  id: number;
+  name: string;
+};
+
+export type StoredCategory = {
+  id: number;
+  sourceKey: string;
+  sourceName: string;
+  name: string;
+  group: BudgetGroup;
+  color: string;
+  icon: string;
+  subcategories: StoredSubcategory[];
+};
+
 export async function upsertTelegramUser(user: { id: number; first_name?: string; username?: string }) {
   const supabase = createSupabaseAdmin();
   const { error } = await supabase.from("users").upsert({
@@ -183,12 +201,118 @@ export async function deleteBudget(telegramUserId: number, category: string, mon
   if (error) throw error;
 }
 
+export async function upsertCategory(
+  telegramUserId: number,
+  values: {
+    sourceKey: string;
+    sourceName: string;
+    name: string;
+    group: BudgetGroup;
+    color: string;
+    icon: string;
+  }
+) {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("categories")
+    .upsert(
+      {
+        telegram_user_id: telegramUserId,
+        source_key: values.sourceKey,
+        source_name: values.sourceName.toLowerCase(),
+        name: values.name,
+        budget_group: values.group,
+        color: values.color,
+        icon: values.icon,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "telegram_user_id,source_key" }
+    )
+    .select("id")
+    .single();
+  if (error) throw error;
+  return Number(data.id);
+}
+
+export async function addSubcategory(
+  telegramUserId: number,
+  values: {
+    sourceKey: string;
+    sourceName: string;
+    categoryName: string;
+    group: BudgetGroup;
+    color: string;
+    icon: string;
+    name: string;
+  }
+) {
+  const categoryId = await upsertCategory(telegramUserId, {
+    sourceKey: values.sourceKey,
+    sourceName: values.sourceName,
+    name: values.categoryName,
+    group: values.group,
+    color: values.color,
+    icon: values.icon
+  });
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("subcategories")
+    .upsert(
+      {
+        telegram_user_id: telegramUserId,
+        category_id: categoryId,
+        name: values.name
+      },
+      { onConflict: "telegram_user_id,category_id,name" }
+    )
+    .select("id")
+    .single();
+  if (error) throw error;
+  return Number(data.id);
+}
+
+export async function getStoredCategories(telegramUserId: number): Promise<StoredCategory[]> {
+  const supabase = createSupabaseAdmin();
+  const [categoriesRes, subcategoriesRes] = await Promise.all([
+    supabase
+      .from("categories")
+      .select("id, source_key, source_name, name, budget_group, color, icon")
+      .eq("telegram_user_id", telegramUserId)
+      .order("name"),
+    supabase
+      .from("subcategories")
+      .select("id, category_id, name")
+      .eq("telegram_user_id", telegramUserId)
+      .order("name")
+  ]);
+
+  if (categoriesRes.error) throw categoriesRes.error;
+  if (subcategoriesRes.error) throw subcategoriesRes.error;
+
+  const subcategories = new Map<number, StoredSubcategory[]>();
+  for (const row of subcategoriesRes.data || []) {
+    const categoryId = Number(row.category_id);
+    subcategories.set(categoryId, [...(subcategories.get(categoryId) || []), { id: Number(row.id), name: row.name }]);
+  }
+
+  return (categoriesRes.data || []).map((row) => ({
+    id: Number(row.id),
+    sourceKey: row.source_key,
+    sourceName: row.source_name,
+    name: row.name,
+    group: row.budget_group as BudgetGroup,
+    color: row.color,
+    icon: row.icon,
+    subcategories: subcategories.get(Number(row.id)) || []
+  }));
+}
+
 export async function getSummary(telegramUserId: number, month: string) {
   const supabase = createSupabaseAdmin();
   const start = `${month}-01`;
   const end = nextMonthStart(month);
 
-  const [transactionsRes, budgetsRes] = await Promise.all([
+  const [transactionsRes, budgetsRes, storedCategories] = await Promise.all([
     supabase
       .from("transactions")
       .select("id, kind, category, account, description, amount_cents, currency, occurred_on")
@@ -202,7 +326,8 @@ export async function getSummary(telegramUserId: number, month: string) {
       .select("category, amount_cents, currency")
       .eq("telegram_user_id", telegramUserId)
       .eq("month", month)
-      .order("category")
+      .order("category"),
+    getStoredCategories(telegramUserId)
   ]);
 
   if (transactionsRes.error) throw transactionsRes.error;
@@ -249,6 +374,7 @@ export async function getSummary(telegramUserId: number, month: string) {
     daily: Array.from(daily.entries())
       .map(([date, spentCents]) => ({ date, spentCents }))
       .sort((a, b) => a.date.localeCompare(b.date)),
+    storedCategories,
     recent: transactions.slice(0, 20).map((tx) => ({
       id: tx.id,
       kind: tx.kind,
