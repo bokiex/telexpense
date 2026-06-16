@@ -268,6 +268,7 @@ export async function getStoredAccounts(telegramUserId: number): Promise<Omit<St
     .select("id, account_key, name, institution, account_type, opening_balance_cents, currency, color, icon, active")
     .eq("telegram_user_id", telegramUserId)
     .order("name");
+  if (error && isMissingSchemaError(error)) return [];
   if (error) throw error;
   return (data || []).map((row) => ({
     id: Number(row.id),
@@ -368,6 +369,8 @@ export async function getStoredCategories(telegramUserId: number): Promise<Store
       .order("name")
   ]);
 
+  if (categoriesRes.error && isMissingSchemaError(categoriesRes.error)) return [];
+  if (subcategoriesRes.error && isMissingSchemaError(subcategoriesRes.error)) return [];
   if (categoriesRes.error) throw categoriesRes.error;
   if (subcategoriesRes.error) throw subcategoriesRes.error;
 
@@ -394,15 +397,8 @@ export async function getSummary(telegramUserId: number, month: string) {
   const start = `${month}-01`;
   const end = nextMonthStart(month);
 
-  const [transactionsRes, budgetsRes, storedCategories, storedAccounts, accountTransactionsRes] = await Promise.all([
-    supabase
-      .from("transactions")
-      .select("id, kind, category, account, account_id, description, amount_cents, currency, occurred_on")
-      .eq("telegram_user_id", telegramUserId)
-      .gte("occurred_on", start)
-      .lt("occurred_on", end)
-      .order("occurred_on", { ascending: false })
-      .order("id", { ascending: false }),
+  const [transactions, budgetsRes, storedCategories, storedAccounts, allAccountTransactions] = await Promise.all([
+    getSummaryTransactions(telegramUserId, start, end),
     supabase
       .from("budgets")
       .select("category, amount_cents, currency")
@@ -411,18 +407,11 @@ export async function getSummary(telegramUserId: number, month: string) {
       .order("category"),
     getStoredCategories(telegramUserId),
     getStoredAccounts(telegramUserId),
-    supabase
-      .from("transactions")
-      .select("account, account_id, amount_cents, currency")
-      .eq("telegram_user_id", telegramUserId)
+    getAccountTransactions(telegramUserId)
   ]);
 
-  if (transactionsRes.error) throw transactionsRes.error;
   if (budgetsRes.error) throw budgetsRes.error;
-  if (accountTransactionsRes.error) throw accountTransactionsRes.error;
 
-  const transactions = transactionsRes.data || [];
-  const allAccountTransactions = accountTransactionsRes.data || [];
   const budgets = (budgetsRes.data || []).map((row) => ({
     category: row.category,
     budgetCents: row.amount_cents,
@@ -497,6 +486,52 @@ export function currentMonth() {
   return new Date().toISOString().slice(0, 7);
 }
 
+async function getSummaryTransactions(telegramUserId: number, start: string, end: string) {
+  const supabase = createSupabaseAdmin();
+  const withAccountId = await supabase
+    .from("transactions")
+    .select("id, kind, category, account, account_id, description, amount_cents, currency, occurred_on")
+    .eq("telegram_user_id", telegramUserId)
+    .gte("occurred_on", start)
+    .lt("occurred_on", end)
+    .order("occurred_on", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (!withAccountId.error) return withAccountId.data || [];
+  if (!isMissingSchemaError(withAccountId.error)) throw withAccountId.error;
+
+  const legacy = await supabase
+    .from("transactions")
+    .select("id, kind, category, account, description, amount_cents, currency, occurred_on")
+    .eq("telegram_user_id", telegramUserId)
+    .gte("occurred_on", start)
+    .lt("occurred_on", end)
+    .order("occurred_on", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (legacy.error) throw legacy.error;
+  return (legacy.data || []).map((row) => ({ ...row, account_id: null }));
+}
+
+async function getAccountTransactions(telegramUserId: number) {
+  const supabase = createSupabaseAdmin();
+  const withAccountId = await supabase
+    .from("transactions")
+    .select("account, account_id, amount_cents, currency")
+    .eq("telegram_user_id", telegramUserId);
+
+  if (!withAccountId.error) return withAccountId.data || [];
+  if (!isMissingSchemaError(withAccountId.error)) throw withAccountId.error;
+
+  const legacy = await supabase
+    .from("transactions")
+    .select("account, amount_cents, currency")
+    .eq("telegram_user_id", telegramUserId);
+
+  if (legacy.error) throw legacy.error;
+  return (legacy.data || []).map((row) => ({ ...row, account_id: null }));
+}
+
 function buildAccounts(
   storedAccounts: Omit<StoredAccount, "balanceCents">[],
   transactions: { account: string; account_id: number | null; amount_cents: number; currency: string }[]
@@ -532,6 +567,11 @@ function buildAccounts(
   }
 
   return Array.from(accounts.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function isMissingSchemaError(error: unknown) {
+  const candidate = error as { code?: string; message?: string };
+  return candidate.code === "42P01" || candidate.code === "42703" || /does not exist|Could not find/i.test(candidate.message || "");
 }
 
 function slug(value: string) {
