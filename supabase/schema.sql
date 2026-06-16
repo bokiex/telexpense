@@ -54,6 +54,7 @@ create table if not exists public.categories (
   budget_group text not null default 'Needs' check (budget_group in ('Needs', 'Wants', 'Savings')),
   color text not null default '#4ade80',
   icon text not null default 'Wallet',
+  active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (telegram_user_id, source_key)
@@ -70,6 +71,9 @@ create table if not exists public.subcategories (
 
 alter table public.transactions
   add column if not exists account_id bigint references public.accounts(id) on delete set null;
+
+alter table public.categories
+  add column if not exists active boolean not null default true;
 
 create index if not exists transactions_user_month_idx
   on public.transactions (telegram_user_id, occurred_on desc);

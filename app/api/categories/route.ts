@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addSubcategory, upsertCategory } from "@/lib/repository";
+import { addSubcategory, deleteBudget, deleteCategoryMetadata, upsertCategory } from "@/lib/repository";
 import { requireEnv } from "@/lib/env";
 import { validateTelegramInitData } from "@/lib/telegram";
 import type { BudgetGroup } from "@/lib/repository";
@@ -51,6 +51,27 @@ export async function POST(request: NextRequest) {
       icon
     });
     return NextResponse.json({ ok: true, id });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 401 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const userId = authenticatedUserId(request);
+    const sourceKey = String(request.nextUrl.searchParams.get("sourceKey") || "").trim();
+    const sourceName = String(request.nextUrl.searchParams.get("sourceName") || "").trim();
+    const month = String(request.nextUrl.searchParams.get("month") || "").trim();
+
+    if (!sourceKey) return NextResponse.json({ error: "Category source key is required." }, { status: 400 });
+    if (!sourceName) return NextResponse.json({ error: "Category source name is required." }, { status: 400 });
+
+    await deleteCategoryMetadata(userId, sourceKey, sourceName);
+    if (/^\d{4}-\d{2}$/.test(month)) {
+      await deleteBudget(userId, sourceName, month);
+    }
+
+    return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 401 });
   }

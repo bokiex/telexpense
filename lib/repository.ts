@@ -69,6 +69,7 @@ export type StoredCategory = {
   group: BudgetGroup;
   color: string;
   icon: string;
+  active: boolean;
   subcategories: StoredSubcategory[];
 };
 
@@ -358,6 +359,7 @@ export async function upsertCategory(
         budget_group: values.group,
         color: values.color,
         icon: values.icon,
+        active: true,
         updated_at: new Date().toISOString()
       },
       { onConflict: "telegram_user_id,source_key" }
@@ -405,12 +407,34 @@ export async function addSubcategory(
   return Number(data.id);
 }
 
+export async function deleteCategoryMetadata(telegramUserId: number, sourceKey: string, sourceName: string) {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase
+    .from("categories")
+    .upsert(
+      {
+        telegram_user_id: telegramUserId,
+        source_key: sourceKey,
+        source_name: sourceName.toLowerCase(),
+        name: titleCase(sourceName),
+        budget_group: "Needs",
+        color: "#4ade80",
+        icon: "Wallet",
+        active: false,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "telegram_user_id,source_key" }
+    );
+  if (error && isMissingSchemaError(error)) return;
+  if (error) throw error;
+}
+
 export async function getStoredCategories(telegramUserId: number): Promise<StoredCategory[]> {
   const supabase = createSupabaseAdmin();
   const [categoriesRes, subcategoriesRes] = await Promise.all([
     supabase
       .from("categories")
-      .select("id, source_key, source_name, name, budget_group, color, icon")
+      .select("id, source_key, source_name, name, budget_group, color, icon, active")
       .eq("telegram_user_id", telegramUserId)
       .order("name"),
     supabase
@@ -439,6 +463,7 @@ export async function getStoredCategories(telegramUserId: number): Promise<Store
     group: row.budget_group as BudgetGroup,
     color: row.color,
     icon: row.icon,
+    active: row.active,
     subcategories: subcategories.get(Number(row.id)) || []
   }));
 }

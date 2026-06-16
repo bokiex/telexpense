@@ -511,6 +511,10 @@ button {
   height: 26px;
 }
 
+.tiny-icon.danger {
+  color: var(--destructive);
+}
+
 .confirm-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -529,6 +533,11 @@ button {
 .confirm-row button + button {
   color: var(--destructive);
   border-left: 1px solid var(--border);
+}
+
+.category-confirm {
+  border-left: 0;
+  border-right: 0;
 }
 
 .account-total-list {

@@ -95,6 +95,7 @@ type StoredCategory = {
   group: BudgetGroup;
   color: string;
   icon: string;
+  active: boolean;
   subcategories: { id: number; name: string }[];
 };
 
@@ -115,6 +116,7 @@ type Category = {
   budget?: number;
   currency: string;
   subcategories: SubCategory[];
+  hidden?: boolean;
 };
 
 type Transaction = {
@@ -157,9 +159,10 @@ type ModalState =
   | { type: "edit-transaction"; tx: Transaction }
   | { type: "add-account" }
   | { type: "edit-account"; account: Account }
+  | { type: "add-category" }
   | { type: "edit-category"; categoryId: string }
   | { type: "add-subcategory"; categoryId: string }
-  | { type: "set-budget"; categoryId: string; subcategoryId?: string };
+  | { type: "set-budget"; categoryId: string };
 
 declare global {
   interface Window {
@@ -291,20 +294,51 @@ export default function Dashboard() {
     reload();
   }
 
-  async function saveCategory(categoryId: string, values: { name: string; group: BudgetGroup; color: string; icon: string }) {
-    const category = data.categories.find((item) => item.id === categoryId);
-    if (!category) return;
-    const response = await apiRequest("/api/categories", "POST", {
-      sourceKey: category.id,
-      sourceName: category.sourceName,
-      ...values
+  async function saveCategory(categoryId: string | null, values: { name: string; group: BudgetGroup; color: string; icon: string; budgetCents: number }) {
+    const category = categoryId ? data.categories.find((item) => item.id === categoryId) : null;
+    const sourceKey = category?.id || slug(values.name);
+    const sourceName = category?.sourceName || values.name.toLowerCase();
+    const currency = category?.currency || summary?.recent[0]?.currency || "USD";
+    const categoryResponse = await apiRequest("/api/categories", "POST", {
+      sourceKey,
+      sourceName,
+      name: values.name,
+      group: values.group,
+      color: values.color,
+      icon: values.icon
     });
-    if (!response.ok) {
-      const result = await response.json().catch(() => null);
+    if (!categoryResponse.ok) {
+      const result = await categoryResponse.json().catch(() => null);
       setError(result?.error || "Could not save category.");
       return;
     }
+    const budgetResponse = await apiRequest("/api/budgets", "POST", {
+      category: sourceName,
+      month,
+      amountCents: values.budgetCents,
+      currency
+    });
+    if (!budgetResponse.ok) {
+      const result = await budgetResponse.json().catch(() => null);
+      setError(result?.error || "Could not save budget.");
+      return;
+    }
     setModal({ type: "none" });
+    reload();
+  }
+
+  async function deleteCategory(categoryId: string) {
+    const category = data.categories.find((item) => item.id === categoryId);
+    if (!category) return;
+    const response = await apiRequest(
+      `/api/categories?sourceKey=${encodeURIComponent(category.id)}&sourceName=${encodeURIComponent(category.sourceName)}&month=${encodeURIComponent(month)}`,
+      "DELETE"
+    );
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      setError(result?.error || "Could not delete category.");
+      return;
+    }
     reload();
   }
 
@@ -402,9 +436,10 @@ export default function Dashboard() {
           {activeTab === "categories" ? (
             <CategoriesView
               data={data}
-              onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })}
+              onAddCategory={() => setModal({ type: "add-category" })}
               onEditCategory={(categoryId) => setModal({ type: "edit-category", categoryId })}
               onAddSubcategory={(categoryId) => setModal({ type: "add-subcategory", categoryId })}
+              onDeleteCategory={deleteCategory}
             />
           ) : null}
         </div>
@@ -439,6 +474,15 @@ export default function Dashboard() {
       {modal.type === "edit-category" ? (
         <CategoryModal
           category={data.categories.find((category) => category.id === modal.categoryId)}
+          currency={data.categories.find((category) => category.id === modal.categoryId)?.currency || "USD"}
+          onSave={saveCategory}
+          onClose={() => setModal({ type: "none" })}
+        />
+      ) : null}
+
+      {modal.type === "add-category" ? (
+        <CategoryModal
+          currency={summary?.recent[0]?.currency || "USD"}
           onSave={saveCategory}
           onClose={() => setModal({ type: "none" })}
         />
@@ -591,7 +635,7 @@ function TransactionListView({
           <FieldLabel label="Category">
             <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
               <option value="all">All Categories</option>
-              {data.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              {data.categories.filter((category) => !category.hidden).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
           </FieldLabel>
           {activeFilters ? (
@@ -711,7 +755,7 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
       </section>
 
       {GROUPS.map((group) => {
-        const categories = data.categories.filter((category) => category.group === group && category.budget !== undefined);
+        const categories = data.categories.filter((category) => !category.hidden && category.group === group && category.budget !== undefined);
         if (!categories.length) return null;
         const groupBudget = categories.reduce((sum, category) => sum + (category.budget || 0), 0);
         const groupSpent = categories.reduce((sum, category) => sum + spentForCategory(data, category.id), 0);
@@ -756,22 +800,28 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
 
 function CategoriesView({
   data,
-  onSetBudget,
+  onAddCategory,
   onEditCategory,
-  onAddSubcategory
+  onAddSubcategory,
+  onDeleteCategory
 }: {
   data: AppData;
-  onSetBudget: (categoryId: string) => void;
+  onAddCategory: () => void;
   onEditCategory: (categoryId: string) => void;
   onAddSubcategory: (categoryId: string) => void;
+  onDeleteCategory: (categoryId: string) => void;
 }) {
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   return (
     <div className="screen-stack">
       <p className="helper-copy">Edit names, groups, colors, icons, and add sub-categories for faster transaction entry.</p>
+      <button className="primary-action" type="button" onClick={onAddCategory}>
+        <Plus size={16} /> Add Category
+      </button>
       {GROUPS.map((group) => {
-        const categories = data.categories.filter((category) => category.group === group);
+        const categories = data.categories.filter((category) => !category.hidden && category.group === group);
         return (
           <section key={group}>
             <div className="category-group-label">
@@ -796,10 +846,16 @@ function CategoriesView({
                       <button className="tiny-icon" type="button" onClick={() => onEditCategory(category.id)} aria-label={`Edit ${category.name}`}>
                         <Pencil size={11} />
                       </button>
-                      <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
-                        <Wallet size={11} />
+                      <button className="tiny-icon danger" type="button" onClick={() => setDeleteConfirm(deleteConfirm === category.id ? null : category.id)} aria-label={`Delete ${category.name}`}>
+                        <Trash2 size={11} />
                       </button>
                     </div>
+                    {deleteConfirm === category.id ? (
+                      <div className="confirm-row category-confirm">
+                        <button type="button" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+                        <button type="button" onClick={() => { onDeleteCategory(category.id); setDeleteConfirm(null); }}>Delete</button>
+                      </div>
+                    ) : null}
                     {expanded ? (
                       <div className="subcategory-list">
                         {category.subcategories.length ? category.subcategories.map((sub) => (
@@ -827,31 +883,38 @@ function CategoriesView({
 
 function CategoryModal({
   category,
+  currency,
   onSave,
   onClose
 }: {
   category?: Category;
-  onSave: (categoryId: string, values: { name: string; group: BudgetGroup; color: string; icon: string }) => void;
+  currency: string;
+  onSave: (categoryId: string | null, values: { name: string; group: BudgetGroup; color: string; icon: string; budgetCents: number }) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(category?.name || "");
   const [group, setGroup] = useState<BudgetGroup>(category?.group || "Needs");
   const [color, setColor] = useState(category?.color || CATEGORY_COLORS[0]);
   const [icon, setIcon] = useState(category?.icon || "Wallet");
+  const [budget, setBudget] = useState(category?.budget ? String(category.budget / 100) : "0");
   const [error, setError] = useState("");
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!category) return;
     if (!name.trim()) {
       setError("Name is required.");
       return;
     }
-    onSave(category.id, { name: name.trim(), group, color, icon });
+    const budgetCents = Math.round(Number(budget) * 100);
+    if (!Number.isFinite(budgetCents) || budgetCents < 0) {
+      setError("Budget is not valid.");
+      return;
+    }
+    onSave(category?.id || null, { name: name.trim(), group, color, icon, budgetCents });
   }
 
   return (
-    <BottomSheet title="Edit Category" onClose={onClose}>
+    <BottomSheet title={category ? "Edit Category" : "Add Category"} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
         <FieldLabel label="Name">
           <input value={name} placeholder="Category name" onChange={(event) => setName(event.target.value)} />
@@ -864,6 +927,9 @@ function CategoryModal({
               </button>
             ))}
           </div>
+        </FieldLabel>
+        <FieldLabel label={`Monthly Budget (${currency})`}>
+          <input value={budget} inputMode="decimal" placeholder="0.00" onChange={(event) => setBudget(event.target.value)} />
         </FieldLabel>
         <FieldLabel label="Color">
           <div className="choice-grid color-grid">
@@ -892,7 +958,7 @@ function CategoryModal({
           </div>
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-action" type="submit">Save Category</button>
+        <button className="primary-action" type="submit">{category ? "Save Category" : "Add Category"}</button>
       </form>
     </BottomSheet>
   );
@@ -976,7 +1042,7 @@ function AccountModal({
       return;
     }
     onSave({
-      accountKey: account?.accountKey || slug(name),
+      accountKey: account?.accountKey || `${slug(name)}-${Date.now().toString(36)}`,
       name: name.trim(),
       institution: institution.trim(),
       accountType,
@@ -1109,7 +1175,7 @@ function TransactionModal({
         </FieldLabel>
         <FieldLabel label="Category">
           <select value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setSubcategoryId(""); }}>
-            {data.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+            {data.categories.filter((category) => !category.hidden).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
           </select>
         </FieldLabel>
         <FieldLabel label="Sub-category">
@@ -1304,7 +1370,8 @@ function buildAppData(summary: Summary | null): AppData {
       icon: stored?.icon || look.icon,
       budget: budget?.budgetCents,
       currency: budget?.currency || currency,
-      subcategories: []
+      subcategories: [],
+      hidden: stored?.active === false
     };
     categoryMap.set(id, category);
     return category;
@@ -1313,6 +1380,7 @@ function buildAppData(summary: Summary | null): AppData {
   for (const item of summary.categories) addCategory(item.category, item.currency);
   for (const item of summary.budgets) addCategory(item.category, item.currency);
   for (const item of summary.recent) addCategory(item.category, item.currency);
+  for (const stored of summary.storedCategories) addCategory(stored.sourceName);
 
   const transactions = summary.recent.map((tx) => {
     const category = addCategory(tx.category, tx.currency);
