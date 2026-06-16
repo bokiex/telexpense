@@ -18,6 +18,27 @@ export type DailyPoint = {
   spentCents: number;
 };
 
+export type RecentTransaction = {
+  id: number;
+  kind: string;
+  category: string;
+  account: string;
+  description: string;
+  amountCents: number;
+  currency: string;
+  occurredOn: string;
+};
+
+export type BudgetHealth = {
+  spentCents: number;
+  budgetCents: number;
+  remainingCents: number;
+  budgetUsed: number;
+  daysLeft: number;
+  dailySafeCents: number;
+  projectedSpendCents: number;
+};
+
 export async function upsertTelegramUser(user: { id: number; first_name?: string; username?: string }) {
   const supabase = createSupabaseAdmin();
   const { error } = await supabase.from("users").upsert({
@@ -48,6 +69,63 @@ export async function addTransaction(telegramUserId: number, transaction: Parsed
   return Number(data.id);
 }
 
+export async function updateTransaction(telegramUserId: number, transactionId: number, transaction: ParsedTransaction) {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase
+    .from("transactions")
+    .update({
+      kind: transaction.kind,
+      category: transaction.category,
+      account: transaction.account,
+      description: transaction.description,
+      amount_cents: transaction.amountCents,
+      currency: transaction.currency
+    })
+    .eq("telegram_user_id", telegramUserId)
+    .eq("id", transactionId);
+  if (error) throw error;
+}
+
+export async function updateTransactionFields(
+  telegramUserId: number,
+  transactionId: number,
+  values: {
+    kind: ParsedTransaction["kind"];
+    category: string;
+    account: string;
+    description: string;
+    amountCents: number;
+    currency: string;
+    occurredOn: string;
+  }
+) {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase
+    .from("transactions")
+    .update({
+      kind: values.kind,
+      category: values.category.toLowerCase(),
+      account: values.account.toLowerCase(),
+      description: values.description,
+      amount_cents: values.amountCents,
+      currency: values.currency.toUpperCase(),
+      occurred_on: values.occurredOn
+    })
+    .eq("telegram_user_id", telegramUserId)
+    .eq("id", transactionId);
+  if (error) throw error;
+}
+
+export async function deleteTransaction(telegramUserId: number, transactionId: number) {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase
+    .from("transactions")
+    .delete()
+    .eq("telegram_user_id", telegramUserId)
+    .eq("id", transactionId);
+  if (error) throw error;
+}
+
 export async function setBudget(telegramUserId: number, category: string, month: string, amountCents: number, currency = "USD") {
   const supabase = createSupabaseAdmin();
   const { error } = await supabase.from("budgets").upsert(
@@ -60,6 +138,17 @@ export async function setBudget(telegramUserId: number, category: string, month:
     },
     { onConflict: "telegram_user_id,category,month" }
   );
+  if (error) throw error;
+}
+
+export async function deleteBudget(telegramUserId: number, category: string, month: string) {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase
+    .from("budgets")
+    .delete()
+    .eq("telegram_user_id", telegramUserId)
+    .eq("category", category.toLowerCase())
+    .eq("month", month);
   if (error) throw error;
 }
 
@@ -107,10 +196,25 @@ export async function getSummary(telegramUserId: number, month: string) {
     daily.set(tx.occurred_on, (daily.get(tx.occurred_on) || 0) + spent);
   }
 
+  const categoryList = Array.from(categories.values()).sort((a, b) => b.spentCents - a.spentCents);
+  const spentCents = categoryList.reduce((sum, item) => sum + item.spentCents, 0);
+  const budgetCents = budgets.reduce((sum, item) => sum + item.budgetCents, 0);
+  const daysElapsed = daysElapsedInMonth(month);
+  const daysLeft = daysLeftInMonth(month);
+
   return {
     month,
-    categories: Array.from(categories.values()).sort((a, b) => b.spentCents - a.spentCents),
+    categories: categoryList,
     budgets,
+    health: {
+      spentCents,
+      budgetCents,
+      remainingCents: budgetCents - spentCents,
+      budgetUsed: budgetCents ? Math.round((spentCents / budgetCents) * 100) : 0,
+      daysLeft,
+      dailySafeCents: daysLeft > 0 ? Math.floor(Math.max(0, budgetCents - spentCents) / daysLeft) : 0,
+      projectedSpendCents: daysElapsed > 0 ? Math.round((spentCents / daysElapsed) * daysInMonth(month)) : spentCents
+    },
     daily: Array.from(daily.entries())
       .map(([date, spentCents]) => ({ date, spentCents }))
       .sort((a, b) => a.date.localeCompare(b.date)),
@@ -149,3 +253,23 @@ function nextMonthStart(month: string) {
   return new Date(Date.UTC(year, monthIndex, 1)).toISOString().slice(0, 10);
 }
 
+function daysInMonth(month: string) {
+  const [year, monthIndex] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, monthIndex, 0)).getUTCDate();
+}
+
+function daysElapsedInMonth(month: string) {
+  const now = new Date();
+  const current = now.toISOString().slice(0, 7);
+  if (month < current) return daysInMonth(month);
+  if (month > current) return 0;
+  return now.getUTCDate();
+}
+
+function daysLeftInMonth(month: string) {
+  const now = new Date();
+  const current = now.toISOString().slice(0, 7);
+  if (month < current) return 0;
+  if (month > current) return daysInMonth(month);
+  return Math.max(0, daysInMonth(month) - now.getUTCDate() + 1);
+}

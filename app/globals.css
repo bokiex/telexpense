@@ -28,7 +28,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -74,7 +75,7 @@ input {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -100,9 +101,27 @@ input {
 .metric strong {
   display: block;
   margin-top: 8px;
-  font-size: 23px;
+  font-size: 21px;
   line-height: 1.15;
   overflow-wrap: anywhere;
+}
+
+.health-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--tg-theme-secondary-bg-color, var(--surface));
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.health-strip strong {
+  color: var(--text);
 }
 
 .panel {
@@ -196,6 +215,86 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
+.compact {
+  padding: 8px 0;
+}
+
+.editable-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 6px;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.icon-button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.icon-button.danger {
+  color: #a83f2b;
+}
+
+.inline-form,
+.edit-transaction {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-form {
+  grid-template-columns: minmax(0, 1.2fr) minmax(92px, 0.8fr) auto;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.edit-transaction {
+  grid-template-columns: minmax(96px, 0.8fr) repeat(3, minmax(96px, 1fr)) minmax(84px, 0.7fr) minmax(130px, 0.9fr) auto;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.edit-transaction:first-child {
+  border-top: 0;
+}
+
+.inline-form input,
+.edit-transaction input,
+.edit-transaction select,
+.amount-input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 9px 10px;
+}
+
+.amount-input {
+  width: 92px;
+}
+
+.span-actions {
+  grid-column: auto;
+}
+
 .empty,
 .error {
   padding: 18px 0;
@@ -213,11 +312,27 @@ input {
   }
 
   .metric-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .bar-row {
     grid-template-columns: 1fr;
   }
-}
 
+  .editable-row {
+    grid-template-columns: 1fr;
+  }
+
+  .row-actions {
+    justify-content: start;
+  }
+
+  .inline-form,
+  .edit-transaction {
+    grid-template-columns: 1fr;
+  }
+
+  .span-actions {
+    grid-column: 1;
+  }
+}

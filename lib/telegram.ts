@@ -60,11 +60,61 @@ export async function sendTelegramMessage(chatId: number, text: string, replyMar
   }
 }
 
-export function dashboardKeyboard() {
+export async function answerTelegramCallback(callbackQueryId: string, text?: string) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+
+  const response = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      callback_query_id: callbackQueryId,
+      text
+    })
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.ok) {
+    console.error("Telegram answerCallbackQuery failed", result);
+    throw new Error(result?.description || "Telegram answerCallbackQuery failed");
+  }
+}
+
+export async function editTelegramMessageReplyMarkup(chatId: number, messageId: number, replyMarkup?: unknown) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+
+  const response = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: replyMarkup
+    })
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.ok) {
+    console.error("Telegram editMessageReplyMarkup failed", result);
+    throw new Error(result?.description || "Telegram editMessageReplyMarkup failed");
+  }
+}
+
+export function dashboardKeyboard(extraRows: unknown[][] = []) {
   const baseUrl = process.env.APP_BASE_URL || process.env.VERCEL_PROJECT_PRODUCTION_URL || "";
-  if (!baseUrl || baseUrl.includes("your-public-domain.example")) return undefined;
+  if (!baseUrl || baseUrl.includes("your-public-domain.example")) {
+    return extraRows.length ? { inline_keyboard: extraRows } : undefined;
+  }
   const normalized = baseUrl.startsWith("http") ? baseUrl : `https://${baseUrl}`;
   return {
-    inline_keyboard: [[{ text: "Open dashboard", web_app: { url: normalized } }]]
+    inline_keyboard: [[{ text: "Open dashboard", web_app: { url: normalized } }], ...extraRows]
   };
+}
+
+export function transactionKeyboard(transactionId: number) {
+  return dashboardKeyboard([
+    [
+      { text: "Edit", callback_data: `tx:edit:${transactionId}` },
+      { text: "Undo", callback_data: `tx:undo:${transactionId}` }
+    ]
+  ]);
 }

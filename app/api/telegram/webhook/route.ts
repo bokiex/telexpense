@@ -5,16 +5,29 @@ import { parseTransactionMessage } from "@/lib/parser";
 import {
   addTransaction,
   currentMonth,
+  deleteTransaction,
   getBudgetStatus,
   setBudget,
+  updateTransaction,
   upsertTelegramUser
 } from "@/lib/repository";
-import { dashboardKeyboard, sendTelegramMessage } from "@/lib/telegram";
+import {
+  answerTelegramCallback,
+  dashboardKeyboard,
+  editTelegramMessageReplyMarkup,
+  sendTelegramMessage,
+  transactionKeyboard
+} from "@/lib/telegram";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   const update = await request.json();
+  if (update.callback_query) {
+    await handleCallbackQuery(update.callback_query);
+    return NextResponse.json({ ok: true });
+  }
+
   const message = update.message;
   if (!message?.text || !message.from?.id || !message.chat?.id) {
     return NextResponse.json({ ok: true });
@@ -42,14 +55,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    const editId = editTransactionIdFromReply(message);
     const parsed = parseTransactionMessage(text);
-    await addTransaction(user.id, parsed);
+    const transactionId = editId || (await addTransaction(user.id, parsed));
+    if (editId) {
+      await updateTransaction(user.id, editId, parsed);
+    }
+
     const status = await getBudgetStatus(user.id, currentMonth(), parsed.category);
     const warning = budgetWarningText(status, Number(optionalEnv("BUDGET_WARNING_RATIO", "0.8")));
-    const reply = [`Saved ${parsed.category}: ${money(Math.abs(parsed.amountCents))} on ${parsed.account}.`, warning]
+    const verb = editId ? "Updated" : "Saved";
+    const reply = [`${verb} ${parsed.category}: ${money(Math.abs(parsed.amountCents))} on ${parsed.account}.`, warning]
       .filter(Boolean)
       .join("\n");
-    await sendTelegramMessage(chatId, reply, dashboardKeyboard());
+    await sendTelegramMessage(chatId, reply, transactionKeyboard(transactionId));
     return NextResponse.json({ ok: true });
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "Could not save transaction.";
@@ -57,6 +76,49 @@ export async function POST(request: NextRequest) {
     await safeSendTelegramMessage(chatId, `${messageText}\nExample: food, debit card, lunch, $4.20`);
     return NextResponse.json({ ok: true });
   }
+}
+
+async function handleCallbackQuery(callbackQuery: any) {
+  const data = String(callbackQuery.data || "");
+  const fromUserId = Number(callbackQuery.from?.id);
+  const chatId = Number(callbackQuery.message?.chat?.id);
+  const messageId = Number(callbackQuery.message?.message_id);
+  const callbackId = String(callbackQuery.id || "");
+  const [, action, idValue] = data.split(":");
+  const transactionId = Number(idValue);
+
+  if (!callbackId || !fromUserId || !chatId || !Number.isFinite(transactionId)) return;
+
+  try {
+    if (action === "undo") {
+      await deleteTransaction(fromUserId, transactionId);
+      await answerTelegramCallback(callbackId, "Transaction removed.");
+      if (messageId) await editTelegramMessageReplyMarkup(chatId, messageId, dashboardKeyboard());
+      await sendTelegramMessage(chatId, `Removed transaction #${transactionId}.`, dashboardKeyboard());
+      return;
+    }
+
+    if (action === "edit") {
+      await answerTelegramCallback(callbackId, "Reply with the corrected transaction.");
+      await sendTelegramMessage(
+        chatId,
+        `Editing transaction #${transactionId}. Reply with: category, account, description, $amount`,
+        {
+          force_reply: true,
+          input_field_placeholder: "food, debit card, lunch, $4.20"
+        }
+      );
+    }
+  } catch (error) {
+    console.error("Telegram callback handler failed", error);
+    if (callbackId) await answerTelegramCallback(callbackId, "Could not complete that action.");
+  }
+}
+
+function editTransactionIdFromReply(message: any) {
+  const prompt = String(message.reply_to_message?.text || "");
+  const match = /^Editing transaction #(?<id>\d+)\./.exec(prompt);
+  return match?.groups?.id ? Number(match.groups.id) : null;
 }
 
 async function safeSendTelegramMessage(chatId: number, text: string) {
