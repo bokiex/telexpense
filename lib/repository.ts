@@ -69,6 +69,37 @@ export async function addTransaction(telegramUserId: number, transaction: Parsed
   return Number(data.id);
 }
 
+export async function addTransactionFields(
+  telegramUserId: number,
+  values: {
+    kind: ParsedTransaction["kind"];
+    category: string;
+    account: string;
+    description: string;
+    amountCents: number;
+    currency: string;
+    occurredOn: string;
+  }
+) {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("transactions")
+    .insert({
+      telegram_user_id: telegramUserId,
+      kind: values.kind,
+      category: values.category.toLowerCase(),
+      account: values.account.toLowerCase(),
+      description: values.description,
+      amount_cents: values.amountCents,
+      currency: values.currency.toUpperCase(),
+      occurred_on: values.occurredOn
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return Number(data.id);
+}
+
 export async function updateTransaction(telegramUserId: number, transactionId: number, transaction: ParsedTransaction) {
   const supabase = createSupabaseAdmin();
   const { error } = await supabase
