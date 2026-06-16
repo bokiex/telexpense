@@ -27,7 +27,6 @@ create table if not exists public.transactions (
   telegram_user_id bigint not null references public.users(telegram_user_id) on delete cascade,
   kind text not null check (kind in ('expense', 'income', 'investment', 'transfer')),
   category text not null,
-  account text not null,
   account_id bigint references public.accounts(id) on delete set null,
   description text not null,
   amount_cents integer not null,

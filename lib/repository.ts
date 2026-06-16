@@ -22,7 +22,6 @@ export type RecentTransaction = {
   id: number;
   kind: string;
   category: string;
-  account: string;
   accountId: number | null;
   description: string;
   amountCents: number;
@@ -85,21 +84,31 @@ export async function upsertTelegramUser(user: { id: number; first_name?: string
 
 export async function addTransaction(telegramUserId: number, transaction: ParsedTransaction) {
   const supabase = createSupabaseAdmin();
+  const accountId = await ensureAccountFromName(telegramUserId, transaction.account, transaction.currency);
+  const insert = {
+    telegram_user_id: telegramUserId,
+    kind: transaction.kind,
+    category: transaction.category,
+    account_id: accountId,
+    description: transaction.description,
+    amount_cents: transaction.amountCents,
+    currency: transaction.currency,
+    occurred_on: new Date().toISOString().slice(0, 10)
+  };
   const { data, error } = await supabase
     .from("transactions")
-    .insert({
-      telegram_user_id: telegramUserId,
-      kind: transaction.kind,
-      category: transaction.category,
-      account: transaction.account,
-      account_id: null,
-      description: transaction.description,
-      amount_cents: transaction.amountCents,
-      currency: transaction.currency,
-      occurred_on: new Date().toISOString().slice(0, 10)
-    })
+    .insert(insert)
     .select("id")
     .single();
+  if (error && (isLegacyAccountColumnRequired(error) || isMissingSchemaError(error))) {
+    const retry = await supabase
+      .from("transactions")
+      .insert({ ...insert, account: transaction.account })
+      .select("id")
+      .single();
+    if (retry.error) throw retry.error;
+    return Number(retry.data.id);
+  }
   if (error) throw error;
   return Number(data.id);
 }
@@ -109,8 +118,7 @@ export async function addTransactionFields(
   values: {
     kind: ParsedTransaction["kind"];
     category: string;
-    account: string;
-    accountId?: number | null;
+    accountId: number;
     description: string;
     amountCents: number;
     currency: string;
@@ -118,39 +126,66 @@ export async function addTransactionFields(
   }
 ) {
   const supabase = createSupabaseAdmin();
+  const insert = {
+    telegram_user_id: telegramUserId,
+    kind: values.kind,
+    category: values.category.toLowerCase(),
+    account_id: values.accountId,
+    description: values.description,
+    amount_cents: values.amountCents,
+    currency: values.currency.toUpperCase(),
+    occurred_on: values.occurredOn
+  };
   const { data, error } = await supabase
     .from("transactions")
-    .insert({
-      telegram_user_id: telegramUserId,
-      kind: values.kind,
-      category: values.category.toLowerCase(),
-      account: values.account.toLowerCase(),
-      account_id: values.accountId ?? null,
-      description: values.description,
-      amount_cents: values.amountCents,
-      currency: values.currency.toUpperCase(),
-      occurred_on: values.occurredOn
-    })
+    .insert(insert)
     .select("id")
     .single();
+  if (error && isLegacyAccountColumnRequired(error)) {
+    const accountName = await getAccountName(telegramUserId, values.accountId);
+    const retry = await supabase
+      .from("transactions")
+      .insert({ ...insert, account: accountName.toLowerCase() })
+      .select("id")
+      .single();
+    if (retry.error) throw retry.error;
+    return Number(retry.data.id);
+  }
   if (error) throw error;
   return Number(data.id);
 }
 
 export async function updateTransaction(telegramUserId: number, transactionId: number, transaction: ParsedTransaction) {
   const supabase = createSupabaseAdmin();
+  const accountId = await ensureAccountFromName(telegramUserId, transaction.account, transaction.currency);
   const { error } = await supabase
     .from("transactions")
     .update({
       kind: transaction.kind,
       category: transaction.category,
-      account: transaction.account,
+      account_id: accountId,
       description: transaction.description,
       amount_cents: transaction.amountCents,
       currency: transaction.currency
     })
     .eq("telegram_user_id", telegramUserId)
     .eq("id", transactionId);
+  if (error && isMissingSchemaError(error)) {
+    const retry = await supabase
+      .from("transactions")
+      .update({
+        kind: transaction.kind,
+        category: transaction.category,
+        account: transaction.account,
+        description: transaction.description,
+        amount_cents: transaction.amountCents,
+        currency: transaction.currency
+      })
+      .eq("telegram_user_id", telegramUserId)
+      .eq("id", transactionId);
+    if (retry.error) throw retry.error;
+    return;
+  }
   if (error) throw error;
 }
 
@@ -160,8 +195,7 @@ export async function updateTransactionFields(
   values: {
     kind: ParsedTransaction["kind"];
     category: string;
-    account: string;
-    accountId?: number | null;
+    accountId: number;
     description: string;
     amountCents: number;
     currency: string;
@@ -174,8 +208,7 @@ export async function updateTransactionFields(
     .update({
       kind: values.kind,
       category: values.category.toLowerCase(),
-      account: values.account.toLowerCase(),
-      account_id: values.accountId ?? null,
+      account_id: values.accountId,
       description: values.description,
       amount_cents: values.amountCents,
       currency: values.currency.toUpperCase(),
@@ -183,6 +216,24 @@ export async function updateTransactionFields(
     })
     .eq("telegram_user_id", telegramUserId)
     .eq("id", transactionId);
+  if (error && isMissingSchemaError(error)) {
+    const accountName = await getAccountName(telegramUserId, values.accountId);
+    const retry = await supabase
+      .from("transactions")
+      .update({
+        kind: values.kind,
+        category: values.category.toLowerCase(),
+        account: accountName.toLowerCase(),
+        description: values.description,
+        amount_cents: values.amountCents,
+        currency: values.currency.toUpperCase(),
+        occurred_on: values.occurredOn
+      })
+      .eq("telegram_user_id", telegramUserId)
+      .eq("id", transactionId);
+    if (retry.error) throw retry.error;
+    return;
+  }
   if (error) throw error;
 }
 
@@ -459,7 +510,6 @@ export async function getSummary(telegramUserId: number, month: string) {
       id: tx.id,
       kind: tx.kind,
       category: tx.category,
-      account: tx.account,
       accountId: tx.account_id,
       description: tx.description,
       amountCents: tx.amount_cents,
@@ -486,11 +536,40 @@ export function currentMonth() {
   return new Date().toISOString().slice(0, 7);
 }
 
+async function getAccountName(telegramUserId: number, accountId: number) {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("name")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("id", accountId)
+    .single();
+  if (error) throw error;
+  return String(data.name || "account");
+}
+
+async function ensureAccountFromName(telegramUserId: number, name: string, currency: string) {
+  try {
+    return await upsertAccount(telegramUserId, {
+      accountKey: slug(name),
+      name: titleCase(name),
+      accountType: "other",
+      openingBalanceCents: 0,
+      currency,
+      color: "#60a5fa",
+      icon: "Wallet"
+    });
+  } catch (error) {
+    if (isMissingSchemaError(error)) return null;
+    throw error;
+  }
+}
+
 async function getSummaryTransactions(telegramUserId: number, start: string, end: string) {
   const supabase = createSupabaseAdmin();
   const withAccountId = await supabase
     .from("transactions")
-    .select("id, kind, category, account, account_id, description, amount_cents, currency, occurred_on")
+    .select("id, kind, category, account_id, description, amount_cents, currency, occurred_on")
     .eq("telegram_user_id", telegramUserId)
     .gte("occurred_on", start)
     .lt("occurred_on", end)
@@ -572,6 +651,11 @@ function buildAccounts(
 function isMissingSchemaError(error: unknown) {
   const candidate = error as { code?: string; message?: string };
   return candidate.code === "42P01" || candidate.code === "42703" || /does not exist|Could not find/i.test(candidate.message || "");
+}
+
+function isLegacyAccountColumnRequired(error: unknown) {
+  const candidate = error as { code?: string; message?: string; details?: string };
+  return candidate.code === "23502" && /account/i.test(`${candidate.message || ""} ${candidate.details || ""}`);
 }
 
 function slug(value: string) {

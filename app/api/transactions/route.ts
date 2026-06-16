@@ -15,8 +15,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const kind = String(body.kind || "").trim().toLowerCase();
     const category = String(body.category || "").trim();
-    const account = String(body.account || "cash").trim();
-    const accountId = body.accountId === null || body.accountId === undefined || body.accountId === "" ? null : Number(body.accountId);
+    const accountId = body.accountId === null || body.accountId === undefined || body.accountId === "" ? NaN : Number(body.accountId);
     const description = String(body.description || "").trim();
     const amountCents = Number(body.amountCents);
     const currency = String(body.currency || "USD").trim().toUpperCase();
@@ -24,8 +23,7 @@ export async function POST(request: NextRequest) {
 
     if (!kinds.has(kind)) return NextResponse.json({ error: "Transaction kind is not valid." }, { status: 400 });
     if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
-    if (!account) return NextResponse.json({ error: "Account is required." }, { status: 400 });
-    if (accountId !== null && !Number.isFinite(accountId)) return NextResponse.json({ error: "Account id is not valid." }, { status: 400 });
+    if (!Number.isFinite(accountId)) return NextResponse.json({ error: "Account id is required." }, { status: 400 });
     if (!description) return NextResponse.json({ error: "Description is required." }, { status: 400 });
     if (!Number.isFinite(amountCents)) return NextResponse.json({ error: "Amount is not valid." }, { status: 400 });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)) {
@@ -35,7 +33,6 @@ export async function POST(request: NextRequest) {
     const id = await addTransactionFields(user.id, {
       kind: kind as ParsedTransaction["kind"],
       category,
-      account,
       accountId,
       description,
       amountCents: Math.round(amountCents),

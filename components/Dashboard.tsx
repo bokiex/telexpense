@@ -59,7 +59,6 @@ type RecentTransaction = {
   id: number;
   kind: "expense" | "income" | "investment" | "transfer";
   category: string;
-  account: string;
   accountId: number | null;
   description: string;
   amountCents: number;
@@ -128,7 +127,6 @@ type Transaction = {
   categoryId: string;
   subcategoryId?: string;
   accountId?: number | null;
-  account: string;
   description: string;
   date: string;
 };
@@ -250,8 +248,7 @@ export default function Dashboard() {
     const body = {
       kind: tx.type,
       category,
-      account: selectedAccount?.name || tx.account || "cash",
-      accountId: selectedAccount?.id ?? null,
+      accountId: selectedAccount?.id,
       description: tx.description,
       amountCents,
       currency: tx.currency || summary?.recent[0]?.currency || "USD",
@@ -546,9 +543,10 @@ function TransactionListView({
     const query = search.trim().toLowerCase();
     return data.transactions.filter((tx) => {
       const category = data.categories.find((item) => item.id === tx.categoryId);
+      const account = data.accounts.find((item) => item.id === tx.accountId);
       if (typeFilter !== "all" && tx.type !== typeFilter) return false;
       if (categoryFilter !== "all" && tx.categoryId !== categoryFilter) return false;
-      if (query && !`${tx.description} ${category?.name || ""} ${tx.account}`.toLowerCase().includes(query)) return false;
+      if (query && !`${tx.description} ${category?.name || ""} ${account?.name || ""}`.toLowerCase().includes(query)) return false;
       return true;
     });
   }, [categoryFilter, data, search, typeFilter]);
@@ -1064,9 +1062,8 @@ function TransactionModal({
   const [description, setDescription] = useState(editTx?.description ?? "");
   const [categoryId, setCategoryId] = useState(editTx?.categoryId ?? data.categories[0]?.id ?? "");
   const [subcategoryId, setSubcategoryId] = useState(editTx?.subcategoryId ?? "");
-  const initialAccount = data.accounts.find((item) => editTx?.accountId ? item.id === editTx.accountId : slug(item.name) === slug(editTx?.account || ""));
+  const initialAccount = data.accounts.find((item) => item.id === editTx?.accountId);
   const [accountChoice, setAccountChoice] = useState(initialAccount?.accountKey || "");
-  const [account, setAccount] = useState(editTx?.account ?? "cash");
   const [date, setDate] = useState(editTx?.date ?? new Date().toISOString().split("T")[0]);
   const [error, setError] = useState("");
   const selectedCategory = data.categories.find((category) => category.id === categoryId);
@@ -1079,6 +1076,10 @@ function TransactionModal({
       setError("Amount, description, category, and date are required.");
       return;
     }
+    if (!selectedAccount?.id) {
+      setError("Select an account.");
+      return;
+    }
     onSave({
       id: editTx?.id,
       sourceId: editTx?.sourceId,
@@ -1086,8 +1087,7 @@ function TransactionModal({
       amount: cents,
       categoryId,
       subcategoryId: subcategoryId || undefined,
-      accountId: selectedAccount?.id ?? null,
-      account,
+      accountId: selectedAccount.id,
       description: description.trim(),
       date,
       currency: editTx?.currency
@@ -1114,26 +1114,19 @@ function TransactionModal({
         </FieldLabel>
         <FieldLabel label="Sub-category">
           <select value={subcategoryId} onChange={(event) => setSubcategoryId(event.target.value)}>
-            <option value="">Use account field</option>
+            <option value="">None</option>
             {selectedCategory?.subcategories.map((sub) => <option key={sub.id} value={sub.id}>{sub.name}</option>)}
           </select>
         </FieldLabel>
         <FieldLabel label="Account">
-          <select value={accountChoice} onChange={(event) => {
-            const next = data.accounts.find((item) => item.accountKey === event.target.value);
-            setAccountChoice(event.target.value);
-            setAccount(next?.name || account);
-          }}>
-            <option value="">Manual account</option>
+          <select value={accountChoice} onChange={(event) => setAccountChoice(event.target.value)}>
+            <option value="">Select account</option>
             {data.accounts.map((item) => (
               <option key={item.accountKey} value={item.accountKey}>
-                {item.name}{item.id ? "" : " (legacy)"}
+                {item.name}
               </option>
             ))}
           </select>
-        </FieldLabel>
-        <FieldLabel label="Account Name">
-          <input value={account} placeholder="cash" onChange={(event) => { setAccount(event.target.value); setAccountChoice(""); }} />
         </FieldLabel>
         <FieldLabel label="Date">
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
@@ -1323,10 +1316,6 @@ function buildAppData(summary: Summary | null): AppData {
 
   const transactions = summary.recent.map((tx) => {
     const category = addCategory(tx.category, tx.currency);
-    const accountId = `${category.id}:${slug(tx.account || "cash")}`;
-    if (!category.subcategories.some((item) => item.id === accountId)) {
-      category.subcategories.push({ id: accountId, name: titleCase(tx.account || "cash"), categoryId: category.id });
-    }
     return {
       id: String(tx.id),
       sourceId: tx.id,
@@ -1335,9 +1324,7 @@ function buildAppData(summary: Summary | null): AppData {
       type: tx.kind === "income" || tx.amountCents > 0 ? "income" : "expense",
       kind: tx.kind,
       categoryId: category.id,
-      subcategoryId: accountId,
       accountId: tx.accountId,
-      account: tx.account,
       description: tx.description,
       date: tx.occurredOn
     } satisfies Transaction;
