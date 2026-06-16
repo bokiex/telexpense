@@ -6,18 +6,23 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Banknote,
+  BookOpen,
   Briefcase,
   Car,
   ChevronDown,
   ChevronRight,
+  Coffee,
   Eye,
   EyeOff,
   Filter,
+  Heart,
   Home,
   LayoutDashboard,
   List,
+  Music,
   Pencil,
   PieChart,
+  Plane,
   Plus,
   Search,
   Shield,
@@ -28,6 +33,7 @@ import {
   TrendingDown,
   TrendingUp,
   Tv,
+  Utensils,
   Wallet,
   X
 } from "lucide-react";
@@ -88,6 +94,7 @@ type SubCategory = {
 type Category = {
   id: string;
   name: string;
+  sourceName: string;
   group: BudgetGroup;
   color: string;
   icon: string;
@@ -115,10 +122,23 @@ type AppData = {
   transactions: Transaction[];
 };
 
+type CategorySettings = Record<
+  string,
+  {
+    name?: string;
+    group?: BudgetGroup;
+    color?: string;
+    icon?: string;
+    subcategories?: Pick<SubCategory, "id" | "name" | "categoryId">[];
+  }
+>;
+
 type ModalState =
   | { type: "none" }
   | { type: "add-transaction" }
   | { type: "edit-transaction"; tx: Transaction }
+  | { type: "edit-category"; categoryId: string }
+  | { type: "add-subcategory"; categoryId: string }
   | { type: "set-budget"; categoryId: string; subcategoryId?: string };
 
 declare global {
@@ -159,6 +179,9 @@ const CATEGORY_LOOK: Record<string, { group: BudgetGroup; color: string; icon: s
 };
 
 const FALLBACK_COLORS = ["#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#38bdf8"];
+const CATEGORY_COLORS = ["#4ade80", "#f87171", "#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#e879f9", "#38bdf8"];
+const CATEGORY_ICONS = ["Wallet", "Home", "ShoppingCart", "Car", "Tv", "ShoppingBag", "Shield", "TrendingUp", "Briefcase", "Utensils", "Coffee", "Heart", "BookOpen", "Music", "Plane"];
+const CATEGORY_SETTINGS_KEY = "telexpense.categorySettings.v1";
 
 export default function Dashboard() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -168,6 +191,7 @@ export default function Dashboard() {
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [categorySettings, setCategorySettings] = useState<CategorySettings>(() => loadCategorySettings());
 
   useEffect(() => {
     const webApp = window.Telegram?.WebApp;
@@ -194,12 +218,17 @@ export default function Dashboard() {
     };
   }, [month, refreshKey]);
 
-  const data = useMemo(() => buildAppData(summary), [summary]);
+  const data = useMemo(() => buildAppData(summary, categorySettings), [categorySettings, summary]);
   const reload = () => setRefreshKey((value) => value + 1);
+
+  useEffect(() => {
+    saveCategorySettings(categorySettings);
+  }, [categorySettings]);
 
   async function saveTransaction(tx: Omit<Transaction, "id" | "sourceId" | "kind" | "currency"> & { id?: string; sourceId?: number; currency?: string }) {
     const amountCents = signedCents(tx.type, tx.amount);
-    const category = data.categories.find((item) => item.id === tx.categoryId)?.name || tx.categoryId;
+    const selectedCategory = data.categories.find((item) => item.id === tx.categoryId);
+    const category = selectedCategory?.sourceName || selectedCategory?.name || tx.categoryId;
     const subcategory = data.categories.flatMap((item) => item.subcategories).find((item) => item.id === tx.subcategoryId);
     const body = {
       kind: tx.type,
@@ -234,7 +263,7 @@ export default function Dashboard() {
     const category = data.categories.find((item) => item.id === categoryId);
     if (!category) return;
     const response = await apiRequest("/api/budgets", "POST", {
-      category: category.name,
+      category: category.sourceName,
       month,
       amountCents: amount,
       currency: category.currency
@@ -245,6 +274,35 @@ export default function Dashboard() {
     }
     setModal({ type: "none" });
     reload();
+  }
+
+  function saveCategory(categoryId: string, values: { name: string; group: BudgetGroup; color: string; icon: string }) {
+    setCategorySettings((current) => ({
+      ...current,
+      [categoryId]: {
+        ...current[categoryId],
+        ...values
+      }
+    }));
+    setModal({ type: "none" });
+  }
+
+  function addSubcategory(categoryId: string, name: string) {
+    const cleanName = name.trim();
+    if (!cleanName) return;
+    setCategorySettings((current) => {
+      const existing = current[categoryId]?.subcategories || [];
+      const id = `${categoryId}:custom-${slug(cleanName)}`;
+      if (existing.some((item) => item.id === id || item.name.toLowerCase() === cleanName.toLowerCase())) return current;
+      return {
+        ...current,
+        [categoryId]: {
+          ...current[categoryId],
+          subcategories: [...existing, { id, name: cleanName, categoryId }]
+        }
+      };
+    });
+    setModal({ type: "none" });
   }
 
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
@@ -288,7 +346,14 @@ export default function Dashboard() {
             />
           ) : null}
           {activeTab === "budget" ? <BudgetView data={data} summary={summary} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
-          {activeTab === "categories" ? <CategoriesView data={data} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
+          {activeTab === "categories" ? (
+            <CategoriesView
+              data={data}
+              onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })}
+              onEditCategory={(categoryId) => setModal({ type: "edit-category", categoryId })}
+              onAddSubcategory={(categoryId) => setModal({ type: "add-subcategory", categoryId })}
+            />
+          ) : null}
         </div>
 
         <nav className="bottom-tabs" aria-label="App sections">
@@ -312,6 +377,22 @@ export default function Dashboard() {
 
       {modal.type === "set-budget" ? (
         <BudgetModal data={data} categoryId={modal.categoryId} onSave={saveBudget} onClose={() => setModal({ type: "none" })} />
+      ) : null}
+
+      {modal.type === "edit-category" ? (
+        <CategoryModal
+          category={data.categories.find((category) => category.id === modal.categoryId)}
+          onSave={saveCategory}
+          onClose={() => setModal({ type: "none" })}
+        />
+      ) : null}
+
+      {modal.type === "add-subcategory" ? (
+        <SubcategoryModal
+          category={data.categories.find((category) => category.id === modal.categoryId)}
+          onSave={addSubcategory}
+          onClose={() => setModal({ type: "none" })}
+        />
       ) : null}
     </main>
   );
@@ -559,12 +640,22 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
   );
 }
 
-function CategoriesView({ data, onSetBudget }: { data: AppData; onSetBudget: (categoryId: string) => void }) {
+function CategoriesView({
+  data,
+  onSetBudget,
+  onEditCategory,
+  onAddSubcategory
+}: {
+  data: AppData;
+  onSetBudget: (categoryId: string) => void;
+  onEditCategory: (categoryId: string) => void;
+  onAddSubcategory: (categoryId: string) => void;
+}) {
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
 
   return (
     <div className="screen-stack">
-      <p className="helper-copy">Categories are derived from your transactions and budgets. Accounts appear as sub-categories.</p>
+      <p className="helper-copy">Edit names, groups, colors, icons, and add sub-categories for faster transaction entry.</p>
       {GROUPS.map((group) => {
         const categories = data.categories.filter((category) => category.group === group);
         return (
@@ -587,9 +678,14 @@ function CategoriesView({ data, onSetBudget }: { data: AppData; onSetBudget: (ca
                       </span>
                       {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </button>
-                    <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
-                      <Pencil size={11} />
-                    </button>
+                    <div className="category-actions">
+                      <button className="tiny-icon" type="button" onClick={() => onEditCategory(category.id)} aria-label={`Edit ${category.name}`}>
+                        <Pencil size={11} />
+                      </button>
+                      <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
+                        <Wallet size={11} />
+                      </button>
+                    </div>
                     {expanded ? (
                       <div className="subcategory-list">
                         {category.subcategories.length ? category.subcategories.map((sub) => (
@@ -597,7 +693,11 @@ function CategoriesView({ data, onSetBudget }: { data: AppData; onSetBudget: (ca
                             <span style={{ backgroundColor: category.color }} />
                             <p>{sub.name}</p>
                           </div>
-                        )) : <div><span style={{ backgroundColor: category.color }} /><p>No accounts yet</p></div>}
+                        )) : <div><span style={{ backgroundColor: category.color }} /><p>No sub-categories yet</p></div>}
+                        <button type="button" onClick={() => onAddSubcategory(category.id)}>
+                          <Plus size={12} />
+                          Add sub-category
+                        </button>
                       </div>
                     ) : null}
                   </div>
@@ -608,6 +708,118 @@ function CategoriesView({ data, onSetBudget }: { data: AppData; onSetBudget: (ca
         );
       })}
     </div>
+  );
+}
+
+function CategoryModal({
+  category,
+  onSave,
+  onClose
+}: {
+  category?: Category;
+  onSave: (categoryId: string, values: { name: string; group: BudgetGroup; color: string; icon: string }) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(category?.name || "");
+  const [group, setGroup] = useState<BudgetGroup>(category?.group || "Needs");
+  const [color, setColor] = useState(category?.color || CATEGORY_COLORS[0]);
+  const [icon, setIcon] = useState(category?.icon || "Wallet");
+  const [error, setError] = useState("");
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!category) return;
+    if (!name.trim()) {
+      setError("Name is required.");
+      return;
+    }
+    onSave(category.id, { name: name.trim(), group, color, icon });
+  }
+
+  return (
+    <BottomSheet title="Edit Category" onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <FieldLabel label="Name">
+          <input value={name} placeholder="Category name" onChange={(event) => setName(event.target.value)} />
+        </FieldLabel>
+        <FieldLabel label="Budget Group">
+          <div className="segmented">
+            {GROUPS.map((item) => (
+              <button key={item} className={group === item ? "active" : ""} type="button" onClick={() => setGroup(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+        </FieldLabel>
+        <FieldLabel label="Color">
+          <div className="choice-grid color-grid">
+            {CATEGORY_COLORS.map((item) => (
+              <button
+                key={item}
+                className={color === item ? "selected" : ""}
+                type="button"
+                style={{ backgroundColor: item }}
+                aria-label={`Use color ${item}`}
+                onClick={() => setColor(item)}
+              />
+            ))}
+          </div>
+        </FieldLabel>
+        <FieldLabel label="Icon">
+          <div className="choice-grid icon-grid">
+            {CATEGORY_ICONS.map((item) => {
+              const Icon = iconFor(item);
+              return (
+                <button key={item} className={icon === item ? "selected" : ""} type="button" title={iconLabel(item)} onClick={() => setIcon(item)}>
+                  <Icon size={18} />
+                </button>
+              );
+            })}
+          </div>
+        </FieldLabel>
+        {error ? <p className="form-error">{error}</p> : null}
+        <button className="primary-action" type="submit">Save Category</button>
+      </form>
+    </BottomSheet>
+  );
+}
+
+function SubcategoryModal({
+  category,
+  onSave,
+  onClose
+}: {
+  category?: Category;
+  onSave: (categoryId: string, name: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!category) return;
+    if (!name.trim()) {
+      setError("Sub-category name is required.");
+      return;
+    }
+    onSave(category.id, name);
+  }
+
+  return (
+    <BottomSheet title="Add Sub-category" onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <div className="budget-target">
+          <small>Adding under</small>
+          <strong>{category?.name}</strong>
+        </div>
+        <FieldLabel label="Name">
+          <input value={name} placeholder="Sub-category name" autoFocus onChange={(event) => setName(event.target.value)} />
+        </FieldLabel>
+        {error ? <p className="form-error">{error}</p> : null}
+        <button className="primary-action" type="submit">Add Sub-category</button>
+      </form>
+    </BottomSheet>
   );
 }
 
@@ -832,7 +1044,7 @@ function EmptyState({ label }: { label: string }) {
   return <div className="empty-state"><Banknote size={28} /><span>{label}</span></div>;
 }
 
-function buildAppData(summary: Summary | null): AppData {
+function buildAppData(summary: Summary | null, settings: CategorySettings): AppData {
   if (!summary) return { categories: [], transactions: [] };
   const categoryMap = new Map<string, Category>();
   const addCategory = (name: string, currency = "USD") => {
@@ -845,12 +1057,14 @@ function buildAppData(summary: Summary | null): AppData {
       icon: "Wallet"
     };
     const budget = summary.budgets.find((item) => slug(item.category) === id);
+    const setting = settings[id] || {};
     const category: Category = {
       id,
-      name: titleCase(name),
-      group: look.group,
-      color: look.color,
-      icon: look.icon,
+      sourceName: name,
+      name: setting.name || titleCase(name),
+      group: setting.group || look.group,
+      color: setting.color || look.color,
+      icon: setting.icon || look.icon,
       budget: budget?.budgetCents,
       currency: budget?.currency || currency,
       subcategories: []
@@ -883,6 +1097,16 @@ function buildAppData(summary: Summary | null): AppData {
       date: tx.occurredOn
     } satisfies Transaction;
   });
+
+  for (const [categoryId, setting] of Object.entries(settings)) {
+    const category = categoryMap.get(categoryId);
+    if (!category?.subcategories || !setting.subcategories?.length) continue;
+    for (const sub of setting.subcategories) {
+      if (!category.subcategories.some((item) => item.id === sub.id || item.name.toLowerCase() === sub.name.toLowerCase())) {
+        category.subcategories.push({ ...sub, categoryId });
+      }
+    }
+  }
 
   return {
     categories: Array.from(categoryMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
@@ -932,7 +1156,10 @@ function capitalize(value: string) {
 
 function iconFor(name?: string) {
   const icons: Record<string, typeof Wallet> = {
+    BookOpen,
+    Coffee,
     Home,
+    Heart,
     ShoppingCart,
     Car,
     Tv,
@@ -940,9 +1167,33 @@ function iconFor(name?: string) {
     Shield,
     TrendingUp,
     Briefcase,
+    Music,
+    Plane,
+    Utensils,
     Wallet
   };
   return icons[name || "Wallet"] || Wallet;
+}
+
+function iconLabel(name: string) {
+  return name.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
+function loadCategorySettings(): CategorySettings {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(CATEGORY_SETTINGS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed as CategorySettings : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCategorySettings(settings: CategorySettings) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(CATEGORY_SETTINGS_KEY, JSON.stringify(settings));
 }
 
 function headerTitle(tab: Tab) {

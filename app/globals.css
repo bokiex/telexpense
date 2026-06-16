@@ -675,7 +675,7 @@ button {
   gap: 10px;
   background: transparent;
   color: var(--foreground);
-  padding: 12px 42px 12px 12px;
+  padding: 12px 74px 12px 12px;
   text-align: left;
 }
 
@@ -685,10 +685,12 @@ button {
   display: grid;
 }
 
-.category-card > .tiny-icon {
+.category-actions {
   position: absolute;
   top: 15px;
   right: 12px;
+  display: flex;
+  gap: 6px;
 }
 
 .subcategory-list {
@@ -713,6 +715,52 @@ button {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+.subcategory-list button {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--primary);
+  padding: 10px 12px 10px 52px;
+  font-size: 12px;
+}
+
+.choice-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.color-grid {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.icon-grid {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.choice-grid button {
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.color-grid button {
+  min-height: 32px;
+}
+
+.choice-grid button.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.28);
 }
 
 .empty-state {
