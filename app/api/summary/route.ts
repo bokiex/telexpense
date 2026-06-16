@@ -13,7 +13,12 @@ export async function GET(request: NextRequest) {
     const summary = await getSummary(user.id, month);
     return NextResponse.json(summary);
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 401 });
+    return NextResponse.json({ error: errorMessage(error) }, { status: 401 });
   }
 }
 
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) return String((error as { message?: unknown }).message || "Unknown error");
+  return "Unknown error";
+}

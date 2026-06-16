@@ -596,7 +596,7 @@ async function getAccountTransactions(telegramUserId: number) {
   const supabase = createSupabaseAdmin();
   const withAccountId = await supabase
     .from("transactions")
-    .select("account, account_id, amount_cents, currency")
+    .select("account_id, amount_cents, currency")
     .eq("telegram_user_id", telegramUserId);
 
   if (!withAccountId.error) return withAccountId.data || [];
@@ -613,7 +613,7 @@ async function getAccountTransactions(telegramUserId: number) {
 
 function buildAccounts(
   storedAccounts: Omit<StoredAccount, "balanceCents">[],
-  transactions: { account: string; account_id: number | null; amount_cents: number; currency: string }[]
+  transactions: { account?: string; account_id: number | null; amount_cents: number; currency: string }[]
 ): StoredAccount[] {
   const accounts = new Map<string, StoredAccount>();
   const accountIdToKey = new Map<number, string>();
@@ -624,7 +624,8 @@ function buildAccounts(
   }
 
   for (const tx of transactions) {
-    const accountKey = tx.account_id ? accountIdToKey.get(Number(tx.account_id)) || slug(tx.account) : slug(tx.account);
+    const accountKey = tx.account_id ? accountIdToKey.get(Number(tx.account_id)) : tx.account ? slug(tx.account) : null;
+    if (!accountKey) continue;
     const existing = accounts.get(accountKey);
     if (existing) {
       existing.balanceCents += tx.amount_cents;
@@ -633,7 +634,7 @@ function buildAccounts(
     accounts.set(accountKey, {
       id: null,
       accountKey,
-      name: titleCase(tx.account),
+      name: titleCase(tx.account || accountKey),
       institution: null,
       accountType: "other",
       openingBalanceCents: 0,
