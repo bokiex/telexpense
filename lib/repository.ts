@@ -23,6 +23,7 @@ export type RecentTransaction = {
   kind: string;
   category: string;
   account: string;
+  accountId: number | null;
   description: string;
   amountCents: number;
   currency: string;
@@ -40,6 +41,21 @@ export type BudgetHealth = {
 };
 
 export type BudgetGroup = "Needs" | "Wants" | "Savings";
+export type AccountType = "cash" | "bank" | "card" | "investment" | "other";
+
+export type StoredAccount = {
+  id: number | null;
+  accountKey: string;
+  name: string;
+  institution: string | null;
+  accountType: AccountType;
+  openingBalanceCents: number;
+  balanceCents: number;
+  currency: string;
+  color: string;
+  icon: string;
+  active: boolean;
+};
 
 export type StoredSubcategory = {
   id: number;
@@ -76,6 +92,7 @@ export async function addTransaction(telegramUserId: number, transaction: Parsed
       kind: transaction.kind,
       category: transaction.category,
       account: transaction.account,
+      account_id: null,
       description: transaction.description,
       amount_cents: transaction.amountCents,
       currency: transaction.currency,
@@ -93,6 +110,7 @@ export async function addTransactionFields(
     kind: ParsedTransaction["kind"];
     category: string;
     account: string;
+    accountId?: number | null;
     description: string;
     amountCents: number;
     currency: string;
@@ -107,6 +125,7 @@ export async function addTransactionFields(
       kind: values.kind,
       category: values.category.toLowerCase(),
       account: values.account.toLowerCase(),
+      account_id: values.accountId ?? null,
       description: values.description,
       amount_cents: values.amountCents,
       currency: values.currency.toUpperCase(),
@@ -142,6 +161,7 @@ export async function updateTransactionFields(
     kind: ParsedTransaction["kind"];
     category: string;
     account: string;
+    accountId?: number | null;
     description: string;
     amountCents: number;
     currency: string;
@@ -155,6 +175,7 @@ export async function updateTransactionFields(
       kind: values.kind,
       category: values.category.toLowerCase(),
       account: values.account.toLowerCase(),
+      account_id: values.accountId ?? null,
       description: values.description,
       amount_cents: values.amountCents,
       currency: values.currency.toUpperCase(),
@@ -199,6 +220,67 @@ export async function deleteBudget(telegramUserId: number, category: string, mon
     .eq("category", category.toLowerCase())
     .eq("month", month);
   if (error) throw error;
+}
+
+export async function upsertAccount(
+  telegramUserId: number,
+  values: {
+    accountKey: string;
+    name: string;
+    institution?: string | null;
+    accountType: AccountType;
+    openingBalanceCents: number;
+    currency: string;
+    color: string;
+    icon: string;
+    active?: boolean;
+  }
+) {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("accounts")
+    .upsert(
+      {
+        telegram_user_id: telegramUserId,
+        account_key: values.accountKey,
+        name: values.name,
+        institution: values.institution || null,
+        account_type: values.accountType,
+        opening_balance_cents: values.openingBalanceCents,
+        currency: values.currency.toUpperCase(),
+        color: values.color,
+        icon: values.icon,
+        active: values.active ?? true,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "telegram_user_id,account_key" }
+    )
+    .select("id")
+    .single();
+  if (error) throw error;
+  return Number(data.id);
+}
+
+export async function getStoredAccounts(telegramUserId: number): Promise<Omit<StoredAccount, "balanceCents">[]> {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id, account_key, name, institution, account_type, opening_balance_cents, currency, color, icon, active")
+    .eq("telegram_user_id", telegramUserId)
+    .order("name");
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: Number(row.id),
+    accountKey: row.account_key,
+    name: row.name,
+    institution: row.institution,
+    accountType: row.account_type as AccountType,
+    openingBalanceCents: row.opening_balance_cents,
+    currency: row.currency,
+    color: row.color,
+    icon: row.icon,
+    active: row.active
+  }));
 }
 
 export async function upsertCategory(
@@ -312,10 +394,10 @@ export async function getSummary(telegramUserId: number, month: string) {
   const start = `${month}-01`;
   const end = nextMonthStart(month);
 
-  const [transactionsRes, budgetsRes, storedCategories] = await Promise.all([
+  const [transactionsRes, budgetsRes, storedCategories, storedAccounts, accountTransactionsRes] = await Promise.all([
     supabase
       .from("transactions")
-      .select("id, kind, category, account, description, amount_cents, currency, occurred_on")
+      .select("id, kind, category, account, account_id, description, amount_cents, currency, occurred_on")
       .eq("telegram_user_id", telegramUserId)
       .gte("occurred_on", start)
       .lt("occurred_on", end)
@@ -327,13 +409,20 @@ export async function getSummary(telegramUserId: number, month: string) {
       .eq("telegram_user_id", telegramUserId)
       .eq("month", month)
       .order("category"),
-    getStoredCategories(telegramUserId)
+    getStoredCategories(telegramUserId),
+    getStoredAccounts(telegramUserId),
+    supabase
+      .from("transactions")
+      .select("account, account_id, amount_cents, currency")
+      .eq("telegram_user_id", telegramUserId)
   ]);
 
   if (transactionsRes.error) throw transactionsRes.error;
   if (budgetsRes.error) throw budgetsRes.error;
+  if (accountTransactionsRes.error) throw accountTransactionsRes.error;
 
   const transactions = transactionsRes.data || [];
+  const allAccountTransactions = accountTransactionsRes.data || [];
   const budgets = (budgetsRes.data || []).map((row) => ({
     category: row.category,
     budgetCents: row.amount_cents,
@@ -357,6 +446,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   const budgetCents = budgets.reduce((sum, item) => sum + item.budgetCents, 0);
   const daysElapsed = daysElapsedInMonth(month);
   const daysLeft = daysLeftInMonth(month);
+  const accounts = buildAccounts(storedAccounts, allAccountTransactions);
 
   return {
     month,
@@ -375,11 +465,13 @@ export async function getSummary(telegramUserId: number, month: string) {
       .map(([date, spentCents]) => ({ date, spentCents }))
       .sort((a, b) => a.date.localeCompare(b.date)),
     storedCategories,
+    accounts,
     recent: transactions.slice(0, 20).map((tx) => ({
       id: tx.id,
       kind: tx.kind,
       category: tx.category,
       account: tx.account,
+      accountId: tx.account_id,
       description: tx.description,
       amountCents: tx.amount_cents,
       currency: tx.currency,
@@ -403,6 +495,51 @@ export async function getBudgetStatus(telegramUserId: number, month: string, cat
 
 export function currentMonth() {
   return new Date().toISOString().slice(0, 7);
+}
+
+function buildAccounts(
+  storedAccounts: Omit<StoredAccount, "balanceCents">[],
+  transactions: { account: string; account_id: number | null; amount_cents: number; currency: string }[]
+): StoredAccount[] {
+  const accounts = new Map<string, StoredAccount>();
+  const accountIdToKey = new Map<number, string>();
+
+  for (const account of storedAccounts) {
+    accounts.set(account.accountKey, { ...account, balanceCents: account.openingBalanceCents });
+    if (account.id) accountIdToKey.set(account.id, account.accountKey);
+  }
+
+  for (const tx of transactions) {
+    const accountKey = tx.account_id ? accountIdToKey.get(Number(tx.account_id)) || slug(tx.account) : slug(tx.account);
+    const existing = accounts.get(accountKey);
+    if (existing) {
+      existing.balanceCents += tx.amount_cents;
+      continue;
+    }
+    accounts.set(accountKey, {
+      id: null,
+      accountKey,
+      name: titleCase(tx.account),
+      institution: null,
+      accountType: "other",
+      openingBalanceCents: 0,
+      balanceCents: tx.amount_cents,
+      currency: tx.currency,
+      color: "#60a5fa",
+      icon: "Wallet",
+      active: true
+    });
+  }
+
+  return Array.from(accounts.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function slug(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "account";
+}
+
+function titleCase(value: string) {
+  return value.replace(/[-_]+/g, " ").replace(/\w\S*/g, (word) => word[0].toUpperCase() + word.slice(1).toLowerCase());
 }
 
 function nextMonthStart(month: string) {

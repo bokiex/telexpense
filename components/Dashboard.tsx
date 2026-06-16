@@ -40,7 +40,8 @@ import {
 
 type BudgetGroup = "Needs" | "Wants" | "Savings";
 type TransactionType = "income" | "expense";
-type Tab = "home" | "transactions" | "budget" | "categories";
+type AccountType = "cash" | "bank" | "card" | "investment" | "other";
+type Tab = "home" | "transactions" | "accounts" | "budget" | "categories";
 
 type CategorySpend = {
   category: string;
@@ -59,6 +60,7 @@ type RecentTransaction = {
   kind: "expense" | "income" | "investment" | "transfer";
   category: string;
   account: string;
+  accountId: number | null;
   description: string;
   amountCents: number;
   currency: string;
@@ -82,6 +84,7 @@ type Summary = {
   health: BudgetHealth;
   daily: { date: string; spentCents: number }[];
   storedCategories: StoredCategory[];
+  accounts: Account[];
   recent: RecentTransaction[];
 };
 
@@ -124,6 +127,7 @@ type Transaction = {
   kind: RecentTransaction["kind"];
   categoryId: string;
   subcategoryId?: string;
+  accountId?: number | null;
   account: string;
   description: string;
   date: string;
@@ -131,13 +135,30 @@ type Transaction = {
 
 type AppData = {
   categories: Category[];
+  accounts: Account[];
   transactions: Transaction[];
+};
+
+type Account = {
+  id: number | null;
+  accountKey: string;
+  name: string;
+  institution: string | null;
+  accountType: AccountType;
+  openingBalanceCents: number;
+  balanceCents: number;
+  currency: string;
+  color: string;
+  icon: string;
+  active: boolean;
 };
 
 type ModalState =
   | { type: "none" }
   | { type: "add-transaction" }
   | { type: "edit-transaction"; tx: Transaction }
+  | { type: "add-account" }
+  | { type: "edit-account"; account: Account }
   | { type: "edit-category"; categoryId: string }
   | { type: "add-subcategory"; categoryId: string }
   | { type: "set-budget"; categoryId: string; subcategoryId?: string };
@@ -182,6 +203,7 @@ const CATEGORY_LOOK: Record<string, { group: BudgetGroup; color: string; icon: s
 const FALLBACK_COLORS = ["#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#38bdf8"];
 const CATEGORY_COLORS = ["#4ade80", "#f87171", "#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#e879f9", "#38bdf8"];
 const CATEGORY_ICONS = ["Wallet", "Home", "ShoppingCart", "Car", "Tv", "ShoppingBag", "Shield", "TrendingUp", "Briefcase", "Utensils", "Coffee", "Heart", "BookOpen", "Music", "Plane"];
+const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "other"];
 
 export default function Dashboard() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -224,11 +246,12 @@ export default function Dashboard() {
     const amountCents = signedCents(tx.type, tx.amount);
     const selectedCategory = data.categories.find((item) => item.id === tx.categoryId);
     const category = selectedCategory?.sourceName || selectedCategory?.name || tx.categoryId;
-    const subcategory = data.categories.flatMap((item) => item.subcategories).find((item) => item.id === tx.subcategoryId);
+    const selectedAccount = data.accounts.find((item) => item.id === tx.accountId);
     const body = {
       kind: tx.type,
       category,
-      account: subcategory?.name || tx.account || "cash",
+      account: selectedAccount?.name || tx.account || "cash",
+      accountId: selectedAccount?.id ?? null,
       description: tx.description,
       amountCents,
       currency: tx.currency || summary?.recent[0]?.currency || "USD",
@@ -310,9 +333,30 @@ export default function Dashboard() {
     reload();
   }
 
+  async function saveAccount(account: {
+    accountKey: string;
+    name: string;
+    institution: string;
+    accountType: AccountType;
+    openingBalanceCents: number;
+    currency: string;
+    color: string;
+    icon: string;
+  }) {
+    const response = await apiRequest("/api/accounts", "POST", account);
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      setError(result?.error || "Could not save account.");
+      return;
+    }
+    setModal({ type: "none" });
+    reload();
+  }
+
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: "home", label: "Home", icon: <LayoutDashboard size={20} /> },
     { id: "transactions", label: "History", icon: <List size={20} /> },
+    { id: "accounts", label: "Accounts", icon: <Wallet size={20} /> },
     { id: "budget", label: "Budget", icon: <PieChart size={20} /> },
     { id: "categories", label: "Categories", icon: <Tag size={20} /> }
   ];
@@ -350,6 +394,13 @@ export default function Dashboard() {
               onAdd={() => setModal({ type: "add-transaction" })}
             />
           ) : null}
+          {activeTab === "accounts" ? (
+            <AccountsView
+              accounts={data.accounts}
+              onAddAccount={() => setModal({ type: "add-account" })}
+              onEditAccount={(account) => setModal({ type: "edit-account", account })}
+            />
+          ) : null}
           {activeTab === "budget" ? <BudgetView data={data} summary={summary} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
           {activeTab === "categories" ? (
             <CategoriesView
@@ -382,6 +433,10 @@ export default function Dashboard() {
 
       {modal.type === "set-budget" ? (
         <BudgetModal data={data} categoryId={modal.categoryId} onSave={saveBudget} onClose={() => setModal({ type: "none" })} />
+      ) : null}
+
+      {modal.type === "add-account" || modal.type === "edit-account" ? (
+        <AccountModal account={modal.type === "edit-account" ? modal.account : null} onSave={saveAccount} onClose={() => setModal({ type: "none" })} />
       ) : null}
 
       {modal.type === "edit-category" ? (
@@ -572,6 +627,62 @@ function TransactionListView({
 
       <button className="primary-action" type="button" onClick={onAdd}>
         <Plus size={16} /> Add Transaction
+      </button>
+    </div>
+  );
+}
+
+function AccountsView({
+  accounts,
+  onAddAccount,
+  onEditAccount
+}: {
+  accounts: Account[];
+  onAddAccount: () => void;
+  onEditAccount: (account: Account) => void;
+}) {
+  const totalByCurrency = accounts.reduce<Record<string, number>>((totals, account) => {
+    totals[account.currency] = (totals[account.currency] || 0) + account.balanceCents;
+    return totals;
+  }, {});
+
+  return (
+    <div className="screen-stack">
+      <section className="mini-card">
+        <p className="eyebrow">Total Across Accounts</p>
+        <div className="account-total-list">
+          {Object.entries(totalByCurrency).length ? Object.entries(totalByCurrency).map(([currency, total]) => (
+            <strong key={currency}>{money(total, currency)}</strong>
+          )) : <strong>{money(0)}</strong>}
+        </div>
+      </section>
+
+      <section className="row-stack">
+        {accounts.length ? accounts.map((account) => (
+          <article key={account.accountKey} className="account-card">
+            <div className="account-icon" style={{ color: account.color, backgroundColor: `${account.color}22` }}>
+              {(() => {
+                const Icon = iconFor(account.icon);
+                return <Icon size={18} />;
+              })()}
+            </div>
+            <div className="account-copy">
+              <strong>{account.name}</strong>
+              <span>{account.institution || accountTypeLabel(account.accountType)} · {accountTypeLabel(account.accountType)}</span>
+            </div>
+            <div className="account-balance">
+              <strong>{money(account.balanceCents, account.currency)}</strong>
+              <span>Opening {money(account.openingBalanceCents, account.currency)}</span>
+            </div>
+            <button className="tiny-icon" type="button" onClick={() => onEditAccount(account)} aria-label={`Edit ${account.name}`}>
+              <Pencil size={11} />
+            </button>
+          </article>
+        )) : <EmptyState label="No accounts yet" />}
+      </section>
+
+      <button className="primary-action" type="button" onClick={onAddAccount}>
+        <Plus size={16} /> Add Account
       </button>
     </div>
   );
@@ -828,6 +939,115 @@ function SubcategoryModal({
   );
 }
 
+function AccountModal({
+  account,
+  onSave,
+  onClose
+}: {
+  account: Account | null;
+  onSave: (account: {
+    accountKey: string;
+    name: string;
+    institution: string;
+    accountType: AccountType;
+    openingBalanceCents: number;
+    currency: string;
+    color: string;
+    icon: string;
+  }) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(account?.name || "");
+  const [institution, setInstitution] = useState(account?.institution || "");
+  const [accountType, setAccountType] = useState<AccountType>(account?.accountType || "bank");
+  const [openingBalance, setOpeningBalance] = useState(account ? String(account.openingBalanceCents / 100) : "0");
+  const [currency, setCurrency] = useState(account?.currency || "USD");
+  const [color, setColor] = useState(account?.color || "#60a5fa");
+  const [icon, setIcon] = useState(account?.icon || "Wallet");
+  const [error, setError] = useState("");
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const openingBalanceCents = Math.round(Number(openingBalance) * 100);
+    if (!name.trim()) {
+      setError("Account name is required.");
+      return;
+    }
+    if (!Number.isFinite(openingBalanceCents)) {
+      setError("Opening balance is not valid.");
+      return;
+    }
+    onSave({
+      accountKey: account?.accountKey || slug(name),
+      name: name.trim(),
+      institution: institution.trim(),
+      accountType,
+      openingBalanceCents,
+      currency: currency.trim().toUpperCase() || "USD",
+      color,
+      icon
+    });
+  }
+
+  return (
+    <BottomSheet title={account ? "Edit Account" : "Add Account"} onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <FieldLabel label="Name">
+          <input value={name} placeholder="Checking, Savings, Credit Card" onChange={(event) => setName(event.target.value)} />
+        </FieldLabel>
+        <FieldLabel label="Institution">
+          <input value={institution} placeholder="Bank name, optional" onChange={(event) => setInstitution(event.target.value)} />
+        </FieldLabel>
+        <FieldLabel label="Type">
+          <div className="segmented wrap">
+            {ACCOUNT_TYPES.map((item) => (
+              <button key={item} className={accountType === item ? "active" : ""} type="button" onClick={() => setAccountType(item)}>
+                {accountTypeLabel(item)}
+              </button>
+            ))}
+          </div>
+        </FieldLabel>
+        <div className="form-grid-2">
+          <FieldLabel label="Opening Balance">
+            <input value={openingBalance} inputMode="decimal" onChange={(event) => setOpeningBalance(event.target.value)} />
+          </FieldLabel>
+          <FieldLabel label="Currency">
+            <input value={currency} maxLength={3} onChange={(event) => setCurrency(event.target.value)} />
+          </FieldLabel>
+        </div>
+        <FieldLabel label="Color">
+          <div className="choice-grid color-grid">
+            {CATEGORY_COLORS.map((item) => (
+              <button
+                key={item}
+                className={color === item ? "selected" : ""}
+                type="button"
+                style={{ backgroundColor: item }}
+                aria-label={`Use color ${item}`}
+                onClick={() => setColor(item)}
+              />
+            ))}
+          </div>
+        </FieldLabel>
+        <FieldLabel label="Icon">
+          <div className="choice-grid icon-grid">
+            {CATEGORY_ICONS.map((item) => {
+              const Icon = iconFor(item);
+              return (
+                <button key={item} className={icon === item ? "selected" : ""} type="button" title={iconLabel(item)} onClick={() => setIcon(item)}>
+                  <Icon size={18} />
+                </button>
+              );
+            })}
+          </div>
+        </FieldLabel>
+        {error ? <p className="form-error">{error}</p> : null}
+        <button className="primary-action" type="submit">{account ? "Save Account" : "Add Account"}</button>
+      </form>
+    </BottomSheet>
+  );
+}
+
 function TransactionModal({
   data,
   editTx,
@@ -844,10 +1064,13 @@ function TransactionModal({
   const [description, setDescription] = useState(editTx?.description ?? "");
   const [categoryId, setCategoryId] = useState(editTx?.categoryId ?? data.categories[0]?.id ?? "");
   const [subcategoryId, setSubcategoryId] = useState(editTx?.subcategoryId ?? "");
+  const initialAccount = data.accounts.find((item) => editTx?.accountId ? item.id === editTx.accountId : slug(item.name) === slug(editTx?.account || ""));
+  const [accountChoice, setAccountChoice] = useState(initialAccount?.accountKey || "");
   const [account, setAccount] = useState(editTx?.account ?? "cash");
   const [date, setDate] = useState(editTx?.date ?? new Date().toISOString().split("T")[0]);
   const [error, setError] = useState("");
   const selectedCategory = data.categories.find((category) => category.id === categoryId);
+  const selectedAccount = data.accounts.find((item) => item.accountKey === accountChoice);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -863,6 +1086,7 @@ function TransactionModal({
       amount: cents,
       categoryId,
       subcategoryId: subcategoryId || undefined,
+      accountId: selectedAccount?.id ?? null,
       account,
       description: description.trim(),
       date,
@@ -889,13 +1113,27 @@ function TransactionModal({
           </select>
         </FieldLabel>
         <FieldLabel label="Sub-category">
-          <select value={subcategoryId} onChange={(event) => { setSubcategoryId(event.target.value); setAccount(event.target.selectedOptions[0]?.text || account); }}>
+          <select value={subcategoryId} onChange={(event) => setSubcategoryId(event.target.value)}>
             <option value="">Use account field</option>
             {selectedCategory?.subcategories.map((sub) => <option key={sub.id} value={sub.id}>{sub.name}</option>)}
           </select>
         </FieldLabel>
         <FieldLabel label="Account">
-          <input value={account} placeholder="cash" onChange={(event) => setAccount(event.target.value)} />
+          <select value={accountChoice} onChange={(event) => {
+            const next = data.accounts.find((item) => item.accountKey === event.target.value);
+            setAccountChoice(event.target.value);
+            setAccount(next?.name || account);
+          }}>
+            <option value="">Manual account</option>
+            {data.accounts.map((item) => (
+              <option key={item.accountKey} value={item.accountKey}>
+                {item.name}{item.id ? "" : " (legacy)"}
+              </option>
+            ))}
+          </select>
+        </FieldLabel>
+        <FieldLabel label="Account Name">
+          <input value={account} placeholder="cash" onChange={(event) => { setAccount(event.target.value); setAccountChoice(""); }} />
         </FieldLabel>
         <FieldLabel label="Date">
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
@@ -1050,7 +1288,7 @@ function EmptyState({ label }: { label: string }) {
 }
 
 function buildAppData(summary: Summary | null): AppData {
-  if (!summary) return { categories: [], transactions: [] };
+  if (!summary) return { categories: [], accounts: [], transactions: [] };
   const categoryMap = new Map<string, Category>();
   const storedCategories = new Map(summary.storedCategories.map((category) => [category.sourceKey, category]));
   const addCategory = (name: string, currency = "USD") => {
@@ -1098,6 +1336,7 @@ function buildAppData(summary: Summary | null): AppData {
       kind: tx.kind,
       categoryId: category.id,
       subcategoryId: accountId,
+      accountId: tx.accountId,
       account: tx.account,
       description: tx.description,
       date: tx.occurredOn
@@ -1117,6 +1356,7 @@ function buildAppData(summary: Summary | null): AppData {
 
   return {
     categories: Array.from(categoryMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    accounts: summary.accounts,
     transactions
   };
 }
@@ -1186,8 +1426,17 @@ function iconLabel(name: string) {
   return name.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
+function accountTypeLabel(type: AccountType) {
+  if (type === "cash") return "Cash";
+  if (type === "bank") return "Bank";
+  if (type === "card") return "Card";
+  if (type === "investment") return "Investment";
+  return "Other";
+}
+
 function headerTitle(tab: Tab) {
   if (tab === "transactions") return "All Transactions";
+  if (tab === "accounts") return "Accounts";
   if (tab === "budget") return "Monthly Budget";
   if (tab === "categories") return "Categories";
   return "Halo, User";
