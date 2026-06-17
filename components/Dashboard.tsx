@@ -140,6 +140,20 @@ type Transaction = {
   date: string;
 };
 
+type TransactionFormValues =
+  | (Omit<Transaction, "id" | "sourceId" | "kind" | "currency"> & { id?: string; sourceId?: number; currency?: string; type: "income" | "expense" })
+  | {
+      id?: string;
+      sourceId?: number;
+      type: "transfer";
+      amount: number;
+      category: string;
+      accountId: number;
+      toAccountId: number;
+      description: string;
+      date: string;
+    };
+
 type AppData = {
   categories: Category[];
   accounts: Account[];
@@ -289,7 +303,29 @@ export default function Dashboard() {
   const data = useMemo(() => buildAppData(summary), [summary]);
   const reload = () => setRefreshKey((value) => value + 1);
 
-  async function saveTransaction(tx: Omit<Transaction, "id" | "sourceId" | "kind" | "currency"> & { id?: string; sourceId?: number; currency?: string }) {
+  async function saveTransaction(tx: TransactionFormValues) {
+    if (tx.type === "transfer") {
+      const fromAccount = data.accounts.find((item) => item.id === tx.accountId);
+      const toAccount = data.accounts.find((item) => item.id === tx.toAccountId);
+      const response = await apiRequest("/api/transfers", "POST", {
+        fromAccountId: fromAccount?.id,
+        toAccountId: toAccount?.id,
+        category: tx.category,
+        description: tx.description,
+        amountCents: tx.amount,
+        currency: fromAccount?.currency || toAccount?.currency || DEFAULT_CURRENCY,
+        occurredOn: tx.date
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        setError(result?.error || "Could not save transfer.");
+        return;
+      }
+      setModal({ type: "none" });
+      reload();
+      return;
+    }
+
     const amountCents = signedCents(tx.type, tx.amount);
     const selectedCategory = data.categories.find((item) => item.id === tx.categoryId);
     const category = selectedCategory?.sourceName || selectedCategory?.name || tx.categoryId;
@@ -622,8 +658,8 @@ function HomeView({
   onViewAllTransactions: () => void;
   onAddTransaction: () => void;
 }) {
-  const totalIncome = data.transactions.filter((tx) => tx.type === "income").reduce((sum, tx) => sum + tx.amount, 0);
-  const totalExpense = data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
+  const totalIncome = data.transactions.filter((tx) => tx.kind === "income").reduce((sum, tx) => sum + tx.amount, 0);
+  const totalExpense = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
   const totalBalance = totalIncome - totalExpense;
   const recent = data.transactions.slice(0, 5);
   const currency = data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
@@ -1491,30 +1527,55 @@ function TransactionModal({
 }: {
   data: AppData;
   editTx: Transaction | null;
-  onSave: (tx: Omit<Transaction, "id" | "sourceId" | "kind" | "currency"> & { id?: string; sourceId?: number; currency?: string }) => void;
+  onSave: (tx: TransactionFormValues) => void;
   onClose: () => void;
 }) {
-  const [type, setType] = useState<TransactionType>(editTx?.type ?? "expense");
+  const [type, setType] = useState<"income" | "expense" | "transfer">(editTx?.kind === "transfer" ? "transfer" : editTx?.type ?? "expense");
   const [amount, setAmount] = useState(editTx ? String(editTx.amount / 100) : "");
   const [description, setDescription] = useState(editTx?.description ?? "");
   const [categoryId, setCategoryId] = useState(editTx?.categoryId ?? data.categories[0]?.id ?? "");
+  const [transferCategory, setTransferCategory] = useState("transfer");
   const [subcategoryId, setSubcategoryId] = useState(editTx?.subcategoryId ?? "");
   const initialAccount = data.accounts.find((item) => item.id === editTx?.accountId);
   const [accountChoice, setAccountChoice] = useState(initialAccount?.accountKey || "");
+  const [toAccountChoice, setToAccountChoice] = useState("");
   const [date, setDate] = useState(editTx?.date ?? new Date().toISOString().split("T")[0]);
   const [error, setError] = useState("");
   const selectedCategory = data.categories.find((category) => category.id === categoryId);
   const selectedAccount = data.accounts.find((item) => item.accountKey === accountChoice);
+  const toAccount = data.accounts.find((item) => item.accountKey === toAccountChoice);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const cents = Math.round(Number(amount) * 100);
-    if (!description.trim() || !categoryId || !Number.isFinite(cents) || cents <= 0 || !date) {
-      setError("Amount, description, category, and date are required.");
+    if (!description.trim() || !Number.isFinite(cents) || cents <= 0 || !date) {
+      setError("Amount, description, and date are required.");
       return;
     }
     if (!selectedAccount?.id) {
       setError("Select an account.");
+      return;
+    }
+    if (type === "transfer") {
+      if (!toAccount?.id || toAccount.id === selectedAccount.id) {
+        setError("Select a different destination account.");
+        return;
+      }
+      onSave({
+        id: editTx?.id,
+        sourceId: editTx?.sourceId,
+        type,
+        amount: cents,
+        category: transferCategory.trim() || "transfer",
+        accountId: selectedAccount.id,
+        toAccountId: toAccount.id,
+        description: description.trim(),
+        date
+      });
+      return;
+    }
+    if (!categoryId) {
+      setError("Select a category.");
       return;
     }
     onSave({
@@ -1537,6 +1598,7 @@ function TransactionModal({
         <div className="segmented">
           <button className={type === "expense" ? "active danger" : ""} type="button" onClick={() => setType("expense")}>Expense</button>
           <button className={type === "income" ? "active" : ""} type="button" onClick={() => setType("income")}>Income</button>
+          <button className={type === "transfer" ? "active" : ""} type="button" onClick={() => setType("transfer")}>Transfer</button>
         </div>
         <FieldLabel label="Amount">
           <input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
@@ -1544,18 +1606,26 @@ function TransactionModal({
         <FieldLabel label="Description">
           <input value={description} placeholder="What was this for?" onChange={(event) => setDescription(event.target.value)} />
         </FieldLabel>
-        <FieldLabel label="Category">
-          <select value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setSubcategoryId(""); }}>
-            {data.categories.filter((category) => !category.hidden).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-          </select>
-        </FieldLabel>
-        <FieldLabel label="Sub-category">
-          <select value={subcategoryId} onChange={(event) => setSubcategoryId(event.target.value)}>
-            <option value="">None</option>
-            {selectedCategory?.subcategories.map((sub) => <option key={sub.id} value={sub.id}>{sub.name}</option>)}
-          </select>
-        </FieldLabel>
-        <FieldLabel label="Account">
+        {type === "transfer" ? (
+          <FieldLabel label="Category">
+            <input value={transferCategory} onChange={(event) => setTransferCategory(event.target.value)} />
+          </FieldLabel>
+        ) : (
+          <>
+            <FieldLabel label="Category">
+              <select value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setSubcategoryId(""); }}>
+                {data.categories.filter((category) => !category.hidden).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </select>
+            </FieldLabel>
+            <FieldLabel label="Sub-category">
+              <select value={subcategoryId} onChange={(event) => setSubcategoryId(event.target.value)}>
+                <option value="">None</option>
+                {selectedCategory?.subcategories.map((sub) => <option key={sub.id} value={sub.id}>{sub.name}</option>)}
+              </select>
+            </FieldLabel>
+          </>
+        )}
+        <FieldLabel label={type === "transfer" ? "From Account" : "Account"}>
           <select value={accountChoice} onChange={(event) => setAccountChoice(event.target.value)}>
             <option value="">Select account</option>
             {data.accounts.map((item) => (
@@ -1565,6 +1635,18 @@ function TransactionModal({
             ))}
           </select>
         </FieldLabel>
+        {type === "transfer" ? (
+          <FieldLabel label="To Account">
+            <select value={toAccountChoice} onChange={(event) => setToAccountChoice(event.target.value)}>
+              <option value="">Select account</option>
+              {data.accounts.map((item) => (
+                <option key={item.accountKey} value={item.accountKey}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </FieldLabel>
+        ) : null}
         <FieldLabel label="Date">
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
         </FieldLabel>

@@ -194,6 +194,49 @@ export async function addTransactionFields(
   return Number(data.id);
 }
 
+export async function addTransferFields(
+  telegramUserId: number,
+  values: {
+    fromAccountId: number;
+    toAccountId: number;
+    category: string;
+    description: string;
+    amountCents: number;
+    currency: string;
+    occurredOn: string;
+  }
+) {
+  const supabase = createSupabaseAdmin();
+  const transferGroupId = randomUUID();
+  const amount = Math.abs(values.amountCents);
+  const rows = [
+    {
+      telegram_user_id: telegramUserId,
+      kind: "expense",
+      category: values.category.toLowerCase(),
+      account_id: values.fromAccountId,
+      transfer_group_id: transferGroupId,
+      description: values.description,
+      amount_cents: -amount,
+      currency: values.currency.toUpperCase(),
+      occurred_on: values.occurredOn
+    },
+    {
+      telegram_user_id: telegramUserId,
+      kind: await transferDestinationKind(telegramUserId, values.toAccountId),
+      category: values.category.toLowerCase(),
+      account_id: values.toAccountId,
+      transfer_group_id: transferGroupId,
+      description: values.description,
+      amount_cents: amount,
+      currency: values.currency.toUpperCase(),
+      occurred_on: values.occurredOn
+    }
+  ];
+  const { error } = await supabase.from("transactions").insert(rows);
+  if (error) throw error;
+}
+
 export async function updateTransaction(telegramUserId: number, transactionId: number, transaction: ParsedTransaction) {
   const supabase = createSupabaseAdmin();
   const accountId = await ensureAccountFromName(telegramUserId, transaction.account, transaction.currency);
@@ -595,7 +638,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   const start = `${month}-01`;
   const end = nextMonthStart(month);
 
-  const [transactions, budgetsRes, storedCategories, storedAccounts, allAccountTransactions, portfolioSnapshots, recurringRules] = await Promise.all([
+  const [transactions, budgetsRes, storedCategories, storedAccounts, allAccountTransactions, recurringRules] = await Promise.all([
     getSummaryTransactions(telegramUserId, start, end),
     supabase
       .from("budgets")
@@ -606,7 +649,6 @@ export async function getSummary(telegramUserId: number, month: string) {
     getStoredCategories(telegramUserId),
     getStoredAccounts(telegramUserId),
     getAccountTransactions(telegramUserId),
-    getPortfolioSnapshots(telegramUserId, month),
     getRecurringRules(telegramUserId)
   ]);
 
@@ -636,6 +678,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   const daysElapsed = daysElapsedInMonth(month);
   const daysLeft = daysLeftInMonth(month);
   const accounts = buildAccounts(storedAccounts, allAccountTransactions);
+  const portfolioSnapshots = await getPortfolioSnapshots(telegramUserId, month, storedAccounts);
   const loanProgress = buildLoanProgress(accounts, transactions);
 
   return {
@@ -687,7 +730,11 @@ export async function getBudgetStatus(telegramUserId: number, month: string, cat
   };
 }
 
-async function getPortfolioSnapshots(telegramUserId: number, month: string): Promise<PortfolioSnapshot[]> {
+async function getPortfolioSnapshots(
+  telegramUserId: number,
+  month: string,
+  storedAccounts: Omit<StoredAccount, "balanceCents">[]
+): Promise<PortfolioSnapshot[]> {
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
     .from("portfolio_snapshots")
@@ -706,13 +753,18 @@ async function getPortfolioSnapshots(telegramUserId: number, month: string): Pro
   return currentRows.map((row) => {
     const accountId = Number(row.account_id);
     const previous = (data || []).find((candidate) => Number(candidate.account_id) === accountId && candidate.month < month);
+    const account = storedAccounts.find((item) => item.id === accountId);
+    const openingContributionCents = Math.max(0, account?.openingBalanceCents || 0);
     const contribution = contributions.get(accountId) || { totalCents: 0, monthCents: 0 };
-    const previousValueCents = previous ? Number(previous.portfolio_value_cents) : contribution.totalCents - contribution.monthCents;
+    const totalContributionCents = openingContributionCents + contribution.totalCents;
+    const previousValueCents = previous
+      ? Number(previous.portfolio_value_cents)
+      : openingContributionCents + contribution.totalCents - contribution.monthCents;
     return {
       accountId,
       month,
       portfolioValueCents: Number(row.portfolio_value_cents),
-      contributionCents: contribution.totalCents,
+      contributionCents: totalContributionCents,
       monthlyContributionCents: contribution.monthCents,
       marketGainLossCents: Number(row.portfolio_value_cents) - previousValueCents - contribution.monthCents,
       currency: row.currency
@@ -890,6 +942,18 @@ async function getAccountName(telegramUserId: number, accountId: number) {
     .single();
   if (error) throw error;
   return String(data.name || "account");
+}
+
+async function transferDestinationKind(telegramUserId: number, accountId: number): Promise<ParsedTransaction["kind"]> {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("account_type")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("id", accountId)
+    .single();
+  if (error) throw error;
+  return data.account_type === "investment" ? "investment" : "transfer";
 }
 
 async function ensureAccountFromName(telegramUserId: number, name: string, currency: string) {
