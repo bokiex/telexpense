@@ -205,6 +205,7 @@ const FALLBACK_COLORS = ["#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", 
 const CATEGORY_COLORS = ["#4ade80", "#f87171", "#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#e879f9", "#38bdf8"];
 const CATEGORY_ICONS = ["Wallet", "Home", "ShoppingCart", "Car", "Tv", "ShoppingBag", "Shield", "TrendingUp", "Briefcase", "Utensils", "Coffee", "Heart", "BookOpen", "Music", "Plane"];
 const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "other"];
+const DEFAULT_CURRENCY = "SGD";
 
 export default function Dashboard() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -254,7 +255,7 @@ export default function Dashboard() {
       accountId: selectedAccount?.id,
       description: tx.description,
       amountCents,
-      currency: tx.currency || summary?.recent[0]?.currency || "USD",
+      currency: tx.currency || summary?.recent[0]?.currency || DEFAULT_CURRENCY,
       occurredOn: tx.date
     };
     const path = tx.sourceId ? `/api/transactions/${tx.sourceId}` : "/api/transactions";
@@ -298,7 +299,7 @@ export default function Dashboard() {
     const category = categoryId ? data.categories.find((item) => item.id === categoryId) : null;
     const sourceKey = category?.id || slug(values.name);
     const sourceName = category?.sourceName || values.name.toLowerCase();
-    const currency = category?.currency || summary?.recent[0]?.currency || "USD";
+    const currency = category?.currency || summary?.recent[0]?.currency || DEFAULT_CURRENCY;
     const categoryResponse = await apiRequest("/api/categories", "POST", {
       sourceKey,
       sourceName,
@@ -474,7 +475,7 @@ export default function Dashboard() {
       {modal.type === "edit-category" ? (
         <CategoryModal
           category={data.categories.find((category) => category.id === modal.categoryId)}
-          currency={data.categories.find((category) => category.id === modal.categoryId)?.currency || "USD"}
+          currency={data.categories.find((category) => category.id === modal.categoryId)?.currency || DEFAULT_CURRENCY}
           onSave={saveCategory}
           onClose={() => setModal({ type: "none" })}
         />
@@ -482,7 +483,7 @@ export default function Dashboard() {
 
       {modal.type === "add-category" ? (
         <CategoryModal
-          currency={summary?.recent[0]?.currency || "USD"}
+          currency={summary?.recent[0]?.currency || DEFAULT_CURRENCY}
           onSave={saveCategory}
           onClose={() => setModal({ type: "none" })}
         />
@@ -518,7 +519,7 @@ function HomeView({
   const totalExpense = data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
   const totalBalance = totalIncome - totalExpense;
   const recent = data.transactions.slice(0, 5);
-  const currency = data.transactions[0]?.currency || summary?.budgets[0]?.currency || "USD";
+  const currency = data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
 
   return (
     <div className="screen-stack">
@@ -695,7 +696,7 @@ function AccountsView({
         <div className="account-total-list">
           {Object.entries(totalByCurrency).length ? Object.entries(totalByCurrency).map(([currency, total]) => (
             <strong key={currency}>{money(total, currency)}</strong>
-          )) : <strong>{money(0)}</strong>}
+          )) : <strong>{money(0, DEFAULT_CURRENCY)}</strong>}
         </div>
       </section>
 
@@ -735,7 +736,7 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
   const totalSpent = summary?.health.spentCents ?? data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
   const budgetLeft = totalBudget - totalSpent;
   const usedPct = totalBudget ? Math.min(100, Math.round((totalSpent / totalBudget) * 100)) : 0;
-  const currency = data.categories[0]?.currency || "USD";
+  const currency = data.categories[0]?.currency || DEFAULT_CURRENCY;
 
   return (
     <div className="screen-stack">
@@ -1025,7 +1026,7 @@ function AccountModal({
   const [institution, setInstitution] = useState(account?.institution || "");
   const [accountType, setAccountType] = useState<AccountType>(account?.accountType || "bank");
   const [openingBalance, setOpeningBalance] = useState(account ? String(account.openingBalanceCents / 100) : "0");
-  const [currency, setCurrency] = useState(account?.currency || "USD");
+  const [currency, setCurrency] = useState(account?.currency || DEFAULT_CURRENCY);
   const [color, setColor] = useState(account?.color || "#60a5fa");
   const [icon, setIcon] = useState(account?.icon || "Wallet");
   const [error, setError] = useState("");
@@ -1047,7 +1048,7 @@ function AccountModal({
       institution: institution.trim(),
       accountType,
       openingBalanceCents,
-      currency: currency.trim().toUpperCase() || "USD",
+      currency: currency.trim().toUpperCase() || DEFAULT_CURRENCY,
       color,
       icon
     });
@@ -1350,7 +1351,7 @@ function buildAppData(summary: Summary | null): AppData {
   if (!summary) return { categories: [], accounts: [], transactions: [] };
   const categoryMap = new Map<string, Category>();
   const storedCategories = new Map(summary.storedCategories.map((category) => [category.sourceKey, category]));
-  const addCategory = (name: string, currency = "USD") => {
+  const addCategory = (name: string, currency = DEFAULT_CURRENCY) => {
     const id = slug(name);
     const existing = categoryMap.get(id);
     if (existing) return existing;
@@ -1436,7 +1437,7 @@ function signedCents(type: TransactionType, cents: number) {
   return type === "income" ? Math.abs(cents) : -Math.abs(cents);
 }
 
-function money(cents: number, currency = "USD") {
+function money(cents: number, currency = DEFAULT_CURRENCY) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(cents / 100);
 }
 
