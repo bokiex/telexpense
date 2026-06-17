@@ -551,7 +551,8 @@ button {
   overflow-wrap: anywhere;
 }
 
-.account-card {
+.account-card,
+.recurring-card {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) auto 26px;
   align-items: center;
@@ -560,6 +561,14 @@ button {
   border-radius: 16px;
   background: var(--card);
   padding: 11px;
+}
+
+.account-card {
+  grid-template-columns: 40px minmax(0, 1fr) auto 30px;
+}
+
+.recurring-card {
+  grid-template-columns: 40px minmax(0, 1fr) auto 30px;
 }
 
 .account-icon {
@@ -594,6 +603,31 @@ button {
 .account-balance {
   align-items: flex-end;
   text-align: right;
+}
+
+.account-detail {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.account-detail > div,
+.loan-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.account-detail span,
+.loan-values span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.account-detail strong {
+  font-size: 12px;
 }
 
 .budget-overview {
@@ -693,6 +727,26 @@ button {
   gap: 8px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
+}
+
+.loan-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.loan-row {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.loan-row strong {
+  font-size: 14px;
+}
+
+.loan-values {
+  flex-wrap: wrap;
 }
 
 .budget-row .category-icon {

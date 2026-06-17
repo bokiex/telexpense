@@ -1,5 +1,6 @@
 import { createSupabaseAdmin } from "@/lib/supabaseAdmin";
 import type { ParsedTransaction } from "@/lib/parser";
+import { randomUUID } from "crypto";
 
 export type CategorySpend = {
   category: string;
@@ -23,6 +24,8 @@ export type RecentTransaction = {
   kind: string;
   category: string;
   accountId: number | null;
+  transferGroupId: string | null;
+  recurringRuleId: number | null;
   description: string;
   amountCents: number;
   currency: string;
@@ -40,7 +43,8 @@ export type BudgetHealth = {
 };
 
 export type BudgetGroup = "Needs" | "Wants" | "Savings";
-export type AccountType = "cash" | "bank" | "card" | "investment" | "other";
+export type AccountType = "cash" | "bank" | "card" | "investment" | "loan" | "other";
+export type RecurringRuleType = "subscription" | "investment_transfer" | "loan_payment";
 
 export type StoredAccount = {
   id: number | null;
@@ -54,6 +58,40 @@ export type StoredAccount = {
   color: string;
   icon: string;
   active: boolean;
+};
+
+export type PortfolioSnapshot = {
+  accountId: number;
+  month: string;
+  portfolioValueCents: number;
+  contributionCents: number;
+  monthlyContributionCents: number;
+  marketGainLossCents: number;
+  currency: string;
+};
+
+export type RecurringRule = {
+  id: number;
+  name: string;
+  ruleType: RecurringRuleType;
+  amountCents: number;
+  currency: string;
+  category: string;
+  fromAccountId: number;
+  toAccountId: number | null;
+  dayOfMonth: number;
+  active: boolean;
+};
+
+export type LoanProgress = {
+  accountId: number;
+  name: string;
+  openingBalanceCents: number;
+  balanceCents: number;
+  repaidCents: number;
+  repaymentThisMonthCents: number;
+  payoffProgress: number;
+  currency: string;
 };
 
 export type StoredSubcategory = {
@@ -336,6 +374,89 @@ export async function getStoredAccounts(telegramUserId: number): Promise<Omit<St
   }));
 }
 
+export async function upsertPortfolioSnapshot(
+  telegramUserId: number,
+  values: {
+    accountId: number;
+    month: string;
+    portfolioValueCents: number;
+    currency: string;
+  }
+) {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase.from("portfolio_snapshots").upsert(
+    {
+      telegram_user_id: telegramUserId,
+      account_id: values.accountId,
+      month: values.month,
+      portfolio_value_cents: values.portfolioValueCents,
+      currency: values.currency.toUpperCase(),
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "telegram_user_id,account_id,month" }
+  );
+  if (error) throw error;
+}
+
+export async function upsertRecurringRule(
+  telegramUserId: number,
+  values: {
+    id?: number | null;
+    name: string;
+    ruleType: RecurringRuleType;
+    amountCents: number;
+    currency: string;
+    category: string;
+    fromAccountId: number;
+    toAccountId?: number | null;
+    dayOfMonth: number;
+    active: boolean;
+  }
+) {
+  const supabase = createSupabaseAdmin();
+  const payload = {
+    telegram_user_id: telegramUserId,
+    name: values.name,
+    rule_type: values.ruleType,
+    amount_cents: values.amountCents,
+    currency: values.currency.toUpperCase(),
+    category: values.category.toLowerCase(),
+    from_account_id: values.fromAccountId,
+    to_account_id: values.toAccountId || null,
+    day_of_month: values.dayOfMonth,
+    active: values.active,
+    updated_at: new Date().toISOString()
+  };
+
+  if (values.id) {
+    const { error } = await supabase
+      .from("recurring_rules")
+      .update(payload)
+      .eq("telegram_user_id", telegramUserId)
+      .eq("id", values.id);
+    if (error) throw error;
+    return values.id;
+  }
+
+  const { data, error } = await supabase
+    .from("recurring_rules")
+    .insert(payload)
+    .select("id")
+    .single();
+  if (error) throw error;
+  return Number(data.id);
+}
+
+export async function deleteRecurringRule(telegramUserId: number, ruleId: number) {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase
+    .from("recurring_rules")
+    .update({ active: false, updated_at: new Date().toISOString() })
+    .eq("telegram_user_id", telegramUserId)
+    .eq("id", ruleId);
+  if (error) throw error;
+}
+
 export async function upsertCategory(
   telegramUserId: number,
   values: {
@@ -470,10 +591,11 @@ export async function getStoredCategories(telegramUserId: number): Promise<Store
 
 export async function getSummary(telegramUserId: number, month: string) {
   const supabase = createSupabaseAdmin();
+  await generateRecurringTransactions(telegramUserId, month);
   const start = `${month}-01`;
   const end = nextMonthStart(month);
 
-  const [transactions, budgetsRes, storedCategories, storedAccounts, allAccountTransactions] = await Promise.all([
+  const [transactions, budgetsRes, storedCategories, storedAccounts, allAccountTransactions, portfolioSnapshots, recurringRules] = await Promise.all([
     getSummaryTransactions(telegramUserId, start, end),
     supabase
       .from("budgets")
@@ -483,7 +605,9 @@ export async function getSummary(telegramUserId: number, month: string) {
       .order("category"),
     getStoredCategories(telegramUserId),
     getStoredAccounts(telegramUserId),
-    getAccountTransactions(telegramUserId)
+    getAccountTransactions(telegramUserId),
+    getPortfolioSnapshots(telegramUserId, month),
+    getRecurringRules(telegramUserId)
   ]);
 
   if (budgetsRes.error) throw budgetsRes.error;
@@ -512,6 +636,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   const daysElapsed = daysElapsedInMonth(month);
   const daysLeft = daysLeftInMonth(month);
   const accounts = buildAccounts(storedAccounts, allAccountTransactions);
+  const loanProgress = buildLoanProgress(accounts, transactions);
 
   return {
     month,
@@ -531,11 +656,16 @@ export async function getSummary(telegramUserId: number, month: string) {
       .sort((a, b) => a.date.localeCompare(b.date)),
     storedCategories,
     accounts,
+    portfolioSnapshots,
+    recurringRules,
+    loanProgress,
     recent: transactions.slice(0, 20).map((tx) => ({
       id: tx.id,
       kind: tx.kind,
       category: tx.category,
       accountId: tx.account_id,
+      transferGroupId: tx.transfer_group_id,
+      recurringRuleId: tx.recurring_rule_id,
       description: tx.description,
       amountCents: tx.amount_cents,
       currency: tx.currency,
@@ -555,6 +685,195 @@ export async function getBudgetStatus(telegramUserId: number, month: string, cat
     budgetCents: budget.budgetCents,
     ratio: budget.budgetCents ? spent / budget.budgetCents : 0
   };
+}
+
+async function getPortfolioSnapshots(telegramUserId: number, month: string): Promise<PortfolioSnapshot[]> {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("portfolio_snapshots")
+    .select("account_id, month, portfolio_value_cents, currency")
+    .eq("telegram_user_id", telegramUserId)
+    .lte("month", month)
+    .order("month", { ascending: false });
+
+  if (error && isMissingSchemaError(error)) return [];
+  if (error) throw error;
+
+  const currentRows = (data || []).filter((row) => row.month === month);
+  const accountIds = currentRows.map((row) => Number(row.account_id));
+  const contributions = await getInvestmentContributionTotals(telegramUserId, accountIds, month);
+
+  return currentRows.map((row) => {
+    const accountId = Number(row.account_id);
+    const previous = (data || []).find((candidate) => Number(candidate.account_id) === accountId && candidate.month < month);
+    const contribution = contributions.get(accountId) || { totalCents: 0, monthCents: 0 };
+    const previousValueCents = previous ? Number(previous.portfolio_value_cents) : contribution.totalCents - contribution.monthCents;
+    return {
+      accountId,
+      month,
+      portfolioValueCents: Number(row.portfolio_value_cents),
+      contributionCents: contribution.totalCents,
+      monthlyContributionCents: contribution.monthCents,
+      marketGainLossCents: Number(row.portfolio_value_cents) - previousValueCents - contribution.monthCents,
+      currency: row.currency
+    };
+  });
+}
+
+async function getInvestmentContributionTotals(telegramUserId: number, accountIds: number[], month: string) {
+  const totals = new Map<number, { totalCents: number; monthCents: number }>();
+  if (!accountIds.length) return totals;
+
+  const supabase = createSupabaseAdmin();
+  const monthStart = `${month}-01`;
+  const monthEnd = nextMonthStart(month);
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("account_id, amount_cents, occurred_on")
+    .eq("telegram_user_id", telegramUserId)
+    .in("account_id", accountIds)
+    .in("kind", ["investment", "transfer"])
+    .gt("amount_cents", 0)
+    .lt("occurred_on", monthEnd);
+
+  if (error && isMissingSchemaError(error)) return totals;
+  if (error) throw error;
+
+  for (const row of data || []) {
+    const accountId = Number(row.account_id);
+    const current = totals.get(accountId) || { totalCents: 0, monthCents: 0 };
+    const amount = Number(row.amount_cents);
+    current.totalCents += amount;
+    if (String(row.occurred_on) >= monthStart) current.monthCents += amount;
+    totals.set(accountId, current);
+  }
+  return totals;
+}
+
+async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[]> {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("recurring_rules")
+    .select("id, name, rule_type, amount_cents, currency, category, from_account_id, to_account_id, day_of_month, active")
+    .eq("telegram_user_id", telegramUserId)
+    .order("name");
+
+  if (error && isMissingSchemaError(error)) return [];
+  if (error) throw error;
+
+  return (data || []).map((row) => ({
+    id: Number(row.id),
+    name: row.name,
+    ruleType: row.rule_type as RecurringRuleType,
+    amountCents: Number(row.amount_cents),
+    currency: row.currency,
+    category: row.category,
+    fromAccountId: Number(row.from_account_id),
+    toAccountId: row.to_account_id === null ? null : Number(row.to_account_id),
+    dayOfMonth: Number(row.day_of_month),
+    active: Boolean(row.active)
+  }));
+}
+
+async function generateRecurringTransactions(telegramUserId: number, month: string) {
+  const rules = (await getRecurringRules(telegramUserId)).filter((rule) => rule.active);
+  if (!rules.length) return;
+
+  const supabase = createSupabaseAdmin();
+  const { data: runs, error: runsError } = await supabase
+    .from("recurring_rule_runs")
+    .select("recurring_rule_id")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("month", month);
+
+  if (runsError && isMissingSchemaError(runsError)) return;
+  if (runsError) throw runsError;
+
+  const existingRuns = new Set((runs || []).map((run) => Number(run.recurring_rule_id)));
+  for (const rule of rules) {
+    if (existingRuns.has(rule.id)) continue;
+    await createRecurringTransactionsForRule(telegramUserId, rule, month);
+  }
+}
+
+async function createRecurringTransactionsForRule(telegramUserId: number, rule: RecurringRule, month: string) {
+  const supabase = createSupabaseAdmin();
+  const transferGroupId = randomUUID();
+  const occurredOn = dueDateForMonth(month, rule.dayOfMonth);
+  const amount = Math.abs(rule.amountCents);
+  const base = {
+    telegram_user_id: telegramUserId,
+    recurring_rule_id: rule.id,
+    transfer_group_id: transferGroupId,
+    currency: rule.currency,
+    occurred_on: occurredOn
+  };
+  const rows = [];
+
+  if (rule.ruleType === "subscription") {
+    rows.push({
+      ...base,
+      kind: "expense",
+      category: rule.category,
+      account_id: rule.fromAccountId,
+      description: rule.name,
+      amount_cents: -amount
+    });
+  } else {
+    rows.push({
+      ...base,
+      kind: rule.ruleType === "loan_payment" ? "expense" : "transfer",
+      category: rule.category,
+      account_id: rule.fromAccountId,
+      description: rule.name,
+      amount_cents: -amount
+    });
+    if (rule.toAccountId) {
+      rows.push({
+        ...base,
+        kind: rule.ruleType === "investment_transfer" ? "investment" : "transfer",
+        category: rule.category,
+        account_id: rule.toAccountId,
+        description: rule.name,
+        amount_cents: amount
+      });
+    }
+  }
+
+  const { error: txError } = await supabase.from("transactions").insert(rows);
+  if (txError && isMissingSchemaError(txError)) return;
+  if (txError) throw txError;
+
+  const { error: runError } = await supabase.from("recurring_rule_runs").insert({
+    telegram_user_id: telegramUserId,
+    recurring_rule_id: rule.id,
+    month,
+    transfer_group_id: transferGroupId
+  });
+  if (runError && runError.code !== "23505") throw runError;
+}
+
+function buildLoanProgress(accounts: StoredAccount[], transactions: Awaited<ReturnType<typeof getSummaryTransactions>>): LoanProgress[] {
+  return accounts
+    .filter((account) => account.accountType === "loan" && account.id)
+    .map((account) => {
+      const openingDebt = Math.max(0, -account.openingBalanceCents);
+      const remainingDebt = Math.max(0, -account.balanceCents);
+      const repaidCents = Math.max(0, openingDebt - remainingDebt);
+      const repaymentThisMonthCents = transactions
+        .filter((tx) => tx.account_id === account.id && tx.amount_cents > 0)
+        .reduce((sum, tx) => sum + tx.amount_cents, 0);
+      return {
+        accountId: Number(account.id),
+        name: account.name,
+        openingBalanceCents: account.openingBalanceCents,
+        balanceCents: account.balanceCents,
+        repaidCents,
+        repaymentThisMonthCents,
+        payoffProgress: openingDebt ? Math.min(100, Math.round((repaidCents / openingDebt) * 100)) : 0,
+        currency: account.currency
+      };
+    });
 }
 
 export function currentMonth() {
@@ -594,7 +913,7 @@ async function getSummaryTransactions(telegramUserId: number, start: string, end
   const supabase = createSupabaseAdmin();
   const withAccountId = await supabase
     .from("transactions")
-    .select("id, kind, category, account_id, description, amount_cents, currency, occurred_on")
+    .select("id, kind, category, account_id, transfer_group_id, recurring_rule_id, description, amount_cents, currency, occurred_on")
     .eq("telegram_user_id", telegramUserId)
     .gte("occurred_on", start)
     .lt("occurred_on", end)
@@ -603,6 +922,20 @@ async function getSummaryTransactions(telegramUserId: number, start: string, end
 
   if (!withAccountId.error) return withAccountId.data || [];
   if (!isMissingSchemaError(withAccountId.error)) throw withAccountId.error;
+
+  const withoutRecurringColumns = await supabase
+    .from("transactions")
+    .select("id, kind, category, account_id, description, amount_cents, currency, occurred_on")
+    .eq("telegram_user_id", telegramUserId)
+    .gte("occurred_on", start)
+    .lt("occurred_on", end)
+    .order("occurred_on", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (!withoutRecurringColumns.error) {
+    return (withoutRecurringColumns.data || []).map((row) => ({ ...row, transfer_group_id: null, recurring_rule_id: null }));
+  }
+  if (!isMissingSchemaError(withoutRecurringColumns.error)) throw withoutRecurringColumns.error;
 
   const legacy = await supabase
     .from("transactions")
@@ -614,7 +947,7 @@ async function getSummaryTransactions(telegramUserId: number, start: string, end
     .order("id", { ascending: false });
 
   if (legacy.error) throw legacy.error;
-  return (legacy.data || []).map((row) => ({ ...row, account_id: null }));
+  return (legacy.data || []).map((row) => ({ ...row, account_id: null, transfer_group_id: null, recurring_rule_id: null }));
 }
 
 async function getAccountTransactions(telegramUserId: number) {
@@ -695,6 +1028,11 @@ function titleCase(value: string) {
 function nextMonthStart(month: string) {
   const [year, monthIndex] = month.split("-").map(Number);
   return new Date(Date.UTC(year, monthIndex, 1)).toISOString().slice(0, 10);
+}
+
+function dueDateForMonth(month: string, dayOfMonth: number) {
+  const day = Math.min(Math.max(1, dayOfMonth), daysInMonth(month));
+  return `${month}-${String(day).padStart(2, "0")}`;
 }
 
 function daysInMonth(month: string) {

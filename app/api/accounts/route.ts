@@ -6,7 +6,7 @@ import type { AccountType } from "@/lib/repository";
 
 export const runtime = "nodejs";
 
-const accountTypes = new Set(["cash", "bank", "card", "investment", "other"]);
+const accountTypes = new Set(["cash", "bank", "card", "investment", "loan", "other"]);
 
 export async function POST(request: NextRequest) {
   try {

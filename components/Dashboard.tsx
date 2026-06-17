@@ -24,6 +24,7 @@ import {
   PieChart,
   Plane,
   Plus,
+  Repeat,
   Search,
   Shield,
   ShoppingBag,
@@ -40,7 +41,8 @@ import {
 
 type BudgetGroup = "Needs" | "Wants" | "Savings";
 type TransactionType = "income" | "expense";
-type AccountType = "cash" | "bank" | "card" | "investment" | "other";
+type AccountType = "cash" | "bank" | "card" | "investment" | "loan" | "other";
+type RecurringRuleType = "subscription" | "investment_transfer" | "loan_payment";
 type Tab = "home" | "transactions" | "accounts" | "budget" | "categories";
 
 type CategorySpend = {
@@ -60,6 +62,8 @@ type RecentTransaction = {
   kind: "expense" | "income" | "investment" | "transfer";
   category: string;
   accountId: number | null;
+  transferGroupId: string | null;
+  recurringRuleId: number | null;
   description: string;
   amountCents: number;
   currency: string;
@@ -84,6 +88,9 @@ type Summary = {
   daily: { date: string; spentCents: number }[];
   storedCategories: StoredCategory[];
   accounts: Account[];
+  portfolioSnapshots: PortfolioSnapshot[];
+  recurringRules: RecurringRule[];
+  loanProgress: LoanProgress[];
   recent: RecentTransaction[];
 };
 
@@ -153,12 +160,49 @@ type Account = {
   active: boolean;
 };
 
+type PortfolioSnapshot = {
+  accountId: number;
+  month: string;
+  portfolioValueCents: number;
+  contributionCents: number;
+  monthlyContributionCents: number;
+  marketGainLossCents: number;
+  currency: string;
+};
+
+type RecurringRule = {
+  id: number;
+  name: string;
+  ruleType: RecurringRuleType;
+  amountCents: number;
+  currency: string;
+  category: string;
+  fromAccountId: number;
+  toAccountId: number | null;
+  dayOfMonth: number;
+  active: boolean;
+};
+
+type LoanProgress = {
+  accountId: number;
+  name: string;
+  openingBalanceCents: number;
+  balanceCents: number;
+  repaidCents: number;
+  repaymentThisMonthCents: number;
+  payoffProgress: number;
+  currency: string;
+};
+
 type ModalState =
   | { type: "none" }
   | { type: "add-transaction" }
   | { type: "edit-transaction"; tx: Transaction }
   | { type: "add-account" }
   | { type: "edit-account"; account: Account }
+  | { type: "portfolio-snapshot"; account: Account }
+  | { type: "add-recurring-rule" }
+  | { type: "edit-recurring-rule"; rule: RecurringRule }
   | { type: "add-category" }
   | { type: "edit-category"; categoryId: string }
   | { type: "add-subcategory"; categoryId: string }
@@ -204,7 +248,8 @@ const CATEGORY_LOOK: Record<string, { group: BudgetGroup; color: string; icon: s
 const FALLBACK_COLORS = ["#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#38bdf8"];
 const CATEGORY_COLORS = ["#4ade80", "#f87171", "#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#e879f9", "#38bdf8"];
 const CATEGORY_ICONS = ["Wallet", "Home", "ShoppingCart", "Car", "Tv", "ShoppingBag", "Shield", "TrendingUp", "Briefcase", "Utensils", "Coffee", "Heart", "BookOpen", "Music", "Plane"];
-const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "other"];
+const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "loan", "other"];
+const RECURRING_TYPES: RecurringRuleType[] = ["subscription", "investment_transfer", "loan_payment"];
 const DEFAULT_CURRENCY = "SGD";
 
 export default function Dashboard() {
@@ -385,6 +430,43 @@ export default function Dashboard() {
     reload();
   }
 
+  async function savePortfolioSnapshot(account: Account, portfolioValueCents: number) {
+    const response = await apiRequest("/api/portfolio-snapshots", "POST", {
+      accountId: account.id,
+      month,
+      portfolioValueCents,
+      currency: account.currency
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      setError(result?.error || "Could not save portfolio value.");
+      return;
+    }
+    setModal({ type: "none" });
+    reload();
+  }
+
+  async function saveRecurringRule(rule: Omit<RecurringRule, "id"> & { id?: number | null }) {
+    const response = await apiRequest("/api/recurring-rules", "POST", rule);
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      setError(result?.error || "Could not save recurring rule.");
+      return;
+    }
+    setModal({ type: "none" });
+    reload();
+  }
+
+  async function deleteRecurringRule(rule: RecurringRule) {
+    const response = await apiRequest(`/api/recurring-rules?id=${encodeURIComponent(rule.id)}`, "DELETE");
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      setError(result?.error || "Could not remove recurring rule.");
+      return;
+    }
+    reload();
+  }
+
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: "home", label: "Home", icon: <LayoutDashboard size={20} /> },
     { id: "transactions", label: "History", icon: <List size={20} /> },
@@ -429,8 +511,14 @@ export default function Dashboard() {
           {activeTab === "accounts" ? (
             <AccountsView
               accounts={data.accounts}
+              snapshots={summary?.portfolioSnapshots || []}
+              recurringRules={summary?.recurringRules || []}
               onAddAccount={() => setModal({ type: "add-account" })}
               onEditAccount={(account) => setModal({ type: "edit-account", account })}
+              onSetSnapshot={(account) => setModal({ type: "portfolio-snapshot", account })}
+              onAddRecurringRule={() => setModal({ type: "add-recurring-rule" })}
+              onEditRecurringRule={(rule) => setModal({ type: "edit-recurring-rule", rule })}
+              onDeleteRecurringRule={deleteRecurringRule}
             />
           ) : null}
           {activeTab === "budget" ? <BudgetView data={data} summary={summary} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
@@ -470,6 +558,25 @@ export default function Dashboard() {
 
       {modal.type === "add-account" || modal.type === "edit-account" ? (
         <AccountModal account={modal.type === "edit-account" ? modal.account : null} onSave={saveAccount} onClose={() => setModal({ type: "none" })} />
+      ) : null}
+
+      {modal.type === "portfolio-snapshot" ? (
+        <PortfolioSnapshotModal
+          account={modal.account}
+          month={month}
+          snapshot={summary?.portfolioSnapshots.find((snapshot) => snapshot.accountId === modal.account.id)}
+          onSave={savePortfolioSnapshot}
+          onClose={() => setModal({ type: "none" })}
+        />
+      ) : null}
+
+      {modal.type === "add-recurring-rule" || modal.type === "edit-recurring-rule" ? (
+        <RecurringRuleModal
+          data={data}
+          rule={modal.type === "edit-recurring-rule" ? modal.rule : null}
+          onSave={saveRecurringRule}
+          onClose={() => setModal({ type: "none" })}
+        />
       ) : null}
 
       {modal.type === "edit-category" ? (
@@ -677,12 +784,24 @@ function TransactionListView({
 
 function AccountsView({
   accounts,
+  snapshots,
+  recurringRules,
   onAddAccount,
-  onEditAccount
+  onEditAccount,
+  onSetSnapshot,
+  onAddRecurringRule,
+  onEditRecurringRule,
+  onDeleteRecurringRule
 }: {
   accounts: Account[];
+  snapshots: PortfolioSnapshot[];
+  recurringRules: RecurringRule[];
   onAddAccount: () => void;
   onEditAccount: (account: Account) => void;
+  onSetSnapshot: (account: Account) => void;
+  onAddRecurringRule: () => void;
+  onEditRecurringRule: (rule: RecurringRule) => void;
+  onDeleteRecurringRule: (rule: RecurringRule) => void;
 }) {
   const totalByCurrency = accounts.reduce<Record<string, number>>((totals, account) => {
     totals[account.currency] = (totals[account.currency] || 0) + account.balanceCents;
@@ -714,12 +833,20 @@ function AccountsView({
               <span>{account.institution || accountTypeLabel(account.accountType)} · {accountTypeLabel(account.accountType)}</span>
             </div>
             <div className="account-balance">
-              <strong>{money(account.balanceCents, account.currency)}</strong>
-              <span>Opening {money(account.openingBalanceCents, account.currency)}</span>
+              <strong>{account.accountType === "loan" ? money(Math.max(0, -account.balanceCents), account.currency) : money(account.balanceCents, account.currency)}</strong>
+              <span>{account.accountType === "loan" ? "Original debt" : "Opening"} {money(account.accountType === "loan" ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents, account.currency)}</span>
             </div>
-            <button className="tiny-icon" type="button" onClick={() => onEditAccount(account)} aria-label={`Edit ${account.name}`}>
-              <Pencil size={11} />
-            </button>
+            <div className="card-actions">
+              {account.accountType === "investment" ? (
+                <button type="button" onClick={() => onSetSnapshot(account)} aria-label={`Set ${account.name} portfolio value`}>
+                  <TrendingUp size={12} />
+                </button>
+              ) : null}
+              <button type="button" onClick={() => onEditAccount(account)} aria-label={`Edit ${account.name}`}>
+                <Pencil size={12} />
+              </button>
+            </div>
+            {account.accountType === "investment" ? <InvestmentAccountDetail account={account} snapshot={snapshots.find((item) => item.accountId === account.id)} /> : null}
           </article>
         )) : <EmptyState label="No accounts yet" />}
       </section>
@@ -727,6 +854,64 @@ function AccountsView({
       <button className="primary-action" type="button" onClick={onAddAccount}>
         <Plus size={16} /> Add Account
       </button>
+
+      <section>
+        <div className="section-line">
+          <p className="eyebrow">Monthly Rules</p>
+          <button className="link-button" type="button" onClick={onAddRecurringRule}>
+            <Plus size={13} /> Add
+          </button>
+        </div>
+        <div className="row-stack">
+          {recurringRules.length ? recurringRules.map((rule) => (
+            <article key={rule.id} className="recurring-card">
+              <div className="account-icon">
+                <Repeat size={17} />
+              </div>
+              <div className="account-copy">
+                <strong>{rule.name}</strong>
+                <span>{recurringTypeLabel(rule.ruleType)} · day {rule.dayOfMonth}</span>
+              </div>
+              <div className="account-balance">
+                <strong>{money(rule.amountCents, rule.currency)}</strong>
+                <span>{rule.active ? "Active" : "Inactive"}</span>
+              </div>
+              <div className="card-actions">
+                <button type="button" onClick={() => onEditRecurringRule(rule)} aria-label={`Edit ${rule.name}`}>
+                  <Pencil size={12} />
+                </button>
+                <button type="button" onClick={() => onDeleteRecurringRule(rule)} aria-label={`Remove ${rule.name}`}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </article>
+          )) : <EmptyState label="No monthly rules yet" />}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function InvestmentAccountDetail({ account, snapshot }: { account: Account; snapshot?: PortfolioSnapshot }) {
+  if (!snapshot) {
+    return (
+      <div className="account-detail">
+        <ValueLine label="Portfolio value" value="Not set" />
+        <ValueLine label="Contributions" value={money(Math.max(0, account.balanceCents), account.currency)} />
+      </div>
+    );
+  }
+  return (
+    <div className="account-detail">
+      <ValueLine label="Portfolio value" value={money(snapshot.portfolioValueCents, snapshot.currency)} />
+      <ValueLine label="Total contributions" value={money(snapshot.contributionCents, snapshot.currency)} />
+      <ValueLine label="This month contributions" value={money(snapshot.monthlyContributionCents, snapshot.currency)} />
+      <ValueLine
+        label="Market movement"
+        value={`${snapshot.marketGainLossCents >= 0 ? "+" : "-"}${money(Math.abs(snapshot.marketGainLossCents), snapshot.currency)}`}
+        positive={snapshot.marketGainLossCents >= 0}
+        danger={snapshot.marketGainLossCents < 0}
+      />
     </div>
   );
 }
@@ -795,6 +980,30 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
           </section>
         );
       })}
+
+      {summary?.loanProgress.length ? (
+        <section className="mini-card grouped-card">
+          <div className="section-line loan-head">
+            <p className="eyebrow">Loan Repayment</p>
+            <span>{summary.loanProgress.length}</span>
+          </div>
+          <div className="nested-list">
+            {summary.loanProgress.map((loan) => (
+              <div key={loan.accountId} className="loan-row">
+                <div>
+                  <strong>{loan.name}</strong>
+                  <Progress value={loan.payoffProgress} color={loan.payoffProgress >= 100 ? "#4ade80" : "#60a5fa"} thin />
+                </div>
+                <div className="loan-values">
+                  <span>{loan.payoffProgress}% paid</span>
+                  <span>{money(Math.max(0, -loan.balanceCents), loan.currency)} left</span>
+                  <span>{money(loan.repaymentThisMonthCents, loan.currency)} this month</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -1113,6 +1322,167 @@ function AccountModal({
   );
 }
 
+function PortfolioSnapshotModal({
+  account,
+  month,
+  snapshot,
+  onSave,
+  onClose
+}: {
+  account: Account;
+  month: string;
+  snapshot?: PortfolioSnapshot;
+  onSave: (account: Account, portfolioValueCents: number) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(snapshot ? String(snapshot.portfolioValueCents / 100) : "");
+  const [error, setError] = useState("");
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const cents = Math.round(Number(value) * 100);
+    if (!Number.isFinite(cents) || cents < 0) {
+      setError("Portfolio value is not valid.");
+      return;
+    }
+    onSave(account, cents);
+  }
+
+  return (
+    <BottomSheet title="Set Portfolio Value" onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <div className="budget-target">
+          <small>{month}</small>
+          <strong>{account.name}</strong>
+        </div>
+        <FieldLabel label={`Portfolio Value (${account.currency})`}>
+          <input value={value} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setValue(event.target.value)} />
+        </FieldLabel>
+        {error ? <p className="form-error">{error}</p> : null}
+        <button className="primary-action" type="submit">Save Value</button>
+      </form>
+    </BottomSheet>
+  );
+}
+
+function RecurringRuleModal({
+  data,
+  rule,
+  onSave,
+  onClose
+}: {
+  data: AppData;
+  rule: RecurringRule | null;
+  onSave: (rule: Omit<RecurringRule, "id"> & { id?: number | null }) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(rule?.name || "");
+  const [ruleType, setRuleType] = useState<RecurringRuleType>(rule?.ruleType || "subscription");
+  const [amount, setAmount] = useState(rule ? String(rule.amountCents / 100) : "");
+  const [currency, setCurrency] = useState(rule?.currency || DEFAULT_CURRENCY);
+  const [category, setCategory] = useState(rule?.category || data.categories[0]?.sourceName || "subscription");
+  const [fromAccountId, setFromAccountId] = useState(rule?.fromAccountId ? String(rule.fromAccountId) : "");
+  const [toAccountId, setToAccountId] = useState(rule?.toAccountId ? String(rule.toAccountId) : "");
+  const [dayOfMonth, setDayOfMonth] = useState(rule ? String(rule.dayOfMonth) : "1");
+  const [active, setActive] = useState(rule?.active ?? true);
+  const [error, setError] = useState("");
+  const needsDestination = ruleType === "investment_transfer" || ruleType === "loan_payment";
+  const destinationAccounts = data.accounts.filter((account) => {
+    if (ruleType === "investment_transfer") return account.accountType === "investment";
+    if (ruleType === "loan_payment") return account.accountType === "loan";
+    return true;
+  });
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const amountCents = Math.round(Number(amount) * 100);
+    const day = Number(dayOfMonth);
+    const fromId = Number(fromAccountId);
+    const toId = Number(toAccountId);
+    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || !category.trim() || !Number.isFinite(fromId)) {
+      setError("Name, amount, category, and source account are required.");
+      return;
+    }
+    if (needsDestination && !Number.isFinite(toId)) {
+      setError("Select a destination account.");
+      return;
+    }
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      setError("Day must be between 1 and 31.");
+      return;
+    }
+    onSave({
+      id: rule?.id || null,
+      name: name.trim(),
+      ruleType,
+      amountCents,
+      currency: currency.trim().toUpperCase() || DEFAULT_CURRENCY,
+      category: category.trim().toLowerCase(),
+      fromAccountId: fromId,
+      toAccountId: needsDestination ? toId : null,
+      dayOfMonth: day,
+      active
+    });
+  }
+
+  return (
+    <BottomSheet title={rule ? "Edit Monthly Rule" : "Add Monthly Rule"} onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <FieldLabel label="Type">
+          <div className="segmented wrap">
+            {RECURRING_TYPES.map((item) => (
+              <button key={item} className={ruleType === item ? "active" : ""} type="button" onClick={() => { setRuleType(item); setToAccountId(""); }}>
+                {recurringTypeLabel(item)}
+              </button>
+            ))}
+          </div>
+        </FieldLabel>
+        <FieldLabel label="Name">
+          <input value={name} placeholder="Netflix, monthly ETF, loan payment" onChange={(event) => setName(event.target.value)} />
+        </FieldLabel>
+        <div className="form-grid-2">
+          <FieldLabel label="Amount">
+            <input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
+          </FieldLabel>
+          <FieldLabel label="Currency">
+            <input value={currency} maxLength={3} onChange={(event) => setCurrency(event.target.value)} />
+          </FieldLabel>
+        </div>
+        <FieldLabel label="Category">
+          <input value={category} placeholder="subscription, investment, loan" onChange={(event) => setCategory(event.target.value)} />
+        </FieldLabel>
+        <FieldLabel label="From Account">
+          <select value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}>
+            <option value="">Select account</option>
+            {data.accounts.filter((account) => account.id).map((account) => <option key={account.id} value={account.id || ""}>{account.name}</option>)}
+          </select>
+        </FieldLabel>
+        {needsDestination ? (
+          <FieldLabel label={ruleType === "investment_transfer" ? "Investment Account" : "Loan Account"}>
+            <select value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}>
+              <option value="">Select account</option>
+              {destinationAccounts.map((account) => <option key={account.id} value={account.id || ""}>{account.name}</option>)}
+            </select>
+          </FieldLabel>
+        ) : null}
+        <div className="form-grid-2">
+          <FieldLabel label="Day">
+            <input value={dayOfMonth} inputMode="numeric" onChange={(event) => setDayOfMonth(event.target.value)} />
+          </FieldLabel>
+          <FieldLabel label="Active">
+            <select value={active ? "yes" : "no"} onChange={(event) => setActive(event.target.value === "yes")}>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </FieldLabel>
+        </div>
+        {error ? <p className="form-error">{error}</p> : null}
+        <button className="primary-action" type="submit">{rule ? "Save Rule" : "Add Rule"}</button>
+      </form>
+    </BottomSheet>
+  );
+}
+
 function TransactionModal({
   data,
   editTx,
@@ -1268,7 +1638,8 @@ function Metric({ icon, label, value, positive = false, masked = false }: { icon
 function TransactionCard({ tx, data, actions }: { tx: Transaction; data: AppData; actions?: ReactNode }) {
   const category = data.categories.find((item) => item.id === tx.categoryId);
   const sub = category?.subcategories.find((item) => item.id === tx.subcategoryId);
-  const isIncome = tx.type === "income";
+  const isPositive = tx.type === "income";
+  const label = tx.kind === "investment" ? "Investment" : tx.kind === "transfer" ? "Transfer" : isPositive ? "Income" : "Expense";
   return (
     <article className="transaction-card">
       <CategoryIcon category={category} />
@@ -1277,10 +1648,10 @@ function TransactionCard({ tx, data, actions }: { tx: Transaction; data: AppData
         <span>{sub?.name || category?.name || tx.categoryId} · {formatDate(tx.date)}</span>
       </div>
       <div className="transaction-amount">
-        <strong className={isIncome ? "positive-text" : "danger-text"}>{isIncome ? "+" : "-"}{money(tx.amount, tx.currency)}</strong>
-        <span className={isIncome ? "positive-text" : "danger-text"}>
-          {isIncome ? <ArrowUpRight size={11} /> : <ArrowDownLeft size={11} />}
-          {isIncome ? "Income" : "Expense"}
+        <strong className={isPositive ? "positive-text" : "danger-text"}>{isPositive ? "+" : "-"}{money(tx.amount, tx.currency)}</strong>
+        <span className={isPositive ? "positive-text" : "danger-text"}>
+          {isPositive ? <ArrowUpRight size={11} /> : <ArrowDownLeft size={11} />}
+          {label}
         </span>
       </div>
       {actions}
@@ -1487,7 +1858,14 @@ function accountTypeLabel(type: AccountType) {
   if (type === "bank") return "Bank";
   if (type === "card") return "Card";
   if (type === "investment") return "Investment";
+  if (type === "loan") return "Loan";
   return "Other";
+}
+
+function recurringTypeLabel(type: RecurringRuleType) {
+  if (type === "subscription") return "Subscription";
+  if (type === "investment_transfer") return "Investment";
+  return "Loan";
 }
 
 function headerTitle(tab: Tab) {
