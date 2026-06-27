@@ -890,101 +890,23 @@ async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[
   }));
 }
 
-export async function materializeRecurringTransactions(month: string) {
+export async function materializeRecurringTransactions(month: string, batchSize = 100) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Month must use YYYY-MM format.");
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 500) {
+    throw new Error("Batch size must be between 1 and 500.");
+  }
   const supabase = createSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("recurring_rules")
-    .select("telegram_user_id")
-    .eq("active", true);
+  const { data, error } = await supabase.rpc("materialize_recurring_transactions", {
+    target_month: month,
+    batch_size: batchSize
+  });
   if (error && isMissingSchemaError(error)) return { usersProcessed: 0, rulesMaterialized: 0 };
   if (error) throw error;
-
-  const userIds = [...new Set((data || []).map((row) => Number(row.telegram_user_id)))];
-  let rulesMaterialized = 0;
-  for (const telegramUserId of userIds) {
-    rulesMaterialized += await generateRecurringTransactions(telegramUserId, month);
-  }
-  return { usersProcessed: userIds.length, rulesMaterialized };
-}
-
-async function generateRecurringTransactions(telegramUserId: number, month: string) {
-  const rules = (await getRecurringRules(telegramUserId)).filter((rule) => rule.active);
-  let materialized = 0;
-  for (const rule of rules) {
-    if (await createRecurringTransactionsForRule(telegramUserId, rule, month)) materialized += 1;
-  }
-  return materialized;
-}
-
-async function createRecurringTransactionsForRule(telegramUserId: number, rule: RecurringRule, month: string) {
-  const supabase = createSupabaseAdmin();
-  const transferGroupId = randomUUID();
-  const run = {
-    telegram_user_id: telegramUserId,
-    recurring_rule_id: rule.id,
-    month,
-    transfer_group_id: transferGroupId
+  const result = Array.isArray(data) ? data[0] : data;
+  return {
+    usersProcessed: Number(result?.users_processed || 0),
+    rulesMaterialized: Number(result?.rules_materialized || 0)
   };
-  const { error: claimError } = await supabase.from("recurring_rule_runs").insert(run);
-  if (claimError?.code === "23505") return false;
-  if (claimError && isMissingSchemaError(claimError)) return false;
-  if (claimError) throw claimError;
-
-  const occurredOn = dueDateForMonth(month, rule.dayOfMonth);
-  const amount = Math.abs(rule.amountCents);
-  const base = {
-    telegram_user_id: telegramUserId,
-    recurring_rule_id: rule.id,
-    transfer_group_id: transferGroupId,
-    currency: rule.currency,
-    occurred_on: occurredOn
-  };
-  const rows = [];
-
-  if (rule.ruleType === "subscription") {
-    rows.push({
-      ...base,
-      kind: "expense",
-      category: rule.category,
-      account_id: rule.fromAccountId,
-      description: rule.name,
-      amount_cents: -amount
-    });
-  } else {
-    rows.push({
-      ...base,
-      kind: rule.ruleType === "loan_payment" ? "expense" : "transfer",
-      category: rule.category,
-      account_id: rule.fromAccountId,
-      description: rule.name,
-      amount_cents: -amount
-    });
-    if (rule.toAccountId) {
-      rows.push({
-        ...base,
-        kind: rule.ruleType === "investment_transfer" ? "investment" : "transfer",
-        category: rule.category,
-        account_id: rule.toAccountId,
-        description: rule.name,
-        amount_cents: amount
-      });
-    }
-  }
-
-  const { error: txError } = await supabase.from("transactions").insert(rows);
-  if (txError) {
-    await supabase
-      .from("recurring_rule_runs")
-      .delete()
-      .eq("telegram_user_id", telegramUserId)
-      .eq("recurring_rule_id", rule.id)
-      .eq("month", month)
-      .eq("transfer_group_id", transferGroupId);
-    if (isMissingSchemaError(txError)) return false;
-    throw txError;
-  }
-  return true;
 }
 
 function buildLoanProgress(accounts: StoredAccount[], transactions: Awaited<ReturnType<typeof getSummaryTransactions>>): LoanProgress[] {
@@ -1229,11 +1151,6 @@ function titleCase(value: string) {
 function nextMonthStart(month: string) {
   const [year, monthIndex] = month.split("-").map(Number);
   return new Date(Date.UTC(year, monthIndex, 1)).toISOString().slice(0, 10);
-}
-
-function dueDateForMonth(month: string, dayOfMonth: number) {
-  const day = Math.min(Math.max(1, dayOfMonth), daysInMonth(month));
-  return `${month}-${String(day).padStart(2, "0")}`;
 }
 
 function daysInMonth(month: string) {
