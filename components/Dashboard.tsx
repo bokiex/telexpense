@@ -273,6 +273,7 @@ export default function Dashboard() {
   const [modal, setModal] = useState<ModalState>({ type: "none" });
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -285,14 +286,21 @@ export default function Dashboard() {
     let ignore = false;
     async function load() {
       setError("");
+      setLoading(true);
       const response = await apiRequest(`/api/summary?month=${encodeURIComponent(month)}`, "GET");
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        if (!ignore) setError(body?.error || "Could not load dashboard.");
+        if (!ignore) {
+          setError(body?.error || "Could not load dashboard.");
+          setLoading(false);
+        }
         return;
       }
       const data = (await response.json()) as Summary;
-      if (!ignore) setSummary(data);
+      if (!ignore) {
+        setSummary(data);
+        setLoading(false);
+      }
     }
     load();
     return () => {
@@ -522,10 +530,11 @@ export default function Dashboard() {
           <input className="mini-month" type="month" value={month} aria-label="Month" onChange={(event) => setMonth(event.target.value || month)} />
         </header>
 
-        {error ? <div className="mini-error">{friendlyError(error)}</div> : null}
+        {error ? <div className="mini-error">{friendlyError(error)} <button type="button" onClick={reload}>Retry</button></div> : null}
 
         <div className="mini-content">
-          {activeTab === "home" ? (
+          {loading ? <DashboardSkeleton /> : null}
+          {!loading && activeTab === "home" ? (
             <HomeView
               data={data}
               summary={summary}
@@ -535,7 +544,7 @@ export default function Dashboard() {
               onAddTransaction={() => setModal({ type: "add-transaction" })}
             />
           ) : null}
-          {activeTab === "transactions" ? (
+          {!loading && activeTab === "transactions" ? (
             <TransactionListView
               data={data}
               month={month}
@@ -544,7 +553,7 @@ export default function Dashboard() {
               onAdd={() => setModal({ type: "add-transaction" })}
             />
           ) : null}
-          {activeTab === "accounts" ? (
+          {!loading && activeTab === "accounts" ? (
             <AccountsView
               accounts={data.accounts}
               snapshots={summary?.portfolioSnapshots || []}
@@ -557,8 +566,8 @@ export default function Dashboard() {
               onDeleteRecurringRule={deleteRecurringRule}
             />
           ) : null}
-          {activeTab === "budget" ? <BudgetView data={data} summary={summary} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
-          {activeTab === "categories" ? (
+          {!loading && activeTab === "budget" ? <BudgetView data={data} summary={summary} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
+          {!loading && activeTab === "categories" ? (
             <CategoriesView
               data={data}
               onAddCategory={() => setModal({ type: "add-category" })}
@@ -643,6 +652,18 @@ export default function Dashboard() {
   );
 }
 
+function DashboardSkeleton() {
+  return (
+    <div className="screen-stack" aria-label="Loading dashboard" aria-busy="true">
+      <div className="skeleton skeleton-title" />
+      <div className="skeleton skeleton-card" />
+      <div className="skeleton skeleton-row" />
+      <div className="skeleton skeleton-row" />
+      <div className="skeleton skeleton-row" />
+    </div>
+  );
+}
+
 function HomeView({
   data,
   summary,
@@ -660,16 +681,16 @@ function HomeView({
 }) {
   const totalIncome = data.transactions.filter((tx) => tx.kind === "income").reduce((sum, tx) => sum + tx.amount, 0);
   const totalExpense = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
-  const totalBalance = totalIncome - totalExpense;
+  const netWorth = data.accounts.reduce((sum, account) => sum + account.balanceCents, 0);
   const recent = data.transactions.slice(0, 5);
-  const currency = data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
+  const currency = data.accounts[0]?.currency || data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
 
   return (
     <div className="screen-stack">
       <section className="balance-block">
-        <p className="eyebrow">Total Balance</p>
+        <p className="eyebrow">Net Worth</p>
         <div className="balance-row">
-          <h1>{balanceVisible ? money(totalBalance, currency) : "••••••"}</h1>
+          <h1>{balanceVisible ? money(netWorth, currency) : "••••••"}</h1>
           <button className="ghost-button" type="button" onClick={onToggleBalance} aria-label="Toggle balance visibility">
             {balanceVisible ? <Eye size={18} /> : <EyeOff size={18} />}
           </button>
@@ -847,7 +868,7 @@ function AccountsView({
   return (
     <div className="screen-stack">
       <section className="mini-card">
-        <p className="eyebrow">Total Across Accounts</p>
+        <p className="eyebrow">Net Worth Across Accounts</p>
         <div className="account-total-list">
           {Object.entries(totalByCurrency).length ? Object.entries(totalByCurrency).map(([currency, total]) => (
             <strong key={currency}>{money(total, currency)}</strong>
@@ -1270,7 +1291,7 @@ function AccountModal({
   const [name, setName] = useState(account?.name || "");
   const [institution, setInstitution] = useState(account?.institution || "");
   const [accountType, setAccountType] = useState<AccountType>(account?.accountType || "bank");
-  const [openingBalance, setOpeningBalance] = useState(account ? String(account.openingBalanceCents / 100) : "0");
+  const [openingBalance, setOpeningBalance] = useState(account ? String((account.accountType === "loan" || account.accountType === "card" ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents) / 100) : "0");
   const [currency, setCurrency] = useState(account?.currency || DEFAULT_CURRENCY);
   const [color, setColor] = useState(account?.color || "#60a5fa");
   const [icon, setIcon] = useState(account?.icon || "Wallet");
@@ -1318,7 +1339,7 @@ function AccountModal({
           </div>
         </FieldLabel>
         <div className="form-grid-2">
-          <FieldLabel label="Opening Balance">
+          <FieldLabel label={accountType === "loan" || accountType === "card" ? "Opening Debt" : "Opening Balance"}>
             <input value={openingBalance} inputMode="decimal" onChange={(event) => setOpeningBalance(event.target.value)} />
           </FieldLabel>
           <FieldLabel label="Currency">

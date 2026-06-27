@@ -7,6 +7,7 @@ import {
   currentMonth,
   deleteTransaction,
   getBudgetStatus,
+  resolveTransactionIdentity,
   setBudget,
   updateTransaction,
   upsertTelegramUser
@@ -56,7 +57,9 @@ export async function POST(request: NextRequest) {
     }
 
     const editId = editTransactionIdFromReply(message);
-    const parsed = parseTransactionMessage(text);
+    let parsed = parseTransactionMessage(text);
+    const identity = await resolveTransactionIdentity(user.id, parsed.category, parsed.account);
+    parsed = { ...parsed, category: identity.category };
     const transactionId = editId || (await addTransaction(user.id, parsed));
     if (editId) {
       await updateTransaction(user.id, editId, parsed);

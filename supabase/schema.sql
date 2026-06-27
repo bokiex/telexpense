@@ -27,6 +27,7 @@ create table if not exists public.transactions (
   telegram_user_id bigint not null references public.users(telegram_user_id) on delete cascade,
   kind text not null check (kind in ('expense', 'income', 'investment', 'transfer')),
   category text not null,
+  category_id bigint,
   account_id bigint references public.accounts(id) on delete set null,
   transfer_group_id uuid,
   recurring_rule_id bigint,
@@ -118,6 +119,9 @@ alter table public.transactions
 alter table public.transactions
   add column if not exists recurring_rule_id bigint references public.recurring_rules(id) on delete set null;
 
+alter table public.transactions
+  add column if not exists category_id bigint references public.categories(id) on delete set null;
+
 do $$
 begin
   alter table public.accounts drop constraint if exists accounts_account_type_check;
@@ -130,7 +134,7 @@ alter table public.categories
   add column if not exists active boolean not null default true;
 
 create index if not exists transactions_user_month_idx
-  on public.transactions (telegram_user_id, occurred_on desc);
+  on public.transactions (telegram_user_id, occurred_on desc, id desc);
 
 create index if not exists transactions_user_account_idx
   on public.transactions (telegram_user_id, account_id);
@@ -171,6 +175,33 @@ alter table public.subcategories enable row level security;
 alter table public.portfolio_snapshots enable row level security;
 alter table public.recurring_rules enable row level security;
 alter table public.recurring_rule_runs enable row level security;
+
+create or replace function public.normalize_identity(value text)
+returns text language sql immutable strict parallel safe
+as $$ select lower(regexp_replace(btrim(value), '\s+', ' ', 'g')) $$;
+
+alter table public.accounts drop constraint if exists accounts_liability_opening_balance_check;
+alter table public.accounts add constraint accounts_liability_opening_balance_check
+  check (account_type not in ('loan', 'card') or opening_balance_cents <= 0);
+
+create unique index if not exists categories_user_canonical_name_uidx
+  on public.categories (telegram_user_id, public.normalize_identity(source_name));
+create unique index if not exists categories_user_canonical_key_uidx
+  on public.categories (telegram_user_id, public.normalize_identity(source_key));
+create unique index if not exists subcategories_user_canonical_name_uidx
+  on public.subcategories (telegram_user_id, category_id, public.normalize_identity(name));
+create index if not exists transactions_user_category_date_idx
+  on public.transactions (telegram_user_id, category_id, occurred_on desc, id desc);
+
+create or replace function public.account_transaction_balances(target_user_id bigint)
+returns table(account_id bigint, balance_cents bigint)
+language sql stable security invoker set search_path = public
+as $$
+  select t.account_id, coalesce(sum(t.amount_cents), 0)::bigint
+  from public.transactions t
+  where t.telegram_user_id = target_user_id and t.account_id is not null
+  group by t.account_id
+$$;
 
 -- The app uses a server-side Supabase secret/service-role key after validating Telegram initData.
 -- No anon policies are required for the Mini App API flow.
