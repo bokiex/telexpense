@@ -287,19 +287,19 @@ export default function Dashboard() {
     async function load() {
       setError("");
       setLoading(true);
-      const response = await apiRequest(`/api/summary?month=${encodeURIComponent(month)}`, "GET");
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        if (!ignore) {
-          setError(body?.error || "Could not load dashboard.");
-          setLoading(false);
+      try {
+        const response = await apiRequest(`/api/summary?month=${encodeURIComponent(month)}`, "GET");
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          if (!ignore) setError(body?.error || "Could not load dashboard.");
+          return;
         }
-        return;
-      }
-      const data = (await response.json()) as Summary;
-      if (!ignore) {
-        setSummary(data);
-        setLoading(false);
+        const data = (await response.json()) as Summary;
+        if (!ignore) setSummary(data);
+      } catch {
+        if (!ignore) setError("Could not load dashboard.");
+      } finally {
+        if (!ignore) setLoading(false);
       }
     }
     load();

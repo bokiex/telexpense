@@ -124,6 +124,25 @@ alter table public.transactions
 
 do $$
 begin
+  if not exists (
+    select 1
+    from pg_constraint c
+    join pg_attribute a
+      on a.attrelid = c.conrelid
+     and a.attnum = any(c.conkey)
+    where c.conrelid = 'public.transactions'::regclass
+      and c.confrelid = 'public.categories'::regclass
+      and c.contype = 'f'
+      and a.attname = 'category_id'
+  ) then
+    alter table public.transactions
+      add constraint transactions_category_id_fkey
+      foreign key (category_id) references public.categories(id) on delete set null;
+  end if;
+end $$;
+
+do $$
+begin
   alter table public.accounts drop constraint if exists accounts_account_type_check;
   alter table public.accounts
     add constraint accounts_account_type_check
@@ -178,6 +197,7 @@ alter table public.recurring_rule_runs enable row level security;
 
 create or replace function public.normalize_identity(value text)
 returns text language sql immutable strict parallel safe
+set search_path = public
 as $$ select lower(regexp_replace(btrim(value), '\s+', ' ', 'g')) $$;
 
 alter table public.accounts drop constraint if exists accounts_liability_opening_balance_check;
