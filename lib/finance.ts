@@ -13,6 +13,13 @@ export function netWorth(balances: number[]) {
   return balances.reduce((total, balance) => total + balance, 0);
 }
 
+export function netWorthByCurrency(accounts: { balanceCents: number; currency: string }[]) {
+  return accounts.reduce<Record<string, number>>((totals, account) => {
+    totals[account.currency] = (totals[account.currency] || 0) + account.balanceCents;
+    return totals;
+  }, {});
+}
+
 export function loanMetrics(openingBalanceCents: number, balanceCents: number) {
   const openingDebt = debtAmount(openingBalanceCents);
   const remainingDebt = debtAmount(balanceCents);

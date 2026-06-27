@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { debtAmount, loanMetrics, netWorth, normalizeOpeningBalance } from "../lib/finance";
+import { debtAmount, loanMetrics, netWorth, netWorthByCurrency, normalizeOpeningBalance } from "../lib/finance";
 import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { parseTransactionMessage } from "../lib/parser";
 
@@ -37,5 +37,16 @@ test("liability signs, net worth, and repayment are consistent", () => {
     remainingDebt: 950_000,
     repaidCents: 50_000,
     payoffProgress: 5
+  });
+});
+
+test("net worth keeps currencies separate", () => {
+  assert.deepEqual(netWorthByCurrency([
+    { balanceCents: 100_000, currency: "SGD" },
+    { balanceCents: -10_000, currency: "SGD" },
+    { balanceCents: 50_000, currency: "USD" }
+  ]), {
+    SGD: 90_000,
+    USD: 50_000
   });
 });

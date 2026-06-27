@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { netWorthByCurrency } from "@/lib/finance";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -681,16 +682,20 @@ function HomeView({
 }) {
   const totalIncome = data.transactions.filter((tx) => tx.kind === "income").reduce((sum, tx) => sum + tx.amount, 0);
   const totalExpense = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
-  const netWorth = data.accounts.reduce((sum, account) => sum + account.balanceCents, 0);
+  const netWorthTotals = Object.entries(netWorthByCurrency(data.accounts));
   const recent = data.transactions.slice(0, 5);
-  const currency = data.accounts[0]?.currency || data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
+  const currency = data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
 
   return (
     <div className="screen-stack">
       <section className="balance-block">
         <p className="eyebrow">Net Worth</p>
         <div className="balance-row">
-          <h1>{balanceVisible ? money(netWorth, currency) : "••••••"}</h1>
+          <div className="account-total-list">
+            {netWorthTotals.length ? netWorthTotals.map(([accountCurrency, total]) => (
+              <h1 key={accountCurrency}>{balanceVisible ? money(total, accountCurrency) : "••••••"}</h1>
+            )) : <h1>{balanceVisible ? money(0, DEFAULT_CURRENCY) : "••••••"}</h1>}
+          </div>
           <button className="ghost-button" type="button" onClick={onToggleBalance} aria-label="Toggle balance visibility">
             {balanceVisible ? <Eye size={18} /> : <EyeOff size={18} />}
           </button>
@@ -860,10 +865,7 @@ function AccountsView({
   onEditRecurringRule: (rule: RecurringRule) => void;
   onDeleteRecurringRule: (rule: RecurringRule) => void;
 }) {
-  const totalByCurrency = accounts.reduce<Record<string, number>>((totals, account) => {
-    totals[account.currency] = (totals[account.currency] || 0) + account.balanceCents;
-    return totals;
-  }, {});
+  const totalByCurrency = netWorthByCurrency(accounts);
 
   return (
     <div className="screen-stack">
