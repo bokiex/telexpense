@@ -106,7 +106,8 @@ check.
   `.eq("telegram_user_id", userId)` can expose or mutate another user's
   financial data even though RLS is enabled.
 - Do not log bot tokens, Supabase keys, raw `initData`, or financial payloads.
-  Keep `.env*`, SQLite files, `.next/`, and `node_modules/` untracked.
+  Keep secret-bearing `.env*` files, SQLite files, `.next/`, and `node_modules/`
+  untracked; keep the sanitized `.env.example` template tracked.
 - `APP_BASE_URL` controls a Telegram `web_app` link. Production values must be
   the intended HTTPS origin; preview URLs should not silently replace the
   production bot target.
