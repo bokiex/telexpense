@@ -74,7 +74,8 @@ check.
 ## Data and API conventions
 
 - Monetary values are integer cents throughout the TypeScript API and
-  database. Expenses and investments are negative; income is positive.
+  database. Expenses and ordinary investment transactions are negative;
+  income is positive. Investment-transfer destination rows may be positive.
   Transfers write two rows sharing `transfer_group_id`.
 - User isolation is by `telegram_user_id`. Every dashboard API must validate
   the `X-Telegram-Init-Data` header with `validateTelegramInitData`, then scope
