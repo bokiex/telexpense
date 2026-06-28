@@ -809,13 +809,23 @@ async function getPortfolioSnapshots(
   if (error && isMissingSchemaError(error)) return [];
   if (error) throw error;
 
-  const currentRows = (data || []).filter((row) => row.month === month);
-  const accountIds = currentRows.map((row) => Number(row.account_id));
-  const contributions = await getInvestmentContributionTotals(telegramUserId, accountIds, month);
-
-  return currentRows.map((row) => {
+  const latestRows = Array.from(
+    (data || []).reduce((rows, row) => {
+      const accountId = Number(row.account_id);
+      if (!rows.has(accountId)) rows.set(accountId, row);
+      return rows;
+    }, new Map<number, NonNullable<typeof data>[number]>()).values()
+  );
+  const contributionEntries = await Promise.all(latestRows.map(async (row) => {
     const accountId = Number(row.account_id);
-    const previous = (data || []).find((candidate) => Number(candidate.account_id) === accountId && candidate.month < month);
+    const totals = await getInvestmentContributionTotals(telegramUserId, [accountId], row.month);
+    return [accountId, totals.get(accountId) || { totalCents: 0, monthCents: 0 }] as const;
+  }));
+  const contributions = new Map(contributionEntries);
+
+  return latestRows.map((row) => {
+    const accountId = Number(row.account_id);
+    const previous = (data || []).find((candidate) => Number(candidate.account_id) === accountId && candidate.month < row.month);
     const account = storedAccounts.find((item) => item.id === accountId);
     const openingContributionCents = Math.max(0, account?.openingBalanceCents || 0);
     const contribution = contributions.get(accountId) || { totalCents: 0, monthCents: 0 };
@@ -825,7 +835,7 @@ async function getPortfolioSnapshots(
       : openingContributionCents + contribution.totalCents - contribution.monthCents;
     return {
       accountId,
-      month,
+      month: row.month,
       portfolioValueCents: Number(row.portfolio_value_cents),
       contributionCents: totalContributionCents,
       monthlyContributionCents: contribution.monthCents,

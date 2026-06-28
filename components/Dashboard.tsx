@@ -682,7 +682,7 @@ function HomeView({
 }) {
   const totalIncome = data.transactions.filter((tx) => tx.kind === "income").reduce((sum, tx) => sum + tx.amount, 0);
   const totalExpense = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
-  const netWorthTotals = Object.entries(netWorthByCurrency(data.accounts));
+  const netWorthTotals = Object.entries(netWorthByCurrency(data.accounts, summary?.portfolioSnapshots));
   const recent = data.transactions.slice(0, 5);
   const currency = data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
 
@@ -865,7 +865,7 @@ function AccountsView({
   onEditRecurringRule: (rule: RecurringRule) => void;
   onDeleteRecurringRule: (rule: RecurringRule) => void;
 }) {
-  const totalByCurrency = netWorthByCurrency(accounts);
+  const totalByCurrency = netWorthByCurrency(accounts, snapshots);
 
   return (
     <div className="screen-stack">

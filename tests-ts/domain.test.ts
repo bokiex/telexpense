@@ -50,3 +50,17 @@ test("net worth keeps currencies separate", () => {
     USD: 50_000
   });
 });
+
+test("net worth substitutes investment valuations without converting currencies", () => {
+  assert.deepEqual(netWorthByCurrency([
+    { id: 1, accountType: "bank", balanceCents: 100_000, currency: "SGD" },
+    { id: 2, accountType: "investment", balanceCents: 50_000, currency: "SGD" },
+    { id: 3, accountType: "investment", balanceCents: 20_000, currency: "USD" }
+  ], [
+    { accountId: 2, portfolioValueCents: 65_000, currency: "SGD" },
+    { accountId: 3, portfolioValueCents: 25_000, currency: "USD" }
+  ]), {
+    SGD: 165_000,
+    USD: 25_000
+  });
+});

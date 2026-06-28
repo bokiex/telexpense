@@ -13,9 +13,28 @@ export function netWorth(balances: number[]) {
   return balances.reduce((total, balance) => total + balance, 0);
 }
 
-export function netWorthByCurrency(accounts: { balanceCents: number; currency: string }[]) {
+type NetWorthAccount = {
+  id?: number | null;
+  accountType?: string;
+  balanceCents: number;
+  currency: string;
+};
+
+type PortfolioValuation = {
+  accountId: number;
+  portfolioValueCents: number;
+  currency: string;
+};
+
+export function netWorthByCurrency(accounts: NetWorthAccount[], valuations: PortfolioValuation[] = []) {
+  const valuationByAccount = new Map(valuations.map((valuation) => [valuation.accountId, valuation]));
   return accounts.reduce<Record<string, number>>((totals, account) => {
-    totals[account.currency] = (totals[account.currency] || 0) + account.balanceCents;
+    const valuation = account.accountType === "investment" && account.id
+      ? valuationByAccount.get(account.id)
+      : undefined;
+    const currency = valuation?.currency || account.currency;
+    const balance = valuation?.portfolioValueCents ?? account.balanceCents;
+    totals[currency] = (totals[currency] || 0) + balance;
     return totals;
   }, {});
 }
