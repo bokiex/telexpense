@@ -13,16 +13,19 @@ export async function GET(request: NextRequest) {
     const limit = Number.isFinite(requestedLimit)
       ? Math.min(100, Math.max(1, Math.trunc(requestedLimit)))
       : 50;
+    const month = request.nextUrl.searchParams.get("month") || "";
     const beforeDate = request.nextUrl.searchParams.get("beforeDate");
     const beforeId = Number(request.nextUrl.searchParams.get("beforeId"));
     if (
-      Boolean(beforeDate) !== request.nextUrl.searchParams.has("beforeId")
+      !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)
+      || Boolean(beforeDate) !== request.nextUrl.searchParams.has("beforeId")
       || (beforeDate && !/^\d{4}-\d{2}-\d{2}$/.test(beforeDate))
       || (request.nextUrl.searchParams.has("beforeId") && (!Number.isSafeInteger(beforeId) || beforeId <= 0))
     ) {
-      return NextResponse.json({ error: "Invalid history cursor." }, { status: 400 });
+      return NextResponse.json({ error: "Invalid history query." }, { status: 400 });
     }
     const result = await listTransactions(user.id, {
+      month,
       limit,
       beforeDate: beforeDate || null,
       beforeId: beforeDate ? beforeId : null

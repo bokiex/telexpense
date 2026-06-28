@@ -5,6 +5,46 @@ select id,
        ) keeper
 from public.accounts;
 
+do $$
+begin
+  if exists (
+    select 1
+    from account_merge_by_key m
+    join public.accounts duplicate on duplicate.id = m.id
+    join public.accounts keeper on keeper.id = m.keeper
+    where m.id <> m.keeper
+      and (
+        duplicate.name is distinct from keeper.name
+        or duplicate.institution is distinct from keeper.institution
+        or duplicate.account_type is distinct from keeper.account_type
+        or duplicate.opening_balance_cents is distinct from keeper.opening_balance_cents
+        or duplicate.currency is distinct from keeper.currency
+        or duplicate.color is distinct from keeper.color
+        or duplicate.icon is distinct from keeper.icon
+        or duplicate.active is distinct from keeper.active
+      )
+  ) then
+    raise exception 'Cannot canonicalize accounts with conflicting financial state or metadata';
+  end if;
+
+  if exists (
+    select 1
+    from account_merge_by_key m
+    join public.portfolio_snapshots duplicate on duplicate.account_id = m.id
+    join public.portfolio_snapshots keeper
+      on keeper.telegram_user_id = duplicate.telegram_user_id
+      and keeper.account_id = m.keeper
+      and keeper.month = duplicate.month
+    where m.id <> m.keeper
+      and (
+        duplicate.portfolio_value_cents is distinct from keeper.portfolio_value_cents
+        or duplicate.currency is distinct from keeper.currency
+      )
+  ) then
+    raise exception 'Cannot canonicalize accounts with conflicting portfolio snapshots';
+  end if;
+end $$;
+
 delete from public.portfolio_snapshots s
 using account_merge_by_key m
 where s.account_id = m.id

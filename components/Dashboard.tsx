@@ -322,10 +322,13 @@ export default function Dashboard() {
     if (activeTab !== "transactions") return;
     let ignore = false;
     async function loadHistory() {
+      setHistory(null);
+      setHistoryCursor(null);
       setHistoryLoading(true);
       setHistoryError("");
       try {
-        const response = await apiRequest("/api/transactions/history?limit=50", "GET");
+        const query = new URLSearchParams({ month, limit: "50" });
+        const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
         if (!response.ok) throw new Error("Could not load transaction history.");
         const page = (await response.json()) as HistoryPage;
         if (!ignore) {
@@ -344,7 +347,11 @@ export default function Dashboard() {
     };
   }, [activeTab, month, refreshKey]);
 
-  const data = useMemo(() => buildAppData(summary, history || undefined), [history, summary]);
+  const data = useMemo(() => buildAppData(summary), [summary]);
+  const historyData = useMemo(
+    () => buildAppData(summary, history || summary?.recent),
+    [history, summary]
+  );
   const reload = () => setRefreshKey((value) => value + 1);
 
   async function loadMoreHistory() {
@@ -353,6 +360,7 @@ export default function Dashboard() {
     setHistoryError("");
     try {
       const query = new URLSearchParams({
+        month,
         limit: "50",
         beforeDate: historyCursor.beforeDate,
         beforeId: String(historyCursor.beforeId)
@@ -604,7 +612,7 @@ export default function Dashboard() {
           ) : null}
           {!loading && activeTab === "transactions" ? (
             <TransactionListView
-              data={data}
+              data={historyData}
               month={month}
               onEdit={(tx) => setModal({ type: "edit-transaction", tx })}
               onDelete={deleteTransaction}

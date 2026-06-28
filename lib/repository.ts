@@ -352,13 +352,17 @@ export async function deleteTransaction(telegramUserId: number, transactionId: n
 
 export async function listTransactions(
   telegramUserId: number,
-  cursor: { limit: number; beforeDate: string | null; beforeId: number | null }
+  cursor: { month: string; limit: number; beforeDate: string | null; beforeId: number | null }
 ) {
   const supabase = createSupabaseAdmin();
+  const monthStart = `${cursor.month}-01`;
+  const monthEnd = nextMonthStart(cursor.month);
   let query = supabase
     .from("transactions")
     .select("id, kind, category, account_id, transfer_group_id, recurring_rule_id, description, amount_cents, currency, occurred_on")
     .eq("telegram_user_id", telegramUserId)
+    .gte("occurred_on", monthStart)
+    .lt("occurred_on", monthEnd)
     .order("occurred_on", { ascending: false })
     .order("id", { ascending: false })
     .limit(cursor.limit + 1);
