@@ -64,6 +64,8 @@ Variables expected by the active application:
   current dashboard does not query Supabase directly.
 - `SUPABASE_SECRET_KEY`: privileged server key. Older projects may instead use
   `SUPABASE_SERVICE_ROLE_KEY`.
+- `CRON_SECRET`: bearer secret Vercel uses to authorize the recurring
+  materialization job.
 
 Never expose either Supabase privileged key in client components or responses.
 After applying `supabase/schema.sql` and deploying, point BotFather's Mini App
@@ -124,6 +126,7 @@ check.
 For changes to the active application:
 
 ```bash
+npm test
 npm run typecheck
 npm run build
 ```
