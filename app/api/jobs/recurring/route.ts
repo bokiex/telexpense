@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const result = await materializeRecurringTransactions(currentMonth());
+    const result = await materializeRecurringTransactions(currentMonth(), 500, 5_000);
     return NextResponse.json(result);
   } catch {
     return NextResponse.json({ error: "Recurring materialization failed" }, { status: 500 });

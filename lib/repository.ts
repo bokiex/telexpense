@@ -816,12 +816,10 @@ async function getPortfolioSnapshots(
       return rows;
     }, new Map<number, NonNullable<typeof data>[number]>()).values()
   );
-  const contributionEntries = await Promise.all(latestRows.map(async (row) => {
-    const accountId = Number(row.account_id);
-    const totals = await getInvestmentContributionTotals(telegramUserId, [accountId], row.month);
-    return [accountId, totals.get(accountId) || { totalCents: 0, monthCents: 0 }] as const;
-  }));
-  const contributions = new Map(contributionEntries);
+  const contributionCutoffs = new Map(
+    latestRows.map((row) => [Number(row.account_id), row.month] as const)
+  );
+  const contributions = await getInvestmentContributionTotals(telegramUserId, contributionCutoffs);
 
   return latestRows.map((row) => {
     const accountId = Number(row.account_id);
@@ -845,31 +843,32 @@ async function getPortfolioSnapshots(
   });
 }
 
-async function getInvestmentContributionTotals(telegramUserId: number, accountIds: number[], month: string) {
+async function getInvestmentContributionTotals(telegramUserId: number, cutoffs: Map<number, string>) {
   const totals = new Map<number, { totalCents: number; monthCents: number }>();
-  if (!accountIds.length) return totals;
+  if (!cutoffs.size) return totals;
 
   const supabase = createSupabaseAdmin();
-  const monthStart = `${month}-01`;
-  const monthEnd = nextMonthStart(month);
+  const latestMonth = Array.from(cutoffs.values()).sort().at(-1)!;
   const { data, error } = await supabase
     .from("transactions")
     .select("account_id, amount_cents, occurred_on")
     .eq("telegram_user_id", telegramUserId)
-    .in("account_id", accountIds)
+    .in("account_id", Array.from(cutoffs.keys()))
     .in("kind", ["investment", "transfer"])
     .gt("amount_cents", 0)
-    .lt("occurred_on", monthEnd);
+    .lt("occurred_on", nextMonthStart(latestMonth));
 
   if (error && isMissingSchemaError(error)) return totals;
   if (error) throw error;
 
   for (const row of data || []) {
     const accountId = Number(row.account_id);
+    const cutoff = cutoffs.get(accountId);
+    if (!cutoff || String(row.occurred_on) >= nextMonthStart(cutoff)) continue;
     const current = totals.get(accountId) || { totalCents: 0, monthCents: 0 };
     const amount = Number(row.amount_cents);
     current.totalCents += amount;
-    if (String(row.occurred_on) >= monthStart) current.monthCents += amount;
+    if (String(row.occurred_on) >= `${cutoff}-01`) current.monthCents += amount;
     totals.set(accountId, current);
   }
   return totals;
@@ -900,23 +899,34 @@ async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[
   }));
 }
 
-export async function materializeRecurringTransactions(month: string, batchSize = 100) {
+export async function materializeRecurringTransactions(month: string, batchSize = 100, maxRules = batchSize) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Month must use YYYY-MM format.");
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 500) {
     throw new Error("Batch size must be between 1 and 500.");
   }
+  if (!Number.isInteger(maxRules) || maxRules < batchSize || maxRules > 10_000) {
+    throw new Error("Rule limit must be between the batch size and 10000.");
+  }
   const supabase = createSupabaseAdmin();
-  const { data, error } = await supabase.rpc("materialize_recurring_transactions", {
-    target_month: month,
-    batch_size: batchSize
-  });
-  if (error && isMissingSchemaError(error)) return { usersProcessed: 0, rulesMaterialized: 0 };
-  if (error) throw error;
-  const result = Array.isArray(data) ? data[0] : data;
-  return {
-    usersProcessed: Number(result?.users_processed || 0),
-    rulesMaterialized: Number(result?.rules_materialized || 0)
-  };
+  let usersProcessed = 0;
+  let rulesMaterialized = 0;
+  let batchesProcessed = 0;
+  while (rulesMaterialized < maxRules) {
+    const requested = Math.min(batchSize, maxRules - rulesMaterialized);
+    const { data, error } = await supabase.rpc("materialize_recurring_transactions", {
+      target_month: month,
+      batch_size: requested
+    });
+    if (error && isMissingSchemaError(error)) break;
+    if (error) throw error;
+    const result = Array.isArray(data) ? data[0] : data;
+    const batchRules = Number(result?.rules_materialized || 0);
+    usersProcessed += Number(result?.users_processed || 0);
+    rulesMaterialized += batchRules;
+    batchesProcessed += 1;
+    if (batchRules < requested) break;
+  }
+  return { usersProcessed, rulesMaterialized, batchesProcessed };
 }
 
 function buildLoanProgress(accounts: StoredAccount[], transactions: Awaited<ReturnType<typeof getSummaryTransactions>>): LoanProgress[] {
