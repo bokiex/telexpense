@@ -661,7 +661,7 @@ export async function addSubcategory(
       {
         telegram_user_id: telegramUserId,
         category_id: categoryId,
-        name: values.name
+        name: normalizeIdentity(values.name)
       },
       { onConflict: "telegram_user_id,category_id,name" }
     )

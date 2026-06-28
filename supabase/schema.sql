@@ -499,6 +499,16 @@ create unique index if not exists subcategories_user_canonical_name_uidx
 create index if not exists transactions_user_category_date_idx
   on public.transactions (telegram_user_id, category_id, occurred_on desc, id desc);
 
+alter table public.categories
+  add constraint categories_telegram_user_id_source_key_key
+  unique (telegram_user_id, source_key);
+alter table public.subcategories
+  add constraint subcategories_telegram_user_id_category_id_name_key
+  unique (telegram_user_id, category_id, name);
+alter table public.budgets
+  add constraint budgets_telegram_user_id_category_month_key
+  unique (telegram_user_id, category, month);
+
 create or replace function public.materialize_recurring_transactions(
   target_month text,
   batch_size integer default 100
