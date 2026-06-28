@@ -34,11 +34,46 @@ alter table public.categories drop constraint if exists categories_telegram_user
 alter table public.subcategories drop constraint if exists subcategories_telegram_user_id_category_id_name_key;
 alter table public.budgets drop constraint if exists budgets_telegram_user_id_category_month_key;
 
+do $$
+begin
+  if exists (
+    select 1
+    from public.categories a
+    join public.categories b
+      on b.telegram_user_id = a.telegram_user_id
+     and b.id > a.id
+     and (
+       public.normalize_identity(b.source_key) = public.normalize_identity(a.source_key)
+       or public.normalize_identity(b.source_name) = public.normalize_identity(a.source_name)
+     )
+    where public.normalize_identity(b.source_key) <> public.normalize_identity(a.source_key)
+       or public.normalize_identity(b.source_name) <> public.normalize_identity(a.source_name)
+       or b.name is distinct from a.name
+       or b.budget_group is distinct from a.budget_group
+       or b.color is distinct from a.color
+       or b.icon is distinct from a.icon
+       or b.active is distinct from a.active
+  ) then
+    raise exception 'Cannot merge canonical duplicate categories with conflicting identity or metadata';
+  end if;
+end $$;
+
 create temporary table category_merge_by_key on commit drop as
 select id, min(id) over (
   partition by telegram_user_id, public.normalize_identity(source_key)
 ) keeper
 from public.categories;
+
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'transactions' and column_name = 'category_id'
+  ) then
+    execute 'update public.transactions t set category_id = m.keeper
+             from category_merge_by_key m where t.category_id = m.id and m.id <> m.keeper';
+  end if;
+end $$;
 
 update public.subcategories s
 set category_id = m.keeper
@@ -54,6 +89,17 @@ select id, min(id) over (
   partition by telegram_user_id, public.normalize_identity(source_name)
 ) keeper
 from public.categories;
+
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'transactions' and column_name = 'category_id'
+  ) then
+    execute 'update public.transactions t set category_id = m.keeper
+             from category_merge_by_name m where t.category_id = m.id and m.id <> m.keeper';
+  end if;
+end $$;
 
 update public.subcategories s
 set category_id = m.keeper

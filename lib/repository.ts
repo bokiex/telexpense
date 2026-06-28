@@ -357,21 +357,49 @@ export async function listTransactions(
   const supabase = createSupabaseAdmin();
   const monthStart = `${cursor.month}-01`;
   const monthEnd = nextMonthStart(cursor.month);
-  let query = supabase
-    .from("transactions")
-    .select("id, kind, category, account_id, transfer_group_id, recurring_rule_id, description, amount_cents, currency, occurred_on")
-    .eq("telegram_user_id", telegramUserId)
-    .gte("occurred_on", monthStart)
-    .lt("occurred_on", monthEnd)
-    .order("occurred_on", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(cursor.limit + 1);
-  if (cursor.beforeDate && cursor.beforeId) {
-    query = query.or(`occurred_on.lt.${cursor.beforeDate},and(occurred_on.eq.${cursor.beforeDate},id.lt.${cursor.beforeId})`);
+
+  async function fetchPage(columns: string) {
+    let query = supabase
+      .from("transactions")
+      .select(columns)
+      .eq("telegram_user_id", telegramUserId)
+      .gte("occurred_on", monthStart)
+      .lt("occurred_on", monthEnd)
+      .order("occurred_on", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(cursor.limit + 1);
+    if (cursor.beforeDate && cursor.beforeId) {
+      query = query.or(`occurred_on.lt.${cursor.beforeDate},and(occurred_on.eq.${cursor.beforeDate},id.lt.${cursor.beforeId})`);
+    }
+    return query;
   }
-  const { data, error } = await query;
-  if (error) throw error;
-  const rows = data || [];
+
+  const full = await fetchPage("id, kind, category, account_id, transfer_group_id, recurring_rule_id, description, amount_cents, currency, occurred_on");
+  let rows: any[];
+  if (!full.error) {
+    rows = full.data || [];
+  } else {
+    if (!isMissingSchemaError(full.error)) throw full.error;
+    const withoutRecurringColumns = await fetchPage("id, kind, category, account_id, description, amount_cents, currency, occurred_on");
+    if (!withoutRecurringColumns.error) {
+      rows = (withoutRecurringColumns.data || []).map((row: any) => ({
+        ...row,
+        transfer_group_id: null,
+        recurring_rule_id: null
+      }));
+    } else {
+      if (!isMissingSchemaError(withoutRecurringColumns.error)) throw withoutRecurringColumns.error;
+      const legacy = await fetchPage("id, kind, category, account, description, amount_cents, currency, occurred_on");
+      if (legacy.error) throw legacy.error;
+      rows = (legacy.data || []).map((row: any) => ({
+        ...row,
+        account_id: null,
+        transfer_group_id: null,
+        recurring_rule_id: null
+      }));
+    }
+  }
+
   const hasMore = rows.length > cursor.limit;
   const items = rows.slice(0, cursor.limit);
   const last = items.at(-1);

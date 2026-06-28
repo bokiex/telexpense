@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { netWorthByCurrency } from "@/lib/finance";
 import {
@@ -285,6 +285,7 @@ export default function Dashboard() {
   const [historyCursor, setHistoryCursor] = useState<HistoryPage["nextCursor"]>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const historyRequestVersion = useRef(0);
 
   useEffect(() => {
     const webApp = window.Telegram?.WebApp;
@@ -321,6 +322,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (activeTab !== "transactions") return;
     let ignore = false;
+    const requestVersion = ++historyRequestVersion.current;
     async function loadHistory() {
       setHistory(null);
       setHistoryCursor(null);
@@ -331,19 +333,22 @@ export default function Dashboard() {
         const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
         if (!response.ok) throw new Error("Could not load transaction history.");
         const page = (await response.json()) as HistoryPage;
-        if (!ignore) {
+        if (!ignore && historyRequestVersion.current === requestVersion) {
           setHistory(page.items);
           setHistoryCursor(page.nextCursor);
         }
       } catch (loadError) {
-        if (!ignore) setHistoryError(loadError instanceof Error ? loadError.message : "Could not load transaction history.");
+        if (!ignore && historyRequestVersion.current === requestVersion) {
+          setHistoryError(loadError instanceof Error ? loadError.message : "Could not load transaction history.");
+        }
       } finally {
-        if (!ignore) setHistoryLoading(false);
+        if (!ignore && historyRequestVersion.current === requestVersion) setHistoryLoading(false);
       }
     }
     loadHistory();
     return () => {
       ignore = true;
+      if (historyRequestVersion.current === requestVersion) historyRequestVersion.current += 1;
     };
   }, [activeTab, month, refreshKey]);
 
@@ -352,28 +357,37 @@ export default function Dashboard() {
     () => buildAppData(summary, history || summary?.recent),
     [history, summary]
   );
-  const reload = () => setRefreshKey((value) => value + 1);
+  const reload = () => {
+    historyRequestVersion.current += 1;
+    setRefreshKey((value) => value + 1);
+  };
 
   async function loadMoreHistory() {
     if (!historyCursor || historyLoading) return;
+    const requestVersion = historyRequestVersion.current;
+    const requestMonth = month;
+    const requestCursor = historyCursor;
     setHistoryLoading(true);
     setHistoryError("");
     try {
       const query = new URLSearchParams({
-        month,
+        month: requestMonth,
         limit: "50",
-        beforeDate: historyCursor.beforeDate,
-        beforeId: String(historyCursor.beforeId)
+        beforeDate: requestCursor.beforeDate,
+        beforeId: String(requestCursor.beforeId)
       });
       const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
       if (!response.ok) throw new Error("Could not load more transactions.");
       const page = (await response.json()) as HistoryPage;
+      if (historyRequestVersion.current !== requestVersion) return;
       setHistory((current) => [...(current || []), ...page.items]);
       setHistoryCursor(page.nextCursor);
     } catch (loadError) {
-      setHistoryError(loadError instanceof Error ? loadError.message : "Could not load more transactions.");
+      if (historyRequestVersion.current === requestVersion) {
+        setHistoryError(loadError instanceof Error ? loadError.message : "Could not load more transactions.");
+      }
     } finally {
-      setHistoryLoading(false);
+      if (historyRequestVersion.current === requestVersion) setHistoryLoading(false);
     }
   }
 
