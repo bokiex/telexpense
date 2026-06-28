@@ -57,12 +57,12 @@ export async function POST(request: NextRequest) {
     }
 
     const editId = editTransactionIdFromReply(message);
-    let parsed = parseTransactionMessage(text);
-    const identity = await resolveTransactionIdentity(user.id, parsed.category, parsed.account);
-    parsed = { ...parsed, category: identity.category };
-    const transactionId = editId || (await addTransaction(user.id, parsed));
+    const parsedInput = parseTransactionMessage(text);
+    const identity = await resolveTransactionIdentity(user.id, parsedInput.category, parsedInput.account);
+    const parsed = { ...parsedInput, category: identity.category, account: identity.account };
+    const transactionId = editId || (await addTransaction(user.id, parsed, identity));
     if (editId) {
-      await updateTransaction(user.id, editId, parsed);
+      await updateTransaction(user.id, editId, parsed, identity);
     }
 
     const status = await getBudgetStatus(user.id, currentMonth(), parsed.category);

@@ -113,6 +113,13 @@ export type StoredCategory = {
   subcategories: StoredSubcategory[];
 };
 
+export type ResolvedTransactionIdentity = {
+  categoryId: number;
+  category: string;
+  accountId: number;
+  account: string;
+};
+
 export async function upsertTelegramUser(user: { id: number; first_name?: string; username?: string }) {
   const supabase = createSupabaseAdmin();
   const { error } = await supabase.from("users").upsert({
@@ -123,9 +130,12 @@ export async function upsertTelegramUser(user: { id: number; first_name?: string
   if (error) throw error;
 }
 
-export async function addTransaction(telegramUserId: number, transaction: ParsedTransaction) {
+export async function addTransaction(
+  telegramUserId: number,
+  transaction: ParsedTransaction,
+  resolved: ResolvedTransactionIdentity
+) {
   const supabase = createSupabaseAdmin();
-  const resolved = await resolveTransactionIdentity(telegramUserId, transaction.category, transaction.account);
   const accountId = resolved.accountId;
   const insert = {
     telegram_user_id: telegramUserId,
@@ -253,9 +263,13 @@ export async function addTransferFields(
   if (error) throw error;
 }
 
-export async function updateTransaction(telegramUserId: number, transactionId: number, transaction: ParsedTransaction) {
+export async function updateTransaction(
+  telegramUserId: number,
+  transactionId: number,
+  transaction: ParsedTransaction,
+  resolved: ResolvedTransactionIdentity
+) {
   const supabase = createSupabaseAdmin();
-  const resolved = await resolveTransactionIdentity(telegramUserId, transaction.category, transaction.account);
   const accountId = resolved.accountId;
   const { error } = await supabase
     .from("transactions")
@@ -1036,7 +1050,11 @@ async function transferDestinationKind(telegramUserId: number, accountId: number
   return data.account_type === "investment" ? "investment" : "transfer";
 }
 
-export async function resolveTransactionIdentity(telegramUserId: number, categoryText: string, accountText: string) {
+export async function resolveTransactionIdentity(
+  telegramUserId: number,
+  categoryText: string,
+  accountText: string
+): Promise<ResolvedTransactionIdentity> {
   const [categories, accounts] = await Promise.all([getStoredCategories(telegramUserId), getStoredAccounts(telegramUserId)]);
   const categoryResolution = resolveIdentity(categoryText, categories.filter((item) => item.active).map((item) => ({
     id: item.id,
@@ -1059,7 +1077,8 @@ export async function resolveTransactionIdentity(telegramUserId: number, categor
   return {
     categoryId: categoryResolution.candidate.id,
     category: normalizeIdentity(categoryResolution.candidate.canonical),
-    accountId: accountResolution.candidate.id
+    accountId: accountResolution.candidate.id,
+    account: normalizeIdentity(accountResolution.candidate.canonical)
   };
 }
 
