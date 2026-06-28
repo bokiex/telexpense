@@ -848,28 +848,54 @@ async function getInvestmentContributionTotals(telegramUserId: number, cutoffs: 
   if (!cutoffs.size) return totals;
 
   const supabase = createSupabaseAdmin();
+  const accountCutoffs = Object.fromEntries(
+    Array.from(cutoffs, ([accountId, month]) => [String(accountId), month])
+  );
+  const aggregated = await supabase.rpc("investment_contribution_totals", {
+    target_user_id: telegramUserId,
+    account_cutoffs: accountCutoffs
+  });
+  if (!aggregated.error) {
+    for (const row of aggregated.data || []) {
+      totals.set(Number(row.account_id), {
+        totalCents: Number(row.total_cents),
+        monthCents: Number(row.month_cents)
+      });
+    }
+    return totals;
+  }
+  if (!isMissingSchemaError(aggregated.error)) throw aggregated.error;
+
   const latestMonth = Array.from(cutoffs.values()).sort().at(-1)!;
-  const { data, error } = await supabase
-    .from("transactions")
-    .select("account_id, amount_cents, occurred_on")
-    .eq("telegram_user_id", telegramUserId)
-    .in("account_id", Array.from(cutoffs.keys()))
-    .in("kind", ["investment", "transfer"])
-    .gt("amount_cents", 0)
-    .lt("occurred_on", nextMonthStart(latestMonth));
+  let lastId = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("id, account_id, amount_cents, occurred_on")
+      .eq("telegram_user_id", telegramUserId)
+      .in("account_id", Array.from(cutoffs.keys()))
+      .in("kind", ["investment", "transfer"])
+      .gt("amount_cents", 0)
+      .lt("occurred_on", nextMonthStart(latestMonth))
+      .gt("id", lastId)
+      .order("id", { ascending: true })
+      .limit(500);
 
-  if (error && isMissingSchemaError(error)) return totals;
-  if (error) throw error;
+    if (error && isMissingSchemaError(error)) return totals;
+    if (error) throw error;
+    if (!data?.length) break;
 
-  for (const row of data || []) {
-    const accountId = Number(row.account_id);
-    const cutoff = cutoffs.get(accountId);
-    if (!cutoff || String(row.occurred_on) >= nextMonthStart(cutoff)) continue;
-    const current = totals.get(accountId) || { totalCents: 0, monthCents: 0 };
-    const amount = Number(row.amount_cents);
-    current.totalCents += amount;
-    if (String(row.occurred_on) >= `${cutoff}-01`) current.monthCents += amount;
-    totals.set(accountId, current);
+    for (const row of data) {
+      const accountId = Number(row.account_id);
+      const cutoff = cutoffs.get(accountId);
+      if (!cutoff || String(row.occurred_on) >= nextMonthStart(cutoff)) continue;
+      const current = totals.get(accountId) || { totalCents: 0, monthCents: 0 };
+      const amount = Number(row.amount_cents);
+      current.totalCents += amount;
+      if (String(row.occurred_on) >= `${cutoff}-01`) current.monthCents += amount;
+      totals.set(accountId, current);
+    }
+    lastId = Number(data.at(-1)!.id);
   }
   return totals;
 }
