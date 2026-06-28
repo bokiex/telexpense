@@ -95,6 +95,11 @@ type Summary = {
   recent: RecentTransaction[];
 };
 
+type HistoryPage = {
+  items: RecentTransaction[];
+  nextCursor: { beforeDate: string; beforeId: number } | null;
+};
+
 type StoredCategory = {
   id: number;
   sourceKey: string;
@@ -276,6 +281,10 @@ export default function Dashboard() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [history, setHistory] = useState<RecentTransaction[] | null>(null);
+  const [historyCursor, setHistoryCursor] = useState<HistoryPage["nextCursor"]>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
   useEffect(() => {
     const webApp = window.Telegram?.WebApp;
@@ -309,8 +318,56 @@ export default function Dashboard() {
     };
   }, [month, refreshKey]);
 
-  const data = useMemo(() => buildAppData(summary), [summary]);
+  useEffect(() => {
+    if (activeTab !== "transactions") return;
+    let ignore = false;
+    async function loadHistory() {
+      setHistoryLoading(true);
+      setHistoryError("");
+      try {
+        const response = await apiRequest("/api/transactions/history?limit=50", "GET");
+        if (!response.ok) throw new Error("Could not load transaction history.");
+        const page = (await response.json()) as HistoryPage;
+        if (!ignore) {
+          setHistory(page.items);
+          setHistoryCursor(page.nextCursor);
+        }
+      } catch (loadError) {
+        if (!ignore) setHistoryError(loadError instanceof Error ? loadError.message : "Could not load transaction history.");
+      } finally {
+        if (!ignore) setHistoryLoading(false);
+      }
+    }
+    loadHistory();
+    return () => {
+      ignore = true;
+    };
+  }, [activeTab, month, refreshKey]);
+
+  const data = useMemo(() => buildAppData(summary, history || undefined), [history, summary]);
   const reload = () => setRefreshKey((value) => value + 1);
+
+  async function loadMoreHistory() {
+    if (!historyCursor || historyLoading) return;
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const query = new URLSearchParams({
+        limit: "50",
+        beforeDate: historyCursor.beforeDate,
+        beforeId: String(historyCursor.beforeId)
+      });
+      const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
+      if (!response.ok) throw new Error("Could not load more transactions.");
+      const page = (await response.json()) as HistoryPage;
+      setHistory((current) => [...(current || []), ...page.items]);
+      setHistoryCursor(page.nextCursor);
+    } catch (loadError) {
+      setHistoryError(loadError instanceof Error ? loadError.message : "Could not load more transactions.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   async function saveTransaction(tx: TransactionFormValues) {
     if (tx.type === "transfer") {
@@ -552,6 +609,11 @@ export default function Dashboard() {
               onEdit={(tx) => setModal({ type: "edit-transaction", tx })}
               onDelete={deleteTransaction}
               onAdd={() => setModal({ type: "add-transaction" })}
+              loading={historyLoading}
+              error={historyError}
+              hasMore={Boolean(historyCursor)}
+              onLoadMore={loadMoreHistory}
+              onRetry={historyCursor ? loadMoreHistory : reload}
             />
           ) : null}
           {!loading && activeTab === "accounts" ? (
@@ -739,13 +801,23 @@ function TransactionListView({
   month,
   onEdit,
   onDelete,
-  onAdd
+  onAdd,
+  loading,
+  error,
+  hasMore,
+  onLoadMore,
+  onRetry
 }: {
   data: AppData;
   month: string;
   onEdit: (tx: Transaction) => void;
   onDelete: (tx: Transaction) => void;
   onAdd: () => void;
+  loading: boolean;
+  error: string;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  onRetry: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | TransactionType>("all");
@@ -836,6 +908,13 @@ function TransactionListView({
           ))
         ) : <EmptyState label={`No transactions found for ${month}`} />}
       </div>
+
+      {error ? <div className="mini-error">{error} <button type="button" onClick={onRetry}>Retry</button></div> : null}
+      {hasMore || loading ? (
+        <button className="link-button" type="button" disabled={loading} onClick={onLoadMore}>
+          {loading ? "Loading…" : "Load more"}
+        </button>
+      ) : null}
 
       <button className="primary-action" type="button" onClick={onAdd}>
         <Plus size={16} /> Add Transaction
@@ -1823,7 +1902,7 @@ function EmptyState({ label }: { label: string }) {
   return <div className="empty-state"><Banknote size={28} /><span>{label}</span></div>;
 }
 
-function buildAppData(summary: Summary | null): AppData {
+function buildAppData(summary: Summary | null, history?: RecentTransaction[]): AppData {
   if (!summary) return { categories: [], accounts: [], transactions: [] };
   const categoryMap = new Map<string, Category>();
   const storedCategories = new Map(summary.storedCategories.map((category) => [category.sourceKey, category]));
@@ -1856,10 +1935,10 @@ function buildAppData(summary: Summary | null): AppData {
 
   for (const item of summary.categories) addCategory(item.category, item.currency);
   for (const item of summary.budgets) addCategory(item.category, item.currency);
-  for (const item of summary.recent) addCategory(item.category, item.currency);
+  for (const item of history || summary.recent) addCategory(item.category, item.currency);
   for (const stored of summary.storedCategories) addCategory(stored.sourceName);
 
-  const transactions = summary.recent.map((tx) => {
+  const transactions = (history || summary.recent).map((tx) => {
     const category = addCategory(tx.category, tx.currency);
     return {
       id: String(tx.id),

@@ -14,10 +14,19 @@ set opening_balance_cents = -abs(opening_balance_cents),
 where account_type in ('loan', 'card')
   and opening_balance_cents > 0;
 
+update public.accounts
+set opening_balance_cents = abs(opening_balance_cents),
+    updated_at = now()
+where account_type not in ('loan', 'card')
+  and opening_balance_cents < 0;
+
 alter table public.accounts drop constraint if exists accounts_liability_opening_balance_check;
 alter table public.accounts
   add constraint accounts_liability_opening_balance_check
-  check (account_type not in ('loan', 'card') or opening_balance_cents <= 0) not valid;
+  check (
+    (account_type in ('loan', 'card') and opening_balance_cents <= 0)
+    or (account_type not in ('loan', 'card') and opening_balance_cents >= 0)
+  ) not valid;
 alter table public.accounts validate constraint accounts_liability_opening_balance_check;
 
 -- Normalize category-bearing tables before enforcing uniqueness.
@@ -77,10 +86,21 @@ where a.id > b.id
   and a.telegram_user_id = b.telegram_user_id
   and public.normalize_identity(a.source_name) = public.normalize_identity(b.source_name);
 
--- Existing duplicate budgets are conservatively combined.
+do $$
+begin
+  if exists (
+    select 1
+    from public.budgets
+    group by telegram_user_id, public.normalize_identity(category), month
+    having count(distinct upper(currency)) > 1
+  ) then
+    raise exception 'Cannot merge canonical duplicate budgets with conflicting currencies';
+  end if;
+end $$;
+
 with combined as (
   select telegram_user_id, public.normalize_identity(category) category, month,
-         sum(amount_cents)::integer amount_cents, min(currency) currency
+         sum(amount_cents)::integer amount_cents, min(upper(currency)) currency
   from public.budgets
   group by telegram_user_id, public.normalize_identity(category), month
 ), removed as (

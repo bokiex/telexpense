@@ -200,6 +200,39 @@ returns text language sql immutable strict parallel safe
 set search_path = public
 as $$ select lower(regexp_replace(btrim(value), '\s+', ' ', 'g')) $$;
 
+create temporary table account_merge_by_key on commit drop as
+select id, min(id) over (
+  partition by telegram_user_id, public.normalize_identity(account_key)
+) keeper
+from public.accounts;
+
+delete from public.portfolio_snapshots s
+using account_merge_by_key m
+where s.account_id = m.id and m.id <> m.keeper
+  and exists (
+    select 1 from public.portfolio_snapshots kept
+    where kept.telegram_user_id = s.telegram_user_id
+      and kept.account_id = m.keeper
+      and kept.month = s.month
+  );
+
+update public.portfolio_snapshots s set account_id = m.keeper
+from account_merge_by_key m where s.account_id = m.id and m.id <> m.keeper;
+update public.transactions t set account_id = m.keeper
+from account_merge_by_key m where t.account_id = m.id and m.id <> m.keeper;
+update public.recurring_rules r set from_account_id = m.keeper
+from account_merge_by_key m where r.from_account_id = m.id and m.id <> m.keeper;
+update public.recurring_rules r set to_account_id = m.keeper
+from account_merge_by_key m where r.to_account_id = m.id and m.id <> m.keeper;
+delete from public.accounts a using account_merge_by_key m
+where a.id = m.id and m.id <> m.keeper;
+
+update public.accounts
+set account_key = public.normalize_identity(account_key), updated_at = now();
+
+create unique index if not exists accounts_user_canonical_key_uidx
+  on public.accounts (telegram_user_id, public.normalize_identity(account_key));
+
 insert into public.categories (telegram_user_id, source_key, source_name, name, budget_group, color, icon)
 select distinct source.telegram_user_id, public.normalize_identity(source.category),
   public.normalize_identity(source.category), initcap(public.normalize_identity(source.category)),
@@ -283,8 +316,17 @@ set search_path = public
 as $$ select lower(regexp_replace(btrim(value), '\s+', ' ', 'g')) $$;
 
 alter table public.accounts drop constraint if exists accounts_liability_opening_balance_check;
+update public.accounts
+set opening_balance_cents = case
+      when account_type in ('loan', 'card') then -abs(opening_balance_cents)
+      else abs(opening_balance_cents)
+    end,
+    updated_at = now();
 alter table public.accounts add constraint accounts_liability_opening_balance_check
-  check (account_type not in ('loan', 'card') or opening_balance_cents <= 0);
+  check (
+    (account_type in ('loan', 'card') and opening_balance_cents <= 0)
+    or (account_type not in ('loan', 'card') and opening_balance_cents >= 0)
+  );
 
 create unique index if not exists categories_user_canonical_name_uidx
   on public.categories (telegram_user_id, public.normalize_identity(source_name));

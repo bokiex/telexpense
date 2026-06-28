@@ -40,6 +40,12 @@ test("liability signs, net worth, and repayment are consistent", () => {
   });
 });
 
+test("asset opening balances are always positive", () => {
+  assert.equal(normalizeOpeningBalance("cash", -50_000), 50_000);
+  assert.equal(normalizeOpeningBalance("bank", -50_000), 50_000);
+  assert.equal(normalizeOpeningBalance("investment", -50_000), 50_000);
+});
+
 test("net worth keeps currencies separate", () => {
   assert.deepEqual(netWorthByCurrency([
     { balanceCents: 100_000, currency: "SGD" },

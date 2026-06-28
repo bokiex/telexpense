@@ -427,7 +427,7 @@ export async function upsertAccount(
     .upsert(
       {
         telegram_user_id: telegramUserId,
-        account_key: values.accountKey,
+        account_key: normalizeIdentity(values.accountKey),
         name: values.name,
         institution: values.institution || null,
         account_type: values.accountType,

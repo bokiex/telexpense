@@ -2,7 +2,7 @@ import type { AccountType } from "@/lib/repository";
 
 export function normalizeOpeningBalance(accountType: AccountType, cents: number) {
   const rounded = Math.round(cents);
-  return accountType === "loan" || accountType === "card" ? -Math.abs(rounded) : rounded;
+  return accountType === "loan" || accountType === "card" ? -Math.abs(rounded) : Math.abs(rounded);
 }
 
 export function debtAmount(balanceCents: number) {

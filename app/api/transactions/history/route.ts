@@ -9,13 +9,23 @@ export async function GET(request: NextRequest) {
   try {
     const initData = request.headers.get("x-telegram-init-data") || "";
     const { user } = validateTelegramInitData(initData, requireEnv("TELEGRAM_BOT_TOKEN"));
-    const limit = Math.min(100, Math.max(1, Number(request.nextUrl.searchParams.get("limit") || 50)));
+    const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || 50);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(100, Math.max(1, Math.trunc(requestedLimit)))
+      : 50;
     const beforeDate = request.nextUrl.searchParams.get("beforeDate");
     const beforeId = Number(request.nextUrl.searchParams.get("beforeId"));
+    if (
+      Boolean(beforeDate) !== request.nextUrl.searchParams.has("beforeId")
+      || (beforeDate && !/^\d{4}-\d{2}-\d{2}$/.test(beforeDate))
+      || (request.nextUrl.searchParams.has("beforeId") && (!Number.isSafeInteger(beforeId) || beforeId <= 0))
+    ) {
+      return NextResponse.json({ error: "Invalid history cursor." }, { status: 400 });
+    }
     const result = await listTransactions(user.id, {
       limit,
       beforeDate: beforeDate || null,
-      beforeId: Number.isFinite(beforeId) ? beforeId : null
+      beforeId: beforeDate ? beforeId : null
     });
     return NextResponse.json(result);
   } catch (error) {
