@@ -19,6 +19,15 @@ test("ambiguous aliases never select a category", () => {
   assert.equal(result.status, "ambiguous");
 });
 
+test("canonical category identity takes precedence over aliases", () => {
+  const result = resolveIdentity("food", [
+    { id: 1, canonical: "food", aliases: [] },
+    { id: 2, canonical: "transport", aliases: ["food"] }
+  ]);
+  assert.equal(result.status, "matched");
+  if (result.status === "matched") assert.equal(result.candidate.id, 1);
+});
+
 test("Telegram parser normalizes category/account and signs expense", () => {
   const parsed = parseTransactionMessage("  FoOd , Main   Card, Lunch, $4.20");
   assert.equal(parsed.category, "food");

@@ -61,6 +61,12 @@ as $$
     where r.active
       and target_month ~ '^\d{4}-(0[1-9]|1[0-2])$'
       and batch_size between 1 and 500
+      and (
+        target_month || '-' ||
+        lpad(least(r.day_of_month, extract(day from (
+          (target_month || '-01')::date + interval '1 month - 1 day'
+        )))::integer::text, 2, '0')
+      )::date <= current_date
       and not exists (
         select 1
         from public.recurring_rule_runs existing

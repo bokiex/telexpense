@@ -15,8 +15,18 @@ export type IdentityResolution =
 
 export function resolveIdentity(input: string, candidates: IdentityCandidate[]): IdentityResolution {
   const normalized = normalizeIdentity(input);
+  const canonicalMatches = candidates.filter(
+    (candidate) => normalizeIdentity(candidate.canonical) === normalized
+  );
+  if (canonicalMatches.length === 1) {
+    return { status: "matched", candidate: canonicalMatches[0] };
+  }
+  if (canonicalMatches.length > 1) {
+    return { status: "ambiguous", candidates: canonicalMatches };
+  }
+
   const matches = candidates.filter((candidate) =>
-    [candidate.canonical, ...candidate.aliases].some((value) => normalizeIdentity(value) === normalized)
+    candidate.aliases.some((value) => normalizeIdentity(value) === normalized)
   );
   if (matches.length === 1) return { status: "matched", candidate: matches[0] };
   if (matches.length > 1) return { status: "ambiguous", candidates: matches };

@@ -284,6 +284,15 @@ from (
   union select telegram_user_id, category from public.recurring_rules
 ) source
 where btrim(source.category) <> ''
+  and not exists (
+    select 1
+    from public.categories existing
+    where existing.telegram_user_id = source.telegram_user_id
+      and (
+        public.normalize_identity(existing.source_key) = public.normalize_identity(source.category)
+        or public.normalize_identity(existing.source_name) = public.normalize_identity(source.category)
+      )
+  )
 on conflict do nothing;
 
 update public.transactions t set category_id = c.id
@@ -510,6 +519,12 @@ as $$
     where r.active
       and target_month ~ '^\d{4}-(0[1-9]|1[0-2])$'
       and batch_size between 1 and 500
+      and (
+        target_month || '-' ||
+        lpad(least(r.day_of_month, extract(day from (
+          (target_month || '-01')::date + interval '1 month - 1 day'
+        )))::integer::text, 2, '0')
+      )::date <= current_date
       and not exists (
         select 1 from public.recurring_rule_runs existing
         where existing.telegram_user_id = r.telegram_user_id
