@@ -27,7 +27,10 @@ This works well because Telegram Mini Apps require HTTPS in production, and Verc
 3. For a fresh project, run [supabase/schema.sql](supabase/schema.sql). For an
    existing deployment, apply the versioned files in
    [supabase/migrations](supabase/migrations) in timestamp order and keep the
-   migration history recorded.
+   migration history recorded. The canonical-identity migration stops rather
+   than guessing if duplicate categories or accounts have conflicting metadata,
+   duplicate portfolio snapshots disagree, or duplicate budgets use different
+   currencies; reconcile those rows and rerun the migration.
 4. Copy your Project URL, publishable key, and server-side secret key.
 
 Server-side routes use `SUPABASE_SECRET_KEY` or legacy `SUPABASE_SERVICE_ROLE_KEY`. Do not expose this key in frontend code.
@@ -124,10 +127,12 @@ instead of silently creating an account.
 
 - Summary reads are read-only. The daily recurring job creates due transactions
   idempotently, in bounded batches, for the current UTC month.
-- Transaction history uses a stable `(occurredOn, id)` cursor. Request
-  `/api/transactions/history?limit=50`; pass the returned
+- Transaction history is loaded separately for the selected month and uses a
+  stable `(occurredOn, id)` cursor. Request
+  `/api/transactions/history?month=2026-06&limit=50`; pass the returned
   `nextCursor.beforeDate` and `nextCursor.beforeId` on the next request. Limits
-  are clamped to 1–100 and requests require `X-Telegram-Init-Data`.
+  are clamped to 1–100; `month` must use `YYYY-MM`, and requests require
+  `X-Telegram-Init-Data`.
 - Account balances are opening balance plus all account transactions. Assets
   are positive; loan and card liabilities are stored as negative values, while
   debt-only fields display their absolute amount.

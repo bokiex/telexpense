@@ -28,8 +28,9 @@ the current UTC month. A unique rule/month run claim prevents duplicate
 materialization across retries or concurrent invocations.
 
 Full transaction history is exposed separately at
-`/api/transactions/history`, ordered by date and ID with a two-part cursor.
-Summary responses include a `Server-Timing` duration for the summary operation.
+`/api/transactions/history`, scoped to the requested month and ordered by date
+and ID with a two-part cursor. Summary responses include a `Server-Timing`
+duration for the summary operation.
 
 Account balances combine opening balances with all linked transactions. Asset
 balances are positive and loan/card liabilities are negative. Dashboard net
@@ -50,4 +51,6 @@ Row Level Security is enabled in [supabase/schema.sql](../supabase/schema.sql), 
 
 Fresh installations use `supabase/schema.sql`. Existing deployments apply the
 timestamped files in `supabase/migrations`; the schema file remains the
-re-runnable fresh-install equivalent.
+re-runnable fresh-install equivalent. Canonicalization migrations abort on
+conflicting duplicate financial data or metadata so an operator can reconcile
+the rows instead of accepting a lossy merge.
