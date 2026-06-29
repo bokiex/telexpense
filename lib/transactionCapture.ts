@@ -7,6 +7,7 @@ export type CaptureChoice =
   | { status: "ready"; category: StoredCategory; subcategoryId: number | null; account: CaptureAccount }
   | { status: "choose-category"; categories: StoredCategory[] }
   | { status: "choose-subcategory"; category: StoredCategory; subcategories: StoredCategory["subcategories"] }
+  | { status: "no-subcategories"; category: StoredCategory }
   | { status: "choose-account"; category: StoredCategory; subcategoryId: number | null; accounts: CaptureAccount[] };
 
 export function resolveConciseCapture(
@@ -42,6 +43,9 @@ export function resolveConciseCapture(
   }
 
   if (subcategoryId === null) {
+    if (category.subcategories.length === 0) {
+      return { status: "no-subcategories", category };
+    }
     const matches = category.subcategories.filter(
       (subcategory) => normalizeIdentity(subcategory.name) === normalizeIdentity(description)
     );

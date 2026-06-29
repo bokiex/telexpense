@@ -1,6 +1,32 @@
 alter table public.transactions
   add column if not exists subcategory_id bigint references public.subcategories(id) on delete set null;
 
+update public.transactions t
+   set subcategory_id = null
+ where subcategory_id is not null
+   and not exists (
+     select 1 from public.subcategories s where s.id = t.subcategory_id
+   );
+
+do $$
+begin
+  if not exists (
+    select 1
+      from pg_constraint c
+      join pg_attribute a
+        on a.attrelid = c.conrelid
+       and a.attnum = any(c.conkey)
+     where c.conrelid = 'public.transactions'::regclass
+       and c.confrelid = 'public.subcategories'::regclass
+       and c.contype = 'f'
+       and a.attname = 'subcategory_id'
+  ) then
+    alter table public.transactions
+      add constraint transactions_subcategory_id_fkey
+      foreign key (subcategory_id) references public.subcategories(id) on delete set null;
+  end if;
+end $$;
+
 create index if not exists transactions_user_subcategory_date_idx
   on public.transactions (telegram_user_id, subcategory_id, occurred_on desc, id desc);
 

@@ -246,6 +246,8 @@ async function sendCapturePrompt(chatId: number, token: string, resolution: Excl
     await sendTelegramMessage(chatId, "Choose a parent category:", choiceKeyboard(resolution.categories.map((item) => [item.name, callbackData(token, "c", item.id)])));
   } else if (resolution.status === "choose-subcategory") {
     await sendTelegramMessage(chatId, `Choose a subcategory under ${resolution.category.name}:`, choiceKeyboard(resolution.subcategories.map((item) => [item.name, callbackData(token, "s", item.id)])));
+  } else if (resolution.status === "no-subcategories") {
+    await sendTelegramMessage(chatId, `Add a subcategory under ${resolution.category.name} in the dashboard, then send the transaction again.`);
   } else {
     const rows = resolution.accounts.map((item) => [item.name, callbackData(token, "a", Number(item.id))] as [string, string]);
     await sendTelegramMessage(chatId, rows.length ? "Choose an account:" : "Add an active account in the dashboard, then send the transaction again.", choiceKeyboard(rows));
