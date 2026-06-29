@@ -193,7 +193,13 @@ async function handlePendingChoice(callbackQuery: any) {
       const account = accounts.find((item) => item.active && item.id === choiceId);
       const category = categories.find((item) => item.id === pending.categoryId);
       if (!account || !category || pending.subcategoryId === null) throw new Error("Selection is incomplete.");
-      const transactionId = await consumePendingTransactionCapture(telegramUserId, token, Number(account.id));
+      const transactionId = await consumePendingTransactionCapture(
+        telegramUserId,
+        token,
+        Number(account.id),
+        category.id,
+        pending.subcategoryId
+      );
       if (transactionId === null) {
         await answerCallback("This selection was already used or expired.");
         return;
@@ -211,7 +217,13 @@ async function handlePendingChoice(callbackQuery: any) {
       pending.subcategoryId ?? undefined
     );
     if (resolution.status === "ready") {
-      const transactionId = await consumePendingTransactionCapture(telegramUserId, token, Number(resolution.account.id));
+      const transactionId = await consumePendingTransactionCapture(
+        telegramUserId,
+        token,
+        Number(resolution.account.id),
+        resolution.category.id,
+        resolution.subcategoryId
+      );
       if (transactionId === null) {
         await answerCallback("This selection was already used or expired.");
         return;

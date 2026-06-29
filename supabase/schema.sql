@@ -238,10 +238,14 @@ alter table public.portfolio_snapshots enable row level security;
 alter table public.recurring_rules enable row level security;
 alter table public.recurring_rule_runs enable row level security;
 
+drop function if exists public.consume_pending_transaction_capture(bigint, text, bigint);
+
 create or replace function public.consume_pending_transaction_capture(
   p_telegram_user_id bigint,
   p_token text,
-  p_account_id bigint
+  p_account_id bigint,
+  p_expected_category_id bigint,
+  p_expected_subcategory_id bigint
 )
 returns bigint
 language plpgsql
@@ -258,6 +262,10 @@ begin
    where telegram_user_id = p_telegram_user_id and token = p_token and expires_at > now()
    for update;
   if not found then return null; end if;
+  if capture.category_id is distinct from p_expected_category_id
+     or capture.subcategory_id is distinct from p_expected_subcategory_id then
+    return null;
+  end if;
 
   select c.source_name into category_source_name
     from public.categories c

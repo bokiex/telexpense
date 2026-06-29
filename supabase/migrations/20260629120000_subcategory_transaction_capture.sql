@@ -47,10 +47,14 @@ create index if not exists pending_transaction_captures_user_expiry_idx
 
 alter table public.pending_transaction_captures enable row level security;
 
+drop function if exists public.consume_pending_transaction_capture(bigint, text, bigint);
+
 create or replace function public.consume_pending_transaction_capture(
   p_telegram_user_id bigint,
   p_token text,
-  p_account_id bigint
+  p_account_id bigint,
+  p_expected_category_id bigint,
+  p_expected_subcategory_id bigint
 )
 returns bigint
 language plpgsql
@@ -71,6 +75,10 @@ begin
    for update;
 
   if not found then
+    return null;
+  end if;
+  if capture.category_id is distinct from p_expected_category_id
+     or capture.subcategory_id is distinct from p_expected_subcategory_id then
     return null;
   end if;
 

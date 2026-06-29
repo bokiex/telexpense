@@ -190,13 +190,17 @@ export async function updatePendingTransactionCapture(
 export async function consumePendingTransactionCapture(
   telegramUserId: number,
   token: string,
-  accountId: number
+  accountId: number,
+  expectedCategoryId: number,
+  expectedSubcategoryId: number | null
 ) {
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase.rpc("consume_pending_transaction_capture", {
     p_telegram_user_id: telegramUserId,
     p_token: token,
-    p_account_id: accountId
+    p_account_id: accountId,
+    p_expected_category_id: expectedCategoryId,
+    p_expected_subcategory_id: expectedSubcategoryId
   });
   if (error) throw error;
   return data === null ? null : Number(data);
