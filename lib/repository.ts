@@ -173,10 +173,10 @@ export async function getPendingTransactionCapture(telegramUserId: number, token
 export async function updatePendingTransactionCapture(
   telegramUserId: number,
   token: string,
-  values: { categoryId?: number; subcategoryId?: number }
+  values: { categoryId?: number; subcategoryId?: number | null }
 ) {
   const supabase = createSupabaseAdmin();
-  const update: Record<string, number> = {};
+  const update: Record<string, number | null> = {};
   if (values.categoryId !== undefined) update.category_id = values.categoryId;
   if (values.subcategoryId !== undefined) update.subcategory_id = values.subcategoryId;
   const { error } = await supabase
@@ -187,14 +187,19 @@ export async function updatePendingTransactionCapture(
   if (error) throw error;
 }
 
-export async function deletePendingTransactionCapture(telegramUserId: number, token: string) {
+export async function consumePendingTransactionCapture(
+  telegramUserId: number,
+  token: string,
+  accountId: number
+) {
   const supabase = createSupabaseAdmin();
-  const { error } = await supabase
-    .from("pending_transaction_captures")
-    .delete()
-    .eq("telegram_user_id", telegramUserId)
-    .eq("token", token);
+  const { data, error } = await supabase.rpc("consume_pending_transaction_capture", {
+    p_telegram_user_id: telegramUserId,
+    p_token: token,
+    p_account_id: accountId
+  });
   if (error) throw error;
+  return data === null ? null : Number(data);
 }
 
 export async function upsertTelegramUser(user: { id: number; first_name?: string; username?: string }) {

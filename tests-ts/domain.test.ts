@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { debtAmount, loanMetrics, netWorth, netWorthByCurrency, normalizeOpeningBalance } from "../lib/finance";
 import { normalizeIdentity, resolveIdentity } from "../lib/identity";
-import { parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
+import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
 
@@ -44,6 +44,12 @@ test("concise Telegram parser extracts amount and subcategory text", () => {
   assert.throws(() => parseConciseTransactionMessage("food, card, lunch, 4.20"));
 });
 
+test("grouped concise amounts are distinct from comma-separated transactions", () => {
+  assert.equal(isConciseTransactionMessage("1,000 eat out"), true);
+  assert.equal(isConciseTransactionMessage("food, card, lunch, 4.20"), false);
+  assert.equal(parseConciseTransactionMessage("1,000 eat out").amountCents, -100_000);
+});
+
 const category = (id: number, name: string, subcategoryName: string): StoredCategory => ({
   id, sourceKey: name.toLowerCase(), sourceName: name.toLowerCase(), name,
   group: "Needs", color: "#000", icon: "Wallet", active: true,
@@ -72,6 +78,13 @@ test("duplicate subcategory names require a parent choice and multiple accounts 
 
   const accountChoice = resolveConciseCapture("daily", categories, [{ ...account }, { ...account, id: 8, accountKey: "cash", name: "Cash" }], 1);
   assert.equal(accountChoice.status, "choose-account");
+});
+
+test("a subcategory selected under another category is rejected", () => {
+  const categories = [category(1, "Food", "Daily"), category(2, "Transport", "Train")];
+  const result = resolveConciseCapture("daily", categories, [account], 2, 10);
+  assert.equal(result.status, "choose-subcategory");
+  if (result.status === "choose-subcategory") assert.equal(result.category.id, 2);
 });
 
 test("unknown concise text starts category selection and callback payloads stay compact", () => {

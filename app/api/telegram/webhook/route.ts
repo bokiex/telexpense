@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { budgetWarningText } from "@/lib/budget";
 import { optionalEnv } from "@/lib/env";
-import { parseConciseTransactionMessage, parseTransactionMessage } from "@/lib/parser";
+import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "@/lib/parser";
 import {
   addTransaction,
   createPendingTransactionCapture,
   currentMonth,
-  deletePendingTransactionCapture,
+  consumePendingTransactionCapture,
   deleteTransaction,
   getPendingTransactionCapture,
   getBudgetStatus,
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     }
 
     const editId = editTransactionIdFromReply(message);
-    if (!text.includes(",") && !editId) {
+    if (!editId && isConciseTransactionMessage(text)) {
       const concise = parseConciseTransactionMessage(text);
       await beginConciseCapture(user.id, chatId, concise);
       return NextResponse.json({ ok: true });
@@ -175,8 +175,9 @@ async function handlePendingChoice(callbackQuery: any) {
     if (kind === "c") {
       const category = categories.find((item) => item.active && item.id === choiceId);
       if (!category) throw new Error("Category is not available.");
-      await updatePendingTransactionCapture(telegramUserId, token, { categoryId: choiceId });
+      await updatePendingTransactionCapture(telegramUserId, token, { categoryId: choiceId, subcategoryId: null });
       pending.categoryId = choiceId;
+      pending.subcategoryId = null;
     } else if (kind === "s") {
       const category = categories.find((item) => item.id === pending.categoryId);
       if (!category?.subcategories.some((item) => item.id === choiceId)) throw new Error("Subcategory is not available.");
@@ -187,21 +188,11 @@ async function handlePendingChoice(callbackQuery: any) {
       const category = categories.find((item) => item.id === pending.categoryId);
       if (!account || !category || pending.subcategoryId === null) throw new Error("Selection is incomplete.");
       await answerTelegramCallback(callbackId, "Saving…");
-      const transactionId = await addTransaction(telegramUserId, {
-        kind: "expense",
-        category: category.sourceName,
-        account: account.name,
-        description: pending.description,
-        amountCents: pending.amountCents,
-        currency: pending.currency
-      }, {
-        categoryId: category.id,
-        category: category.sourceName,
-        subcategoryId: pending.subcategoryId,
-        accountId: Number(account.id),
-        account: account.name
-      });
-      await deletePendingTransactionCapture(telegramUserId, token);
+      const transactionId = await consumePendingTransactionCapture(telegramUserId, token, Number(account.id));
+      if (transactionId === null) {
+        await answerTelegramCallback(callbackId, "This selection was already used or expired.");
+        return;
+      }
       await sendConfirmation(telegramUserId, chatId, transactionId, category.id, pending.subcategoryId, account.name, pending.amountCents);
       return;
     }
@@ -215,21 +206,11 @@ async function handlePendingChoice(callbackQuery: any) {
     );
     await answerTelegramCallback(callbackId);
     if (resolution.status === "ready") {
-      const transactionId = await addTransaction(telegramUserId, {
-        kind: "expense",
-        category: resolution.category.sourceName,
-        account: resolution.account.name,
-        description: pending.description,
-        amountCents: pending.amountCents,
-        currency: pending.currency
-      }, {
-        categoryId: resolution.category.id,
-        category: resolution.category.sourceName,
-        subcategoryId: resolution.subcategoryId,
-        accountId: Number(resolution.account.id),
-        account: resolution.account.name
-      });
-      await deletePendingTransactionCapture(telegramUserId, token);
+      const transactionId = await consumePendingTransactionCapture(telegramUserId, token, Number(resolution.account.id));
+      if (transactionId === null) {
+        await answerTelegramCallback(callbackId, "This selection was already used or expired.");
+        return;
+      }
       await sendConfirmation(telegramUserId, chatId, transactionId, resolution.category.id, resolution.subcategoryId, resolution.account.name, pending.amountCents);
     } else {
       await sendCapturePrompt(chatId, token, resolution);

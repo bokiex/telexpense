@@ -49,7 +49,7 @@ export function parseTransactionMessage(text: string): ParsedTransaction {
 
 export function parseConciseTransactionMessage(text: string): ConciseTransaction {
   const match = /^\s*(?<money>(?:[$€£]\s*)?\d+(?:,\d{3})*(?:\.\d{1,2})?)\s+(?<description>.+?)\s*$/.exec(text);
-  if (!match?.groups?.money || !match.groups.description || text.includes(",")) {
+  if (!match?.groups?.money || !match.groups.description) {
     throw new Error("Use a concise amount and subcategory, such as: 4.20 eat out");
   }
   const { amountCents, currency } = parseMoney(match.groups.money);
@@ -59,6 +59,10 @@ export function parseConciseTransactionMessage(text: string): ConciseTransaction
     amountCents: -Math.abs(amountCents),
     currency
   };
+}
+
+export function isConciseTransactionMessage(text: string) {
+  return /^\s*(?:[$€£]\s*)?\d+(?:,\d{3})*(?:\.\d{1,2})?\s+\S/.test(text);
 }
 
 function parseMoney(text: string) {

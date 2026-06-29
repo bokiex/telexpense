@@ -37,6 +37,10 @@ export function resolveConciseCapture(
     }
   }
 
+  if (subcategoryId !== null && !category.subcategories.some((subcategory) => subcategory.id === subcategoryId)) {
+    subcategoryId = null;
+  }
+
   if (subcategoryId === null) {
     const matches = category.subcategories.filter(
       (subcategory) => normalizeIdentity(subcategory.name) === normalizeIdentity(description)
