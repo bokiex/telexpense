@@ -1,17 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { budgetWarningText } from "@/lib/budget";
 import { optionalEnv } from "@/lib/env";
-import { parseTransactionMessage } from "@/lib/parser";
+import { parseConciseTransactionMessage, parseTransactionMessage } from "@/lib/parser";
 import {
   addTransaction,
+  createPendingTransactionCapture,
   currentMonth,
+  deletePendingTransactionCapture,
   deleteTransaction,
+  getPendingTransactionCapture,
   getBudgetStatus,
+  getStoredAccounts,
+  getStoredCategories,
   resolveTransactionIdentity,
   setBudget,
+  updatePendingTransactionCapture,
   updateTransaction,
   upsertTelegramUser
 } from "@/lib/repository";
+import { callbackData, resolveConciseCapture } from "@/lib/transactionCapture";
 import {
   answerTelegramCallback,
   dashboardKeyboard,
@@ -57,6 +64,11 @@ export async function POST(request: NextRequest) {
     }
 
     const editId = editTransactionIdFromReply(message);
+    if (!text.includes(",") && !editId) {
+      const concise = parseConciseTransactionMessage(text);
+      await beginConciseCapture(user.id, chatId, concise);
+      return NextResponse.json({ ok: true });
+    }
     const parsedInput = parseTransactionMessage(text);
     const identity = await resolveTransactionIdentity(user.id, parsedInput.category, parsedInput.account);
     const parsed = { ...parsedInput, category: identity.category, account: identity.account };
@@ -68,7 +80,8 @@ export async function POST(request: NextRequest) {
     const status = await getBudgetStatus(user.id, currentMonth(), parsed.category);
     const warning = budgetWarningText(status, Number(optionalEnv("BUDGET_WARNING_RATIO", "0.8")));
     const verb = editId ? "Updated" : "Saved";
-    const reply = [`${verb} ${parsed.category}: ${money(Math.abs(parsed.amountCents))} on ${parsed.account}.`, warning]
+    const breadcrumb = await identityBreadcrumb(user.id, identity.categoryId, identity.subcategoryId);
+    const reply = [`${verb} ${breadcrumb}: ${money(Math.abs(parsed.amountCents))} on ${parsed.account}.`, warning]
       .filter(Boolean)
       .join("\n");
     await sendTelegramMessage(chatId, reply, transactionKeyboard(transactionId));
@@ -87,6 +100,10 @@ async function handleCallbackQuery(callbackQuery: any) {
   const chatId = Number(callbackQuery.message?.chat?.id);
   const messageId = Number(callbackQuery.message?.message_id);
   const callbackId = String(callbackQuery.id || "");
+  if (data.startsWith("pc:")) {
+    await handlePendingChoice(callbackQuery);
+    return;
+  }
   const [, action, idValue] = data.split(":");
   const transactionId = Number(idValue);
 
@@ -116,6 +133,159 @@ async function handleCallbackQuery(callbackQuery: any) {
     console.error("Telegram callback handler failed", error);
     if (callbackId) await answerTelegramCallback(callbackId, "Could not complete that action.");
   }
+}
+
+async function beginConciseCapture(
+  telegramUserId: number,
+  chatId: number,
+  concise: ReturnType<typeof parseConciseTransactionMessage>
+) {
+  const [categories, accounts] = await Promise.all([
+    getStoredCategories(telegramUserId),
+    getStoredAccounts(telegramUserId)
+  ]);
+  const resolution = resolveConciseCapture(concise.description, categories, accounts);
+  if (resolution.status === "ready") {
+    await saveConciseTransaction(telegramUserId, chatId, concise, resolution);
+    return;
+  }
+  const token = await createPendingTransactionCapture(telegramUserId, concise);
+  await sendCapturePrompt(chatId, token, resolution);
+}
+
+async function handlePendingChoice(callbackQuery: any) {
+  const data = String(callbackQuery.data || "");
+  const callbackId = String(callbackQuery.id || "");
+  const telegramUserId = Number(callbackQuery.from?.id);
+  const chatId = Number(callbackQuery.message?.chat?.id);
+  const [, token, kind, idValue] = data.split(":");
+  const choiceId = Number(idValue);
+  if (!callbackId || !telegramUserId || !chatId || !token || !["c", "s", "a"].includes(kind) || !Number.isSafeInteger(choiceId)) return;
+
+  try {
+    const pending = await getPendingTransactionCapture(telegramUserId, token);
+    if (!pending) {
+      await answerTelegramCallback(callbackId, "This selection expired. Send the transaction again.");
+      return;
+    }
+    const [categories, accounts] = await Promise.all([
+      getStoredCategories(telegramUserId),
+      getStoredAccounts(telegramUserId)
+    ]);
+    if (kind === "c") {
+      const category = categories.find((item) => item.active && item.id === choiceId);
+      if (!category) throw new Error("Category is not available.");
+      await updatePendingTransactionCapture(telegramUserId, token, { categoryId: choiceId });
+      pending.categoryId = choiceId;
+    } else if (kind === "s") {
+      const category = categories.find((item) => item.id === pending.categoryId);
+      if (!category?.subcategories.some((item) => item.id === choiceId)) throw new Error("Subcategory is not available.");
+      await updatePendingTransactionCapture(telegramUserId, token, { subcategoryId: choiceId });
+      pending.subcategoryId = choiceId;
+    } else {
+      const account = accounts.find((item) => item.active && item.id === choiceId);
+      const category = categories.find((item) => item.id === pending.categoryId);
+      if (!account || !category || pending.subcategoryId === null) throw new Error("Selection is incomplete.");
+      await answerTelegramCallback(callbackId, "Saving…");
+      const transactionId = await addTransaction(telegramUserId, {
+        kind: "expense",
+        category: category.sourceName,
+        account: account.name,
+        description: pending.description,
+        amountCents: pending.amountCents,
+        currency: pending.currency
+      }, {
+        categoryId: category.id,
+        category: category.sourceName,
+        subcategoryId: pending.subcategoryId,
+        accountId: Number(account.id),
+        account: account.name
+      });
+      await deletePendingTransactionCapture(telegramUserId, token);
+      await sendConfirmation(telegramUserId, chatId, transactionId, category.id, pending.subcategoryId, account.name, pending.amountCents);
+      return;
+    }
+
+    const resolution = resolveConciseCapture(
+      pending.description,
+      categories,
+      accounts,
+      pending.categoryId ?? undefined,
+      pending.subcategoryId ?? undefined
+    );
+    await answerTelegramCallback(callbackId);
+    if (resolution.status === "ready") {
+      const transactionId = await addTransaction(telegramUserId, {
+        kind: "expense",
+        category: resolution.category.sourceName,
+        account: resolution.account.name,
+        description: pending.description,
+        amountCents: pending.amountCents,
+        currency: pending.currency
+      }, {
+        categoryId: resolution.category.id,
+        category: resolution.category.sourceName,
+        subcategoryId: resolution.subcategoryId,
+        accountId: Number(resolution.account.id),
+        account: resolution.account.name
+      });
+      await deletePendingTransactionCapture(telegramUserId, token);
+      await sendConfirmation(telegramUserId, chatId, transactionId, resolution.category.id, resolution.subcategoryId, resolution.account.name, pending.amountCents);
+    } else {
+      await sendCapturePrompt(chatId, token, resolution);
+    }
+  } catch (error) {
+    console.error("Telegram pending choice failed", error);
+    if (callbackId) await answerTelegramCallback(callbackId, "Could not save that choice.");
+  }
+}
+
+async function saveConciseTransaction(
+  telegramUserId: number,
+  chatId: number,
+  concise: ReturnType<typeof parseConciseTransactionMessage>,
+  resolution: Extract<ReturnType<typeof resolveConciseCapture>, { status: "ready" }>
+) {
+  const transactionId = await addTransaction(telegramUserId, {
+    ...concise,
+    category: resolution.category.sourceName,
+    account: resolution.account.name
+  }, {
+    categoryId: resolution.category.id,
+    category: resolution.category.sourceName,
+    subcategoryId: resolution.subcategoryId,
+    accountId: Number(resolution.account.id),
+    account: resolution.account.name
+  });
+  await sendConfirmation(telegramUserId, chatId, transactionId, resolution.category.id, resolution.subcategoryId, resolution.account.name, concise.amountCents);
+}
+
+async function sendCapturePrompt(chatId: number, token: string, resolution: Exclude<ReturnType<typeof resolveConciseCapture>, { status: "ready" }>) {
+  if (resolution.status === "choose-category") {
+    await sendTelegramMessage(chatId, "Choose a parent category:", choiceKeyboard(resolution.categories.map((item) => [item.name, callbackData(token, "c", item.id)])));
+  } else if (resolution.status === "choose-subcategory") {
+    await sendTelegramMessage(chatId, `Choose a subcategory under ${resolution.category.name}:`, choiceKeyboard(resolution.subcategories.map((item) => [item.name, callbackData(token, "s", item.id)])));
+  } else {
+    const rows = resolution.accounts.map((item) => [item.name, callbackData(token, "a", Number(item.id))] as [string, string]);
+    await sendTelegramMessage(chatId, rows.length ? "Choose an account:" : "Add an active account in the dashboard, then send the transaction again.", choiceKeyboard(rows));
+  }
+}
+
+function choiceKeyboard(choices: [string, string][]) {
+  return dashboardKeyboard(choices.map(([text, callback_data]) => [{ text, callback_data }]));
+}
+
+async function sendConfirmation(telegramUserId: number, chatId: number, transactionId: number, categoryId: number, subcategoryId: number | null, account: string, amountCents: number) {
+  const breadcrumb = await identityBreadcrumb(telegramUserId, categoryId, subcategoryId);
+  const status = await getBudgetStatus(telegramUserId, currentMonth(), (await getStoredCategories(telegramUserId)).find((item) => item.id === categoryId)?.sourceName || "");
+  const warning = budgetWarningText(status, Number(optionalEnv("BUDGET_WARNING_RATIO", "0.8")));
+  await sendTelegramMessage(chatId, [`Saved ${breadcrumb}: ${money(Math.abs(amountCents))} on ${account}.`, warning].filter(Boolean).join("\n"), transactionKeyboard(transactionId));
+}
+
+async function identityBreadcrumb(telegramUserId: number, categoryId: number, subcategoryId: number | null) {
+  const category = (await getStoredCategories(telegramUserId)).find((item) => item.id === categoryId);
+  const subcategory = category?.subcategories.find((item) => item.id === subcategoryId);
+  return [category?.name || category?.sourceName || "Transaction", subcategory?.name].filter(Boolean).join(" › ");
 }
 
 function editTransactionIdFromReply(message: any) {

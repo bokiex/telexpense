@@ -20,6 +20,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const kind = String(body.kind || "").trim().toLowerCase();
     const category = String(body.category || "").trim();
     const accountId = body.accountId === null || body.accountId === undefined || body.accountId === "" ? NaN : Number(body.accountId);
+    const subcategoryId = body.subcategoryId === null || body.subcategoryId === undefined || body.subcategoryId === "" ? null : Number(body.subcategoryId);
     const description = String(body.description || "").trim();
     const amountCents = Number(body.amountCents);
     const currency = String(body.currency || "USD").trim().toUpperCase();
@@ -28,6 +29,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (!kinds.has(kind)) return NextResponse.json({ error: "Transaction kind is not valid." }, { status: 400 });
     if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
     if (!Number.isFinite(accountId)) return NextResponse.json({ error: "Account id is required." }, { status: 400 });
+    if (subcategoryId !== null && !Number.isSafeInteger(subcategoryId)) return NextResponse.json({ error: "Subcategory id is not valid." }, { status: 400 });
     if (!description) return NextResponse.json({ error: "Description is required." }, { status: 400 });
     if (!Number.isFinite(amountCents)) return NextResponse.json({ error: "Amount is not valid." }, { status: 400 });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)) {
@@ -38,6 +40,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       kind: kind as ParsedTransaction["kind"],
       category,
       accountId,
+      subcategoryId,
       description,
       amountCents: Math.round(amountCents),
       currency: currency || "USD",

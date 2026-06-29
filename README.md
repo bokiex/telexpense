@@ -107,6 +107,7 @@ If the bot receives messages but does not reply, check the Vercel function logs 
 ## Message Formats
 
 ```text
+4.20 eat out
 food, debit card, lunch, $4.20
 transport, debit card, train, $2.00
 income, salary, debit card, paycheck, $5000
@@ -120,8 +121,10 @@ them in bot messages.
 
 Transaction categories and accounts must already exist and be active. Names,
 keys, and subcategory names are matched case-insensitively after whitespace
-normalization; unknown or ambiguous values are rejected with available choices
-instead of silently creating an account.
+normalization. The concise `amount subcategory` form infers the parent category
+and uses the sole active account without prompting. Unknown or ambiguous
+subcategories and multiple accounts are resolved with inline keyboard choices;
+duplicate subcategory names require an explicit parent-category choice.
 
 ## Dashboard Behavior
 

@@ -7,6 +7,13 @@ export type ParsedTransaction = {
   currency: string;
 };
 
+export type ConciseTransaction = {
+  kind: "expense";
+  description: string;
+  amountCents: number;
+  currency: string;
+};
+
 import { normalizeIdentity } from "@/lib/identity";
 
 const kindWords = new Set(["expense", "income", "investment", "transfer"]);
@@ -36,6 +43,20 @@ export function parseTransactionMessage(text: string): ParsedTransaction {
     account: normalizeIdentity(body[1]),
     description: body.slice(2).join(", ").trim() || body[0].toLowerCase(),
     amountCents,
+    currency
+  };
+}
+
+export function parseConciseTransactionMessage(text: string): ConciseTransaction {
+  const match = /^\s*(?<money>(?:[$€£]\s*)?\d+(?:,\d{3})*(?:\.\d{1,2})?)\s+(?<description>.+?)\s*$/.exec(text);
+  if (!match?.groups?.money || !match.groups.description || text.includes(",")) {
+    throw new Error("Use a concise amount and subcategory, such as: 4.20 eat out");
+  }
+  const { amountCents, currency } = parseMoney(match.groups.money);
+  return {
+    kind: "expense",
+    description: match.groups.description.trim(),
+    amountCents: -Math.abs(amountCents),
     currency
   };
 }
