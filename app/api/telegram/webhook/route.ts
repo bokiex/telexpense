@@ -162,10 +162,16 @@ async function handlePendingChoice(callbackQuery: any) {
   const choiceId = Number(idValue);
   if (!callbackId || !telegramUserId || !chatId || !token || !["c", "s", "a"].includes(kind) || !Number.isSafeInteger(choiceId)) return;
 
+  let callbackAnswered = false;
+  const answerCallback = async (text?: string) => {
+    callbackAnswered = true;
+    await answerTelegramCallback(callbackId, text);
+  };
+
   try {
     const pending = await getPendingTransactionCapture(telegramUserId, token);
     if (!pending) {
-      await answerTelegramCallback(callbackId, "This selection expired. Send the transaction again.");
+      await answerCallback("This selection expired. Send the transaction again.");
       return;
     }
     const [categories, accounts] = await Promise.all([
@@ -187,12 +193,12 @@ async function handlePendingChoice(callbackQuery: any) {
       const account = accounts.find((item) => item.active && item.id === choiceId);
       const category = categories.find((item) => item.id === pending.categoryId);
       if (!account || !category || pending.subcategoryId === null) throw new Error("Selection is incomplete.");
-      await answerTelegramCallback(callbackId, "Saving…");
       const transactionId = await consumePendingTransactionCapture(telegramUserId, token, Number(account.id));
       if (transactionId === null) {
-        await answerTelegramCallback(callbackId, "This selection was already used or expired.");
+        await answerCallback("This selection was already used or expired.");
         return;
       }
+      await answerCallback("Saving…");
       await sendConfirmation(telegramUserId, chatId, transactionId, category.id, pending.subcategoryId, account.name, pending.amountCents);
       return;
     }
@@ -204,20 +210,21 @@ async function handlePendingChoice(callbackQuery: any) {
       pending.categoryId ?? undefined,
       pending.subcategoryId ?? undefined
     );
-    await answerTelegramCallback(callbackId);
     if (resolution.status === "ready") {
       const transactionId = await consumePendingTransactionCapture(telegramUserId, token, Number(resolution.account.id));
       if (transactionId === null) {
-        await answerTelegramCallback(callbackId, "This selection was already used or expired.");
+        await answerCallback("This selection was already used or expired.");
         return;
       }
+      await answerCallback("Saving…");
       await sendConfirmation(telegramUserId, chatId, transactionId, resolution.category.id, resolution.subcategoryId, resolution.account.name, pending.amountCents);
     } else {
+      await answerCallback();
       await sendCapturePrompt(chatId, token, resolution);
     }
   } catch (error) {
     console.error("Telegram pending choice failed", error);
-    if (callbackId) await answerTelegramCallback(callbackId, "Could not save that choice.");
+    if (!callbackAnswered) await answerCallback("Could not save that choice.");
   }
 }
 
