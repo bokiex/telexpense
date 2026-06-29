@@ -80,6 +80,18 @@ test("duplicate subcategory names require a parent choice and multiple accounts 
   assert.equal(accountChoice.status, "choose-account");
 });
 
+test("duplicate subcategory names under one parent require a subcategory choice", () => {
+  const duplicateCategory = {
+    ...category(1, "Food", "Daily"),
+    subcategories: [{ id: 10, name: "Daily" }, { id: 11, name: "daily" }]
+  };
+  const result = resolveConciseCapture("DAILY", [duplicateCategory], [account]);
+  assert.equal(result.status, "choose-subcategory");
+  if (result.status === "choose-subcategory") {
+    assert.deepEqual(result.subcategories.map((item) => item.id), [10, 11]);
+  }
+});
+
 test("a subcategory selected under another category is rejected", () => {
   const categories = [category(1, "Food", "Daily"), category(2, "Transport", "Train")];
   const result = resolveConciseCapture("daily", categories, [account], 2, 10);

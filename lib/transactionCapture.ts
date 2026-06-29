@@ -25,16 +25,22 @@ export function resolveConciseCapture(
   let subcategoryId = selectedSubcategoryId ?? null;
 
   if (!category) {
-    const matches = activeCategories.filter((item) =>
-      item.subcategories.some((subcategory) => normalizeIdentity(subcategory.name) === normalizeIdentity(description))
+    const descriptionIdentity = normalizeIdentity(description);
+    const matches = activeCategories.flatMap((item) =>
+      item.subcategories
+        .filter((subcategory) => normalizeIdentity(subcategory.name) === descriptionIdentity)
+        .map((subcategory) => ({ category: item, subcategoryId: subcategory.id }))
     );
     if (matches.length === 1) {
-      category = matches[0];
-      subcategoryId = category.subcategories.find(
-        (subcategory) => normalizeIdentity(subcategory.name) === normalizeIdentity(description)
-      )?.id ?? null;
+      category = matches[0].category;
+      subcategoryId = matches[0].subcategoryId;
+    } else if (matches.length > 1 && matches.every((match) => match.category.id === matches[0].category.id)) {
+      category = matches[0].category;
     } else {
-      return { status: "choose-category", categories: matches.length > 1 ? matches : activeCategories };
+      const matchingCategories = activeCategories.filter((item) =>
+        matches.some((match) => match.category.id === item.id)
+      );
+      return { status: "choose-category", categories: matches.length > 1 ? matchingCategories : activeCategories };
     }
   }
 
