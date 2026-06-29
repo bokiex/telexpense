@@ -62,6 +62,7 @@ type RecentTransaction = {
   id: number;
   kind: "expense" | "income" | "investment" | "transfer";
   category: string;
+  subcategoryId: number | null;
   accountId: number | null;
   transferGroupId: string | null;
   recurringRuleId: number | null;
@@ -421,6 +422,7 @@ export default function Dashboard() {
     const body = {
       kind: tx.type,
       category,
+      subcategoryId: tx.subcategoryId ? Number(tx.subcategoryId.split("stored-").at(-1)) : null,
       accountId: selectedAccount?.id,
       description: tx.description,
       amountCents,
@@ -1851,7 +1853,7 @@ function TransactionCard({ tx, data, actions }: { tx: Transaction; data: AppData
       <CategoryIcon category={category} />
       <div className="transaction-body">
         <strong>{tx.description}</strong>
-        <span>{sub?.name || category?.name || tx.categoryId} · {formatDate(tx.date)}</span>
+        <span>{[category?.name || tx.categoryId, sub?.name].filter(Boolean).join(" › ")} · {formatDate(tx.date)}</span>
       </div>
       <div className="transaction-amount">
         <strong className={isPositive ? "positive-text" : "danger-text"}>{isPositive ? "+" : "-"}{money(tx.amount, tx.currency)}</strong>
@@ -1970,6 +1972,7 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
       type: tx.kind === "income" || tx.amountCents > 0 ? "income" : "expense",
       kind: tx.kind,
       categoryId: category.id,
+      subcategoryId: tx.subcategoryId === null ? undefined : `${category.id}:stored-${tx.subcategoryId}`,
       accountId: tx.accountId,
       description: tx.description,
       date: tx.occurredOn

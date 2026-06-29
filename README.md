@@ -107,6 +107,7 @@ If the bot receives messages but does not reply, check the Vercel function logs 
 ## Message Formats
 
 ```text
+4.20 eat out
 food, debit card, lunch, $4.20
 transport, debit card, train, $2.00
 income, salary, debit card, paycheck, $5000
@@ -120,8 +121,14 @@ them in bot messages.
 
 Transaction categories and accounts must already exist and be active. Names,
 keys, and subcategory names are matched case-insensitively after whitespace
-normalization; unknown or ambiguous values are rejected with available choices
-instead of silently creating an account.
+normalization. The concise `amount subcategory` form infers the parent category
+and uses the sole active account without prompting. Unknown or ambiguous
+subcategories and multiple accounts are resolved with inline keyboard choices;
+duplicate subcategory names require an explicit parent-category choice.
+Selections expire after 15 minutes. If the selected category has no
+subcategories, the bot asks you to add one in the dashboard and retry.
+Confirmations show the category/subcategory breadcrumb with Edit and Undo
+actions.
 
 ## Dashboard Behavior
 
@@ -132,7 +139,8 @@ instead of silently creating an account.
   `/api/transactions/history?month=2026-06&limit=50`; pass the returned
   `nextCursor.beforeDate` and `nextCursor.beforeId` on the next request. Limits
   are clamped to 1–100; `month` must use `YYYY-MM`, and requests require
-  `X-Telegram-Init-Data`.
+  `X-Telegram-Init-Data`. Stored subcategories are retained when transactions
+  are created or edited and appear as category/subcategory breadcrumbs.
 - Account balances are opening balance plus all account transactions. Assets
   are positive; loan and card liabilities are stored as negative values, while
   debt-only fields display their absolute amount.

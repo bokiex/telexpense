@@ -79,6 +79,10 @@ check.
   database. Expenses and ordinary investment transactions are negative;
   income is positive. Investment-transfer destination rows may be positive.
   Transfers write two rows sharing `transfer_group_id`.
+- Transactions may reference `subcategory_id`; it must belong to the selected
+  user-owned category. Bot selection state is stored in
+  `pending_transaction_captures`, keyed by a short callback token and always
+  queried with `telegram_user_id`, so it survives serverless invocations.
 - User isolation is by `telegram_user_id`. Every dashboard API must validate
   the `X-Telegram-Init-Data` header with `validateTelegramInitData`, then scope
   every repository query/mutation to the resulting user ID.

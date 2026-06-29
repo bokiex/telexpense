@@ -25,6 +25,7 @@ export type RecentTransaction = {
   id: number;
   kind: string;
   category: string;
+  subcategoryId: number | null;
   accountId: number | null;
   transferGroupId: string | null;
   recurringRuleId: number | null;
@@ -116,9 +117,94 @@ export type StoredCategory = {
 export type ResolvedTransactionIdentity = {
   categoryId: number;
   category: string;
+  subcategoryId: number | null;
   accountId: number;
   account: string;
 };
+
+export type PendingTransactionCapture = {
+  token: string;
+  description: string;
+  amountCents: number;
+  currency: string;
+  categoryId: number | null;
+  subcategoryId: number | null;
+};
+
+export async function createPendingTransactionCapture(
+  telegramUserId: number,
+  values: Omit<PendingTransactionCapture, "token" | "categoryId" | "subcategoryId">
+) {
+  const supabase = createSupabaseAdmin();
+  const token = randomUUID().replaceAll("-", "").slice(0, 16);
+  const { error } = await supabase.from("pending_transaction_captures").insert({
+    token,
+    telegram_user_id: telegramUserId,
+    description: values.description,
+    amount_cents: values.amountCents,
+    currency: values.currency,
+    expires_at: new Date(Date.now() + 15 * 60_000).toISOString()
+  });
+  if (error) throw error;
+  return token;
+}
+
+export async function getPendingTransactionCapture(telegramUserId: number, token: string) {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("pending_transaction_captures")
+    .select("token, description, amount_cents, currency, category_id, subcategory_id")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("token", token)
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    token: data.token,
+    description: data.description,
+    amountCents: data.amount_cents,
+    currency: data.currency,
+    categoryId: data.category_id === null ? null : Number(data.category_id),
+    subcategoryId: data.subcategory_id === null ? null : Number(data.subcategory_id)
+  } satisfies PendingTransactionCapture;
+}
+
+export async function updatePendingTransactionCapture(
+  telegramUserId: number,
+  token: string,
+  values: { categoryId?: number; subcategoryId?: number | null }
+) {
+  const supabase = createSupabaseAdmin();
+  const update: Record<string, number | null> = {};
+  if (values.categoryId !== undefined) update.category_id = values.categoryId;
+  if (values.subcategoryId !== undefined) update.subcategory_id = values.subcategoryId;
+  const { error } = await supabase
+    .from("pending_transaction_captures")
+    .update(update)
+    .eq("telegram_user_id", telegramUserId)
+    .eq("token", token);
+  if (error) throw error;
+}
+
+export async function consumePendingTransactionCapture(
+  telegramUserId: number,
+  token: string,
+  accountId: number,
+  expectedCategoryId: number,
+  expectedSubcategoryId: number | null
+) {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase.rpc("consume_pending_transaction_capture", {
+    p_telegram_user_id: telegramUserId,
+    p_token: token,
+    p_account_id: accountId,
+    p_expected_category_id: expectedCategoryId,
+    p_expected_subcategory_id: expectedSubcategoryId
+  });
+  if (error) throw error;
+  return data === null ? null : Number(data);
+}
 
 export async function upsertTelegramUser(user: { id: number; first_name?: string; username?: string }) {
   const supabase = createSupabaseAdmin();
@@ -142,29 +228,14 @@ export async function addTransaction(
     kind: transaction.kind,
     category: resolved.category,
     category_id: resolved.categoryId,
+    subcategory_id: resolved.subcategoryId,
     account_id: accountId,
     description: transaction.description,
     amount_cents: transaction.amountCents,
     currency: transaction.currency,
     occurred_on: new Date().toISOString().slice(0, 10)
   };
-  const { data, error } = await supabase
-    .from("transactions")
-    .insert(insert)
-    .select("id")
-    .single();
-  if (error && (isLegacyAccountColumnRequired(error) || isMissingSchemaError(error))) {
-    const { category_id: _categoryId, account_id: _accountId, ...legacyInsert } = insert;
-    const retry = await supabase
-      .from("transactions")
-      .insert({ ...legacyInsert, account: transaction.account })
-      .select("id")
-      .single();
-    if (retry.error) throw retry.error;
-    return Number(retry.data.id);
-  }
-  if (error) throw error;
-  return Number(data.id);
+  return insertTransactionCompat(supabase, insert, transaction.account);
 }
 
 export async function addTransactionFields(
@@ -173,6 +244,7 @@ export async function addTransactionFields(
     kind: ParsedTransaction["kind"];
     category: string;
     accountId: number;
+    subcategoryId?: number | null;
     description: string;
     amountCents: number;
     currency: string;
@@ -182,35 +254,21 @@ export async function addTransactionFields(
   const supabase = createSupabaseAdmin();
   const category = await resolveCategoryIdentity(telegramUserId, values.category);
   await assertOwnedAccount(telegramUserId, values.accountId);
+  await assertOwnedSubcategory(telegramUserId, values.subcategoryId ?? null, category.categoryId);
   const insert = {
     telegram_user_id: telegramUserId,
     kind: values.kind,
     category: category.category,
     category_id: category.categoryId,
+    subcategory_id: values.subcategoryId ?? null,
     account_id: values.accountId,
     description: values.description,
     amount_cents: values.amountCents,
     currency: values.currency.toUpperCase(),
     occurred_on: values.occurredOn
   };
-  const { data, error } = await supabase
-    .from("transactions")
-    .insert(insert)
-    .select("id")
-    .single();
-  if (error && (isLegacyAccountColumnRequired(error) || isMissingSchemaError(error))) {
-    const accountName = await getAccountName(telegramUserId, values.accountId);
-    const { category_id: _categoryId, account_id: _accountId, ...legacyInsert } = insert;
-    const retry = await supabase
-      .from("transactions")
-      .insert({ ...legacyInsert, account: accountName.toLowerCase() })
-      .select("id")
-      .single();
-    if (retry.error) throw retry.error;
-    return Number(retry.data.id);
-  }
-  if (error) throw error;
-  return Number(data.id);
+  const accountName = await getAccountName(telegramUserId, values.accountId);
+  return insertTransactionCompat(supabase, insert, accountName.toLowerCase());
 }
 
 export async function addTransferFields(
@@ -271,36 +329,16 @@ export async function updateTransaction(
 ) {
   const supabase = createSupabaseAdmin();
   const accountId = resolved.accountId;
-  const { error } = await supabase
-    .from("transactions")
-    .update({
-      kind: transaction.kind,
-      category: resolved.category,
-      category_id: resolved.categoryId,
-      account_id: accountId,
-      description: transaction.description,
-      amount_cents: transaction.amountCents,
-      currency: transaction.currency
-    })
-    .eq("telegram_user_id", telegramUserId)
-    .eq("id", transactionId);
-  if (error && isMissingSchemaError(error)) {
-    const retry = await supabase
-      .from("transactions")
-      .update({
-        kind: transaction.kind,
-        category: transaction.category,
-        account: transaction.account,
-        description: transaction.description,
-        amount_cents: transaction.amountCents,
-        currency: transaction.currency
-      })
-      .eq("telegram_user_id", telegramUserId)
-      .eq("id", transactionId);
-    if (retry.error) throw retry.error;
-    return;
-  }
-  if (error) throw error;
+  await updateTransactionCompat(supabase, telegramUserId, transactionId, {
+    kind: transaction.kind,
+    category: resolved.category,
+    category_id: resolved.categoryId,
+    subcategory_id: resolved.subcategoryId,
+    account_id: accountId,
+    description: transaction.description,
+    amount_cents: transaction.amountCents,
+    currency: transaction.currency
+  }, transaction.account);
 }
 
 export async function updateTransactionFields(
@@ -310,6 +348,7 @@ export async function updateTransactionFields(
     kind: ParsedTransaction["kind"];
     category: string;
     accountId: number;
+    subcategoryId?: number | null;
     description: string;
     amountCents: number;
     currency: string;
@@ -319,39 +358,19 @@ export async function updateTransactionFields(
   const supabase = createSupabaseAdmin();
   const category = await resolveCategoryIdentity(telegramUserId, values.category);
   await assertOwnedAccount(telegramUserId, values.accountId);
-  const { error } = await supabase
-    .from("transactions")
-    .update({
-      kind: values.kind,
-      category: category.category,
-      category_id: category.categoryId,
-      account_id: values.accountId,
-      description: values.description,
-      amount_cents: values.amountCents,
-      currency: values.currency.toUpperCase(),
-      occurred_on: values.occurredOn
-    })
-    .eq("telegram_user_id", telegramUserId)
-    .eq("id", transactionId);
-  if (error && isMissingSchemaError(error)) {
-    const accountName = await getAccountName(telegramUserId, values.accountId);
-    const retry = await supabase
-      .from("transactions")
-      .update({
-        kind: values.kind,
-        category: values.category.toLowerCase(),
-        account: accountName.toLowerCase(),
-        description: values.description,
-        amount_cents: values.amountCents,
-        currency: values.currency.toUpperCase(),
-        occurred_on: values.occurredOn
-      })
-      .eq("telegram_user_id", telegramUserId)
-      .eq("id", transactionId);
-    if (retry.error) throw retry.error;
-    return;
-  }
-  if (error) throw error;
+  await assertOwnedSubcategory(telegramUserId, values.subcategoryId ?? null, category.categoryId);
+  const accountName = await getAccountName(telegramUserId, values.accountId);
+  await updateTransactionCompat(supabase, telegramUserId, transactionId, {
+    kind: values.kind,
+    category: category.category,
+    category_id: category.categoryId,
+    subcategory_id: values.subcategoryId ?? null,
+    account_id: values.accountId,
+    description: values.description,
+    amount_cents: values.amountCents,
+    currency: values.currency.toUpperCase(),
+    occurred_on: values.occurredOn
+  }, accountName.toLowerCase());
 }
 
 export async function deleteTransaction(telegramUserId: number, transactionId: number) {
@@ -388,38 +407,18 @@ export async function listTransactions(
     return query;
   }
 
-  const full = await fetchPage("id, kind, category, account_id, transfer_group_id, recurring_rule_id, description, amount_cents, currency, occurred_on");
-  let rows: any[];
-  if (!full.error) {
-    rows = full.data || [];
-  } else {
-    if (!isMissingSchemaError(full.error)) throw full.error;
-    const withoutRecurringColumns = await fetchPage("id, kind, category, account_id, description, amount_cents, currency, occurred_on");
-    if (!withoutRecurringColumns.error) {
-      rows = (withoutRecurringColumns.data || []).map((row: any) => ({
-        ...row,
-        transfer_group_id: null,
-        recurring_rule_id: null
-      }));
-    } else {
-      if (!isMissingSchemaError(withoutRecurringColumns.error)) throw withoutRecurringColumns.error;
-      const legacy = await fetchPage("id, kind, category, account, description, amount_cents, currency, occurred_on");
-      if (legacy.error) throw legacy.error;
-      rows = (legacy.data || []).map((row: any) => ({
-        ...row,
-        account_id: null,
-        transfer_group_id: null,
-        recurring_rule_id: null
-      }));
-    }
-  }
+  const optionalColumns = ["subcategory_id", "account_id", "transfer_group_id", "recurring_rule_id"];
+  const rows = await selectTransactionsCompat(
+    optionalColumns,
+    (columns) => fetchPage(["id", "kind", "category", ...columns, "description", "amount_cents", "currency", "occurred_on"].join(", "))
+  );
 
   const hasMore = rows.length > cursor.limit;
   const items = rows.slice(0, cursor.limit);
   const last = items.at(-1);
   return {
     items: items.map((tx) => ({
-      id: tx.id, kind: tx.kind, category: tx.category, accountId: tx.account_id,
+      id: tx.id, kind: tx.kind, category: tx.category, subcategoryId: tx.subcategory_id, accountId: tx.account_id,
       transferGroupId: tx.transfer_group_id, recurringRuleId: tx.recurring_rule_id,
       description: tx.description, amountCents: tx.amount_cents, currency: tx.currency, occurredOn: tx.occurred_on
     })),
@@ -805,6 +804,7 @@ export async function getSummary(telegramUserId: number, month: string) {
       id: tx.id,
       kind: tx.kind,
       category: tx.category,
+      subcategoryId: tx.subcategory_id,
       accountId: tx.account_id,
       transferGroupId: tx.transfer_group_id,
       recurringRuleId: tx.recurring_rule_id,
@@ -1077,6 +1077,7 @@ export async function resolveTransactionIdentity(
   return {
     categoryId: categoryResolution.candidate.id,
     category: normalizeIdentity(categoryResolution.candidate.canonical),
+    subcategoryId: resolveSubcategoryId(categoryText, categories, categoryResolution.candidate.id),
     accountId: accountResolution.candidate.id,
     account: normalizeIdentity(accountResolution.candidate.canonical)
   };
@@ -1103,49 +1104,43 @@ async function assertOwnedAccount(telegramUserId: number, accountId: number) {
   if (!data) throw new Error("Account is not available.");
 }
 
+async function assertOwnedSubcategory(telegramUserId: number, subcategoryId: number | null, categoryId: number) {
+  if (subcategoryId === null) return;
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("subcategories")
+    .select("id")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("category_id", categoryId)
+    .eq("id", subcategoryId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Subcategory is not available for this category.");
+}
+
+function resolveSubcategoryId(categoryText: string, categories: StoredCategory[], categoryId: number) {
+  const normalized = normalizeIdentity(categoryText);
+  const matches = categories
+    .find((category) => category.id === categoryId)
+    ?.subcategories.filter((subcategory) => normalizeIdentity(subcategory.name) === normalized) || [];
+  return matches.length === 1 ? matches[0].id : null;
+}
+
 function formatChoices(choices: { canonical: string }[], label: string) {
   return choices.length ? `${label}: ${choices.map((item) => item.canonical).join(", ")}.` : `${label}: open the Mini App to add one.`;
 }
 
 async function getSummaryTransactions(telegramUserId: number, start: string, end: string) {
   const supabase = createSupabaseAdmin();
-  const withAccountId = await supabase
+  const optionalColumns = ["subcategory_id", "account_id", "transfer_group_id", "recurring_rule_id"];
+  return selectTransactionsCompat(optionalColumns, (columns) => supabase
     .from("transactions")
-    .select("id, kind, category, account_id, transfer_group_id, recurring_rule_id, description, amount_cents, currency, occurred_on")
+    .select(["id", "kind", "category", ...columns, "description", "amount_cents", "currency", "occurred_on"].join(", "))
     .eq("telegram_user_id", telegramUserId)
     .gte("occurred_on", start)
     .lt("occurred_on", end)
     .order("occurred_on", { ascending: false })
-    .order("id", { ascending: false });
-
-  if (!withAccountId.error) return withAccountId.data || [];
-  if (!isMissingSchemaError(withAccountId.error)) throw withAccountId.error;
-
-  const withoutRecurringColumns = await supabase
-    .from("transactions")
-    .select("id, kind, category, account_id, description, amount_cents, currency, occurred_on")
-    .eq("telegram_user_id", telegramUserId)
-    .gte("occurred_on", start)
-    .lt("occurred_on", end)
-    .order("occurred_on", { ascending: false })
-    .order("id", { ascending: false });
-
-  if (!withoutRecurringColumns.error) {
-    return (withoutRecurringColumns.data || []).map((row) => ({ ...row, transfer_group_id: null, recurring_rule_id: null }));
-  }
-  if (!isMissingSchemaError(withoutRecurringColumns.error)) throw withoutRecurringColumns.error;
-
-  const legacy = await supabase
-    .from("transactions")
-    .select("id, kind, category, account, description, amount_cents, currency, occurred_on")
-    .eq("telegram_user_id", telegramUserId)
-    .gte("occurred_on", start)
-    .lt("occurred_on", end)
-    .order("occurred_on", { ascending: false })
-    .order("id", { ascending: false });
-
-  if (legacy.error) throw legacy.error;
-  return (legacy.data || []).map((row) => ({ ...row, account_id: null, transfer_group_id: null, recurring_rule_id: null }));
+    .order("id", { ascending: false }));
 }
 
 async function getAccountTransactions(telegramUserId: number) {
@@ -1235,6 +1230,73 @@ function isMissingSchemaError(error: unknown) {
 function isLegacyAccountColumnRequired(error: unknown) {
   const candidate = error as { code?: string; message?: string; details?: string };
   return candidate.code === "23502" && /account/i.test(`${candidate.message || ""} ${candidate.details || ""}`);
+}
+
+async function insertTransactionCompat(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  insert: Record<string, unknown>,
+  account: string
+) {
+  const values = { ...insert };
+  for (;;) {
+    const result = await supabase.from("transactions").insert(values).select("id").single();
+    if (!result.error) return Number(result.data.id);
+    if (isLegacyAccountColumnRequired(result.error) && !("account" in values)) {
+      values.account = account;
+      continue;
+    }
+    const column = missingCompatibilityColumn(result.error, values);
+    if (!column) throw result.error;
+    delete values[column];
+  }
+}
+
+async function updateTransactionCompat(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  telegramUserId: number,
+  transactionId: number,
+  update: Record<string, unknown>,
+  account: string
+) {
+  const values = { ...update };
+  for (;;) {
+    const result = await supabase
+      .from("transactions")
+      .update(values)
+      .eq("telegram_user_id", telegramUserId)
+      .eq("id", transactionId);
+    if (!result.error) return;
+    const column = missingCompatibilityColumn(result.error, values);
+    if (!column) throw result.error;
+    delete values[column];
+    if (column === "account_id") values.account = account;
+  }
+}
+
+async function selectTransactionsCompat(
+  optionalColumns: string[],
+  select: (columns: string[]) => PromiseLike<{ data: any[] | null; error: unknown }>
+) {
+  const columns = [...optionalColumns];
+  for (;;) {
+    const result = await select(columns);
+    if (!result.error) {
+      return (result.data || []).map((row) => Object.fromEntries([
+        ...Object.entries(row),
+        ...optionalColumns.filter((column) => !columns.includes(column)).map((column) => [column, null])
+      ]));
+    }
+    const column = missingCompatibilityColumn(result.error, Object.fromEntries(columns.map((item) => [item, true])));
+    if (!column) throw result.error;
+    columns.splice(columns.indexOf(column), 1);
+  }
+}
+
+function missingCompatibilityColumn(error: unknown, values: Record<string, unknown>) {
+  if (!isMissingSchemaError(error)) return null;
+  const message = (error as { message?: string }).message || "";
+  return ["subcategory_id", "category_id", "account_id", "transfer_group_id", "recurring_rule_id"]
+    .find((column) => column in values && new RegExp(`\\b${column}\\b`, "i").test(message)) || null;
 }
 
 function slug(value: string) {
