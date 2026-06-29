@@ -7,6 +7,8 @@ export type ParsedTransaction = {
   currency: string;
 };
 
+import { normalizeIdentity } from "@/lib/identity";
+
 const kindWords = new Set(["expense", "income", "investment", "transfer"]);
 const moneyPattern = /(?<sign>-)?(?:[$€£]\s*)?(?<amount>\d+(?:,\d{3})*(?:\.\d{1,2})?|\d+)(?:\s*(?<currency>[A-Za-z]{3}))?/;
 
@@ -30,8 +32,8 @@ export function parseTransactionMessage(text: string): ParsedTransaction {
 
   return {
     kind,
-    category: body[0].toLowerCase(),
-    account: body[1].toLowerCase(),
+    category: normalizeIdentity(body[0]),
+    account: normalizeIdentity(body[1]),
     description: body.slice(2).join(", ").trim() || body[0].toLowerCase(),
     amountCents,
     currency
@@ -50,4 +52,3 @@ function parseMoney(text: string) {
     currency: (match.groups.currency || "USD").toUpperCase()
   };
 }
-

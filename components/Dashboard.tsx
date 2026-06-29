@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { netWorthByCurrency } from "@/lib/finance";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -92,6 +93,11 @@ type Summary = {
   recurringRules: RecurringRule[];
   loanProgress: LoanProgress[];
   recent: RecentTransaction[];
+};
+
+type HistoryPage = {
+  items: RecentTransaction[];
+  nextCursor: { beforeDate: string; beforeId: number } | null;
 };
 
 type StoredCategory = {
@@ -273,7 +279,13 @@ export default function Dashboard() {
   const [modal, setModal] = useState<ModalState>({ type: "none" });
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [history, setHistory] = useState<RecentTransaction[] | null>(null);
+  const [historyCursor, setHistoryCursor] = useState<HistoryPage["nextCursor"]>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const historyRequestVersion = useRef(0);
 
   useEffect(() => {
     const webApp = window.Telegram?.WebApp;
@@ -285,14 +297,21 @@ export default function Dashboard() {
     let ignore = false;
     async function load() {
       setError("");
-      const response = await apiRequest(`/api/summary?month=${encodeURIComponent(month)}`, "GET");
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        if (!ignore) setError(body?.error || "Could not load dashboard.");
-        return;
+      setLoading(true);
+      try {
+        const response = await apiRequest(`/api/summary?month=${encodeURIComponent(month)}`, "GET");
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          if (!ignore) setError(body?.error || "Could not load dashboard.");
+          return;
+        }
+        const data = (await response.json()) as Summary;
+        if (!ignore) setSummary(data);
+      } catch {
+        if (!ignore) setError("Could not load dashboard.");
+      } finally {
+        if (!ignore) setLoading(false);
       }
-      const data = (await response.json()) as Summary;
-      if (!ignore) setSummary(data);
     }
     load();
     return () => {
@@ -300,8 +319,77 @@ export default function Dashboard() {
     };
   }, [month, refreshKey]);
 
+  useEffect(() => {
+    if (activeTab !== "transactions") return;
+    let ignore = false;
+    const requestVersion = ++historyRequestVersion.current;
+    async function loadHistory() {
+      setHistory(null);
+      setHistoryCursor(null);
+      setHistoryLoading(true);
+      setHistoryError("");
+      try {
+        const query = new URLSearchParams({ month, limit: "50" });
+        const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
+        if (!response.ok) throw new Error("Could not load transaction history.");
+        const page = (await response.json()) as HistoryPage;
+        if (!ignore && historyRequestVersion.current === requestVersion) {
+          setHistory(page.items);
+          setHistoryCursor(page.nextCursor);
+        }
+      } catch (loadError) {
+        if (!ignore && historyRequestVersion.current === requestVersion) {
+          setHistoryError(loadError instanceof Error ? loadError.message : "Could not load transaction history.");
+        }
+      } finally {
+        if (!ignore && historyRequestVersion.current === requestVersion) setHistoryLoading(false);
+      }
+    }
+    loadHistory();
+    return () => {
+      ignore = true;
+      if (historyRequestVersion.current === requestVersion) historyRequestVersion.current += 1;
+    };
+  }, [activeTab, month, refreshKey]);
+
   const data = useMemo(() => buildAppData(summary), [summary]);
-  const reload = () => setRefreshKey((value) => value + 1);
+  const historyData = useMemo(
+    () => buildAppData(summary, history || summary?.recent),
+    [history, summary]
+  );
+  const reload = () => {
+    historyRequestVersion.current += 1;
+    setRefreshKey((value) => value + 1);
+  };
+
+  async function loadMoreHistory() {
+    if (!historyCursor || historyLoading) return;
+    const requestVersion = historyRequestVersion.current;
+    const requestMonth = month;
+    const requestCursor = historyCursor;
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const query = new URLSearchParams({
+        month: requestMonth,
+        limit: "50",
+        beforeDate: requestCursor.beforeDate,
+        beforeId: String(requestCursor.beforeId)
+      });
+      const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
+      if (!response.ok) throw new Error("Could not load more transactions.");
+      const page = (await response.json()) as HistoryPage;
+      if (historyRequestVersion.current !== requestVersion) return;
+      setHistory((current) => [...(current || []), ...page.items]);
+      setHistoryCursor(page.nextCursor);
+    } catch (loadError) {
+      if (historyRequestVersion.current === requestVersion) {
+        setHistoryError(loadError instanceof Error ? loadError.message : "Could not load more transactions.");
+      }
+    } finally {
+      if (historyRequestVersion.current === requestVersion) setHistoryLoading(false);
+    }
+  }
 
   async function saveTransaction(tx: TransactionFormValues) {
     if (tx.type === "transfer") {
@@ -522,10 +610,11 @@ export default function Dashboard() {
           <input className="mini-month" type="month" value={month} aria-label="Month" onChange={(event) => setMonth(event.target.value || month)} />
         </header>
 
-        {error ? <div className="mini-error">{friendlyError(error)}</div> : null}
+        {error ? <div className="mini-error">{friendlyError(error)} <button type="button" onClick={reload}>Retry</button></div> : null}
 
         <div className="mini-content">
-          {activeTab === "home" ? (
+          {loading ? <DashboardSkeleton /> : null}
+          {!loading && activeTab === "home" ? (
             <HomeView
               data={data}
               summary={summary}
@@ -535,16 +624,21 @@ export default function Dashboard() {
               onAddTransaction={() => setModal({ type: "add-transaction" })}
             />
           ) : null}
-          {activeTab === "transactions" ? (
+          {!loading && activeTab === "transactions" ? (
             <TransactionListView
-              data={data}
+              data={historyData}
               month={month}
               onEdit={(tx) => setModal({ type: "edit-transaction", tx })}
               onDelete={deleteTransaction}
               onAdd={() => setModal({ type: "add-transaction" })}
+              loading={historyLoading}
+              error={historyError}
+              hasMore={Boolean(historyCursor)}
+              onLoadMore={loadMoreHistory}
+              onRetry={historyCursor ? loadMoreHistory : reload}
             />
           ) : null}
-          {activeTab === "accounts" ? (
+          {!loading && activeTab === "accounts" ? (
             <AccountsView
               accounts={data.accounts}
               snapshots={summary?.portfolioSnapshots || []}
@@ -557,8 +651,8 @@ export default function Dashboard() {
               onDeleteRecurringRule={deleteRecurringRule}
             />
           ) : null}
-          {activeTab === "budget" ? <BudgetView data={data} summary={summary} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
-          {activeTab === "categories" ? (
+          {!loading && activeTab === "budget" ? <BudgetView data={data} summary={summary} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
+          {!loading && activeTab === "categories" ? (
             <CategoriesView
               data={data}
               onAddCategory={() => setModal({ type: "add-category" })}
@@ -643,6 +737,18 @@ export default function Dashboard() {
   );
 }
 
+function DashboardSkeleton() {
+  return (
+    <div className="screen-stack" aria-label="Loading dashboard" aria-busy="true">
+      <div className="skeleton skeleton-title" />
+      <div className="skeleton skeleton-card" />
+      <div className="skeleton skeleton-row" />
+      <div className="skeleton skeleton-row" />
+      <div className="skeleton skeleton-row" />
+    </div>
+  );
+}
+
 function HomeView({
   data,
   summary,
@@ -660,16 +766,20 @@ function HomeView({
 }) {
   const totalIncome = data.transactions.filter((tx) => tx.kind === "income").reduce((sum, tx) => sum + tx.amount, 0);
   const totalExpense = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
-  const totalBalance = totalIncome - totalExpense;
+  const netWorthTotals = Object.entries(netWorthByCurrency(data.accounts, summary?.portfolioSnapshots));
   const recent = data.transactions.slice(0, 5);
   const currency = data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
 
   return (
     <div className="screen-stack">
       <section className="balance-block">
-        <p className="eyebrow">Total Balance</p>
+        <p className="eyebrow">Net Worth</p>
         <div className="balance-row">
-          <h1>{balanceVisible ? money(totalBalance, currency) : "••••••"}</h1>
+          <div className="account-total-list">
+            {netWorthTotals.length ? netWorthTotals.map(([accountCurrency, total]) => (
+              <h1 key={accountCurrency}>{balanceVisible ? money(total, accountCurrency) : "••••••"}</h1>
+            )) : <h1>{balanceVisible ? money(0, DEFAULT_CURRENCY) : "••••••"}</h1>}
+          </div>
           <button className="ghost-button" type="button" onClick={onToggleBalance} aria-label="Toggle balance visibility">
             {balanceVisible ? <Eye size={18} /> : <EyeOff size={18} />}
           </button>
@@ -713,13 +823,23 @@ function TransactionListView({
   month,
   onEdit,
   onDelete,
-  onAdd
+  onAdd,
+  loading,
+  error,
+  hasMore,
+  onLoadMore,
+  onRetry
 }: {
   data: AppData;
   month: string;
   onEdit: (tx: Transaction) => void;
   onDelete: (tx: Transaction) => void;
   onAdd: () => void;
+  loading: boolean;
+  error: string;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  onRetry: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | TransactionType>("all");
@@ -811,6 +931,13 @@ function TransactionListView({
         ) : <EmptyState label={`No transactions found for ${month}`} />}
       </div>
 
+      {error ? <div className="mini-error">{error} <button type="button" onClick={onRetry}>Retry</button></div> : null}
+      {hasMore || loading ? (
+        <button className="link-button" type="button" disabled={loading} onClick={onLoadMore}>
+          {loading ? "Loading…" : "Load more"}
+        </button>
+      ) : null}
+
       <button className="primary-action" type="button" onClick={onAdd}>
         <Plus size={16} /> Add Transaction
       </button>
@@ -839,15 +966,12 @@ function AccountsView({
   onEditRecurringRule: (rule: RecurringRule) => void;
   onDeleteRecurringRule: (rule: RecurringRule) => void;
 }) {
-  const totalByCurrency = accounts.reduce<Record<string, number>>((totals, account) => {
-    totals[account.currency] = (totals[account.currency] || 0) + account.balanceCents;
-    return totals;
-  }, {});
+  const totalByCurrency = netWorthByCurrency(accounts, snapshots);
 
   return (
     <div className="screen-stack">
       <section className="mini-card">
-        <p className="eyebrow">Total Across Accounts</p>
+        <p className="eyebrow">Net Worth Across Accounts</p>
         <div className="account-total-list">
           {Object.entries(totalByCurrency).length ? Object.entries(totalByCurrency).map(([currency, total]) => (
             <strong key={currency}>{money(total, currency)}</strong>
@@ -1270,7 +1394,7 @@ function AccountModal({
   const [name, setName] = useState(account?.name || "");
   const [institution, setInstitution] = useState(account?.institution || "");
   const [accountType, setAccountType] = useState<AccountType>(account?.accountType || "bank");
-  const [openingBalance, setOpeningBalance] = useState(account ? String(account.openingBalanceCents / 100) : "0");
+  const [openingBalance, setOpeningBalance] = useState(account ? String((account.accountType === "loan" || account.accountType === "card" ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents) / 100) : "0");
   const [currency, setCurrency] = useState(account?.currency || DEFAULT_CURRENCY);
   const [color, setColor] = useState(account?.color || "#60a5fa");
   const [icon, setIcon] = useState(account?.icon || "Wallet");
@@ -1318,7 +1442,7 @@ function AccountModal({
           </div>
         </FieldLabel>
         <div className="form-grid-2">
-          <FieldLabel label="Opening Balance">
+          <FieldLabel label={accountType === "loan" || accountType === "card" ? "Opening Debt" : "Opening Balance"}>
             <input value={openingBalance} inputMode="decimal" onChange={(event) => setOpeningBalance(event.target.value)} />
           </FieldLabel>
           <FieldLabel label="Currency">
@@ -1800,7 +1924,7 @@ function EmptyState({ label }: { label: string }) {
   return <div className="empty-state"><Banknote size={28} /><span>{label}</span></div>;
 }
 
-function buildAppData(summary: Summary | null): AppData {
+function buildAppData(summary: Summary | null, history?: RecentTransaction[]): AppData {
   if (!summary) return { categories: [], accounts: [], transactions: [] };
   const categoryMap = new Map<string, Category>();
   const storedCategories = new Map(summary.storedCategories.map((category) => [category.sourceKey, category]));
@@ -1833,10 +1957,10 @@ function buildAppData(summary: Summary | null): AppData {
 
   for (const item of summary.categories) addCategory(item.category, item.currency);
   for (const item of summary.budgets) addCategory(item.category, item.currency);
-  for (const item of summary.recent) addCategory(item.category, item.currency);
+  for (const item of history || summary.recent) addCategory(item.category, item.currency);
   for (const stored of summary.storedCategories) addCategory(stored.sourceName);
 
-  const transactions = summary.recent.map((tx) => {
+  const transactions = (history || summary.recent).map((tx) => {
     const category = addCategory(tx.category, tx.currency);
     return {
       id: String(tx.id),

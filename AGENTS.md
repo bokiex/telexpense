@@ -64,6 +64,8 @@ Variables expected by the active application:
   current dashboard does not query Supabase directly.
 - `SUPABASE_SECRET_KEY`: privileged server key. Older projects may instead use
   `SUPABASE_SERVICE_ROLE_KEY`.
+- `CRON_SECRET`: bearer secret Vercel uses to authorize the recurring
+  materialization job.
 
 Never expose either Supabase privileged key in client components or responses.
 After applying `supabase/schema.sql` and deploying, point BotFather's Mini App
@@ -92,6 +94,12 @@ check.
   databases have the new account columns.
 - Keep `supabase/schema.sql` safe to re-run when evolving the schema, and update
   repository types/queries and dashboard API payloads together.
+- Evolve deployed data with versioned files created by `supabase migration new`;
+  keep `schema.sql` aligned for fresh installs. Summary GET handlers must remain
+  read-only: recurring materialization belongs in an explicit write/job path.
+- Account balance signs are invariant: assets are positive, loan/card
+  liabilities are negative, and debt-only UI converts liabilities to absolute
+  positive display values.
 
 ## Security sharp edges
 
@@ -118,6 +126,7 @@ check.
 For changes to the active application:
 
 ```bash
+npm test
 npm run typecheck
 npm run build
 ```

@@ -3,6 +3,7 @@ import { requireEnv } from "@/lib/env";
 import { upsertAccount } from "@/lib/repository";
 import { validateTelegramInitData } from "@/lib/telegram";
 import type { AccountType } from "@/lib/repository";
+import { normalizeOpeningBalance } from "@/lib/finance";
 
 export const runtime = "nodejs";
 
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
       name,
       institution: institution || null,
       accountType: accountType as AccountType,
-      openingBalanceCents: Math.round(openingBalanceCents),
+      openingBalanceCents: normalizeOpeningBalance(accountType as AccountType, openingBalanceCents),
       currency,
       color,
       icon
