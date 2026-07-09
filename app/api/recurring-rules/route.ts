@@ -23,15 +23,18 @@ export async function POST(request: NextRequest) {
     const dayOfMonth = Number(body.dayOfMonth || 1);
     const active = body.active !== false;
 
-    if (id !== null && !Number.isFinite(id)) return NextResponse.json({ error: "Rule id is not valid." }, { status: 400 });
+    if (id !== null && (!Number.isSafeInteger(id) || id <= 0)) return NextResponse.json({ error: "Rule id is not valid." }, { status: 400 });
     if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
     if (!ruleTypes.has(ruleType)) return NextResponse.json({ error: "Rule type is not valid." }, { status: 400 });
-    if (!Number.isFinite(amountCents) || amountCents <= 0) return NextResponse.json({ error: "Amount is not valid." }, { status: 400 });
+    if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return NextResponse.json({ error: "Amount must be a positive integer number of cents." }, { status: 400 });
     if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
     if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
-    if (!Number.isFinite(fromAccountId)) return NextResponse.json({ error: "From account is required." }, { status: 400 });
-    if ((ruleType === "investment_transfer" || ruleType === "loan_payment") && !Number.isFinite(toAccountId)) {
+    if (!Number.isSafeInteger(fromAccountId) || fromAccountId <= 0) return NextResponse.json({ error: "From account is required." }, { status: 400 });
+    if ((ruleType === "investment_transfer" || ruleType === "loan_payment") && (!Number.isSafeInteger(toAccountId) || Number(toAccountId) <= 0)) {
       return NextResponse.json({ error: "To account is required for transfers." }, { status: 400 });
+    }
+    if (Number.isSafeInteger(toAccountId) && toAccountId === fromAccountId) {
+      return NextResponse.json({ error: "From and to accounts must be different." }, { status: 400 });
     }
     if (!Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
       return NextResponse.json({ error: "Day of month must be 1-31." }, { status: 400 });
@@ -41,11 +44,11 @@ export async function POST(request: NextRequest) {
       id,
       name,
       ruleType: ruleType as RecurringRuleType,
-      amountCents: Math.round(amountCents),
+      amountCents,
       currency,
       category,
       fromAccountId,
-      toAccountId: Number.isFinite(toAccountId) ? toAccountId : null,
+      toAccountId: Number.isSafeInteger(toAccountId) ? toAccountId : null,
       dayOfMonth,
       active
     });
@@ -59,7 +62,7 @@ export async function DELETE(request: NextRequest) {
   try {
     const userId = authenticatedUserId(request);
     const id = Number(request.nextUrl.searchParams.get("id"));
-    if (!Number.isFinite(id)) return NextResponse.json({ error: "Rule id is required." }, { status: 400 });
+    if (!Number.isSafeInteger(id) || id <= 0) return NextResponse.json({ error: "Rule id is required." }, { status: 400 });
     await deleteRecurringRule(userId, id);
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { deleteBudget, setBudget } from "@/lib/repository";
 import { validateTelegramInitData } from "@/lib/telegram";
 import { requireEnv } from "@/lib/env";
+import { isValidMonth } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -15,12 +16,13 @@ export async function POST(request: NextRequest) {
     const currency = String(body.currency || "USD").trim().toUpperCase();
 
     if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
-    if (!/^\d{4}-\d{2}$/.test(month)) return NextResponse.json({ error: "Month must be YYYY-MM." }, { status: 400 });
-    if (!Number.isFinite(amountCents) || amountCents < 0) {
+    if (!isValidMonth(month)) return NextResponse.json({ error: "Month must be YYYY-MM." }, { status: 400 });
+    if (!Number.isSafeInteger(amountCents) || amountCents < 0) {
       return NextResponse.json({ error: "Budget amount is not valid." }, { status: 400 });
     }
 
-    await setBudget(userId, category, month, Math.round(amountCents), currency || "USD");
+    if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
+    await setBudget(userId, category, month, amountCents, currency);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return errorResponse(error);
@@ -34,7 +36,7 @@ export async function DELETE(request: NextRequest) {
     const month = String(request.nextUrl.searchParams.get("month") || "").trim();
 
     if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
-    if (!/^\d{4}-\d{2}$/.test(month)) return NextResponse.json({ error: "Month must be YYYY-MM." }, { status: 400 });
+    if (!isValidMonth(month)) return NextResponse.json({ error: "Month must be YYYY-MM." }, { status: 400 });
 
     await deleteBudget(userId, category, month);
     return NextResponse.json({ ok: true });

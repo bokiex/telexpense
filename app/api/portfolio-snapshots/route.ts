@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireEnv } from "@/lib/env";
 import { upsertPortfolioSnapshot } from "@/lib/repository";
 import { validateTelegramInitData } from "@/lib/telegram";
+import { isValidMonth } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -14,9 +15,9 @@ export async function POST(request: NextRequest) {
     const portfolioValueCents = Number(body.portfolioValueCents);
     const currency = String(body.currency || "SGD").trim().toUpperCase();
 
-    if (!Number.isFinite(accountId)) return NextResponse.json({ error: "Account id is required." }, { status: 400 });
-    if (!/^\d{4}-\d{2}$/.test(month)) return NextResponse.json({ error: "Month must be YYYY-MM." }, { status: 400 });
-    if (!Number.isFinite(portfolioValueCents) || portfolioValueCents < 0) {
+    if (!Number.isSafeInteger(accountId) || accountId <= 0) return NextResponse.json({ error: "Account id is required." }, { status: 400 });
+    if (!isValidMonth(month)) return NextResponse.json({ error: "Month must be YYYY-MM." }, { status: 400 });
+    if (!Number.isSafeInteger(portfolioValueCents) || portfolioValueCents < 0) {
       return NextResponse.json({ error: "Portfolio value is not valid." }, { status: 400 });
     }
     if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
     await upsertPortfolioSnapshot(userId, {
       accountId,
       month,
-      portfolioValueCents: Math.round(portfolioValueCents),
+      portfolioValueCents,
       currency
     });
     return NextResponse.json({ ok: true });

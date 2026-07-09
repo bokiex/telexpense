@@ -427,20 +427,41 @@ async function assertTransactionIsNotGrouped(
     .eq("id", transactionId)
     .maybeSingle();
   if (error) {
-    if (isMissingSchemaError(error)) return;
+    if (isMissingSchemaError(error)) {
+      const legacy = await supabase
+        .from("transactions")
+        .select("id")
+        .eq("telegram_user_id", telegramUserId)
+        .eq("id", transactionId)
+        .maybeSingle();
+      if (legacy.error) throw legacy.error;
+      if (!legacy.data) throw new Error("Transaction is not available.");
+      return;
+    }
     throw error;
   }
+  if (!data) throw new Error("Transaction is not available.");
   const editError = groupedTransactionEditError(data?.transfer_group_id ?? null);
   if (editError) throw new Error(editError);
 }
 
 export async function deleteTransaction(telegramUserId: number, transactionId: number) {
   const supabase = createSupabaseAdmin();
+  await assertTransactionIsNotGrouped(supabase, telegramUserId, transactionId);
   const { error } = await supabase
     .from("transactions")
     .delete()
     .eq("telegram_user_id", telegramUserId)
     .eq("id", transactionId);
+  if (error) throw error;
+}
+
+export async function deleteTransfer(telegramUserId: number, transferGroupId: string) {
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase.rpc("delete_transfer_group", {
+    target_user_id: telegramUserId,
+    target_transfer_group_id: transferGroupId
+  });
   if (error) throw error;
 }
 
@@ -591,6 +612,7 @@ export async function upsertPortfolioSnapshot(
     currency: string;
   }
 ) {
+  await assertOwnedAccount(telegramUserId, values.accountId);
   const supabase = createSupabaseAdmin();
   const { error } = await supabase.from("portfolio_snapshots").upsert(
     {
@@ -621,6 +643,13 @@ export async function upsertRecurringRule(
     active: boolean;
   }
 ) {
+  await assertOwnedAccount(telegramUserId, values.fromAccountId);
+  if (values.toAccountId !== null && values.toAccountId !== undefined) {
+    await assertOwnedAccount(telegramUserId, values.toAccountId);
+  }
+  if (values.ruleType !== "subscription" && values.toAccountId === values.fromAccountId) {
+    throw new Error("From and to accounts must be different.");
+  }
   const supabase = createSupabaseAdmin();
   const payload = {
     telegram_user_id: telegramUserId,
@@ -637,12 +666,15 @@ export async function upsertRecurringRule(
   };
 
   if (values.id) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("recurring_rules")
       .update(payload)
       .eq("telegram_user_id", telegramUserId)
-      .eq("id", values.id);
+      .eq("id", values.id)
+      .select("id")
+      .maybeSingle();
     if (error) throw error;
+    if (!data) throw new Error("Recurring rule is not available.");
     return values.id;
   }
 
@@ -657,12 +689,15 @@ export async function upsertRecurringRule(
 
 export async function deleteRecurringRule(telegramUserId: number, ruleId: number) {
   const supabase = createSupabaseAdmin();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("recurring_rules")
     .update({ active: false, updated_at: new Date().toISOString() })
     .eq("telegram_user_id", telegramUserId)
-    .eq("id", ruleId);
+    .eq("id", ruleId)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) throw new Error("Recurring rule is not available.");
 }
 
 export async function upsertCategory(
