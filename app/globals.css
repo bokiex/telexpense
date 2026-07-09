@@ -36,6 +36,47 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: wait;
+}
+
+.pending-button-content {
+  display: grid;
+  place-items: center;
+  width: 100%;
+}
+
+.pending-button-idle,
+.pending-button-status {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.pending-button-content.pending .pending-button-idle {
+  visibility: hidden;
+}
+
+.brand-loader {
+  color: var(--primary);
+  animation: brand-loader-spin 0.9s linear infinite;
+}
+
+.card-actions .pending-button-status {
+  font-size: 0;
+}
+
+@keyframes brand-loader-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-loader { animation: brand-loader-pulse 1.2s ease-in-out infinite; }
+  @keyframes brand-loader-pulse { 50% { opacity: 0.45; } }
+}
+
 .mini-root {
   min-height: 100vh;
   display: grid;

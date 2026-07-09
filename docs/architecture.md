@@ -65,6 +65,11 @@ group identity.
 
 Telegram's Mini App docs describe multiple launch paths, including main app/profile button, inline keyboard button, keyboard button, and menu button. This project supports menu or inline button launch by returning an inline `web_app` button in bot replies. BotFather should also be used to configure the main Mini App or menu button for a one-tap dashboard.
 
+Dashboard mutations and transaction-history pagination use the shared
+`PendingButton` and `usePendingAction` primitives. They disable only the
+initiating control while its request is pending, preserve its layout, and
+expose the state through `aria-busy` and a polite status announcement.
+
 The Mini App must run on HTTPS outside Telegram's test environment. In
 production, never disable `initData` validation because it is the boundary that
 maps a dashboard API call to a Telegram user. Validation requires a positive

@@ -7,6 +7,8 @@ This repository contains two implementations. The active product is the Next.js
 
 - `app/page.tsx` renders the Telegram Mini App dashboard through
   `components/Dashboard.tsx`.
+- `components/PendingButton.tsx` provides the shared in-place loading state and
+  duplicate-submission guard for user-triggered asynchronous dashboard actions.
 - `app/api/telegram/webhook/route.ts` is the Telegram bot webhook.
 - The other `app/api/**/route.ts` handlers are the dashboard's JSON API.
 - `lib/parser.ts` and `lib/budget.ts` contain domain rules; `lib/repository.ts`
@@ -108,6 +110,9 @@ check.
 - Account balance signs are invariant: assets are positive, loan/card
   liabilities are negative, and debt-only UI converts liabilities to absolute
   positive display values.
+- Use `PendingButton` or `usePendingAction` for new user-triggered asynchronous
+  dashboard actions so the initiating control is disabled and exposes an
+  accessible in-place status until completion.
 
 ## Security sharp edges
 
