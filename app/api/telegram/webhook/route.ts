@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
 
   try {
     if (text.startsWith("/start")) {
+      await upsertTelegramUser(user);
       await sendTelegramMessage(chatId, "Send expenses like: food, debit card, lunch, $4.20", dashboardKeyboard());
       return NextResponse.json({ ok: true });
     }

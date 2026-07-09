@@ -12,6 +12,9 @@ import {
   transactionCategoryError
 } from "../lib/transactionCategory";
 import { transferAccounts } from "../lib/transfer";
+import { isValidDate, isValidMonth, transactionAmountError } from "../lib/validation";
+import crypto from "node:crypto";
+import { validateTelegramInitData } from "../lib/telegram";
 
 test("transfers omit categories while expense and income still require them", () => {
   assert.equal(transactionCategory("transfer", undefined), null);
@@ -22,6 +25,39 @@ test("transfers omit categories while expense and income still require them", ()
   assert.equal(transactionCategoryError("transfer", null), null);
   assert.equal(transactionCategoryError("expense", null), "Category is required.");
   assert.equal(transactionCategoryError("income", null), "Category is required.");
+});
+
+test("calendar validation rejects normalized impossible dates and months", () => {
+  assert.equal(isValidDate("2026-02-28"), true);
+  assert.equal(isValidDate("2024-02-29"), true);
+  assert.equal(isValidDate("2026-02-29"), false);
+  assert.equal(isValidDate("2026-13-01"), false);
+  assert.equal(isValidMonth("2026-12"), true);
+  assert.equal(isValidMonth("2026-13"), false);
+});
+
+test("transaction amounts enforce integer cents and kind sign invariants", () => {
+  assert.equal(transactionAmountError("expense", -100), null);
+  assert.equal(transactionAmountError("income", 100), null);
+  assert.equal(transactionAmountError("investment", -100), null);
+  assert.equal(transactionAmountError("expense", 100), "Expense amount must be negative.");
+  assert.equal(transactionAmountError("income", -100), "Income amount must be positive.");
+  assert.match(transactionAmountError("expense", 1.5) || "", /integer/);
+});
+
+test("Telegram init data rejects future authentication dates", () => {
+  const token = "test-token";
+  const params = new URLSearchParams({
+    auth_date: String(Math.floor(Date.now() / 1000) + 60),
+    user: JSON.stringify({ id: 123 })
+  });
+  const dataCheckString = Array.from(params.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+  const secret = crypto.createHmac("sha256", "WebAppData").update(token).digest();
+  params.set("hash", crypto.createHmac("sha256", secret).update(dataCheckString).digest("hex"));
+  assert.throws(() => validateTelegramInitData(params.toString(), token), /expired/);
 });
 
 test("generic transaction persistence rejects ungrouped transfers", () => {

@@ -24,15 +24,18 @@ export function validateTelegramInitData(initData: string, botToken: string, max
   }
 
   const authDate = Number(params.get("auth_date") || 0);
-  if (!authDate || Date.now() / 1000 - authDate > maxAgeSeconds) {
+  const ageSeconds = Math.floor(Date.now() / 1000) - authDate;
+  if (!Number.isSafeInteger(authDate) || authDate <= 0 || ageSeconds < 0 || ageSeconds > maxAgeSeconds) {
     throw new Error("Telegram init data is expired");
   }
 
   const userValue = params.get("user");
   if (!userValue) throw new Error("Telegram user is missing");
+  const user = JSON.parse(userValue) as TelegramUser;
+  if (!Number.isSafeInteger(user?.id) || user.id <= 0) throw new Error("Telegram user is invalid");
 
   return {
-    user: JSON.parse(userValue) as TelegramUser,
+    user,
     queryId: params.get("query_id")
   };
 }

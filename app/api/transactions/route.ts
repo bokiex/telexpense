@@ -8,6 +8,7 @@ import {
   transactionCategory,
   transactionCategoryError
 } from "@/lib/transactionCategory";
+import { isValidDate, transactionAmountError } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -35,10 +36,10 @@ export async function POST(request: NextRequest) {
     if (!Number.isFinite(accountId)) return NextResponse.json({ error: "Account id is required." }, { status: 400 });
     if (subcategoryId !== null && !Number.isSafeInteger(subcategoryId)) return NextResponse.json({ error: "Subcategory id is not valid." }, { status: 400 });
     if (!description) return NextResponse.json({ error: "Description is required." }, { status: 400 });
-    if (!Number.isFinite(amountCents)) return NextResponse.json({ error: "Amount is not valid." }, { status: 400 });
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)) {
-      return NextResponse.json({ error: "Date must be YYYY-MM-DD." }, { status: 400 });
-    }
+    const amountError = transactionAmountError(kind as ParsedTransaction["kind"], amountCents);
+    if (amountError) return NextResponse.json({ error: amountError }, { status: 400 });
+    if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
+    if (!isValidDate(occurredOn)) return NextResponse.json({ error: "Date must be a valid YYYY-MM-DD date." }, { status: 400 });
 
     const id = await addTransactionFields(user.id, {
       kind: kind as ParsedTransaction["kind"],
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
       accountId,
       subcategoryId,
       description,
-      amountCents: Math.round(amountCents),
+      amountCents,
       currency: currency || "USD",
       occurredOn
     });

@@ -446,7 +446,10 @@ export default function Dashboard() {
   }
 
   async function deleteTransaction(tx: Transaction) {
-    const response = await apiRequest(`/api/transactions/${tx.sourceId}`, "DELETE");
+    const path = tx.transferGroupId
+      ? `/api/transfers/${tx.transferGroupId}`
+      : `/api/transactions/${tx.sourceId}`;
+    const response = await apiRequest(path, "DELETE");
     if (!response.ok) {
       setError("Could not delete transaction.");
       return;

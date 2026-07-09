@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireEnv } from "@/lib/env";
 import { listTransactions } from "@/lib/repository";
 import { validateTelegramInitData } from "@/lib/telegram";
+import { isValidDate, isValidMonth } from "@/lib/validation";
 
 export const runtime = "nodejs";
 
@@ -17,9 +18,9 @@ export async function GET(request: NextRequest) {
     const beforeDate = request.nextUrl.searchParams.get("beforeDate");
     const beforeId = Number(request.nextUrl.searchParams.get("beforeId"));
     if (
-      !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)
+      !isValidMonth(month)
       || Boolean(beforeDate) !== request.nextUrl.searchParams.has("beforeId")
-      || (beforeDate && !/^\d{4}-\d{2}-\d{2}$/.test(beforeDate))
+      || (beforeDate && !isValidDate(beforeDate))
       || (request.nextUrl.searchParams.has("beforeId") && (!Number.isSafeInteger(beforeId) || beforeId <= 0))
     ) {
       return NextResponse.json({ error: "Invalid history query." }, { status: 400 });
