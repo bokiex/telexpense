@@ -79,8 +79,9 @@ check.
   database. Expenses and ordinary investment transactions are negative;
   income is positive. Investment-transfer destination rows may be positive.
   Transfers write two category-less rows sharing `transfer_group_id`; create
-  and edit them through the grouped transfer endpoints. Expense and income
-  transactions require a category.
+  and edit them through the grouped transfer endpoints, and delete both legs
+  through the grouped delete endpoint. Expense and income transactions require
+  a category.
 - Transactions may reference `subcategory_id`; it must belong to the selected
   user-owned category. Bot selection state is stored in
   `pending_transaction_captures`, keyed by a short callback token and always
@@ -91,8 +92,9 @@ check.
 - The browser calls the Next.js API only. Server routes use the Supabase admin
   client; RLS is enabled with no anonymous policies because the privileged key
   bypasses RLS. Correct repository scoping is therefore a security boundary.
-- Normalize categories/account keys to lowercase, currencies to uppercase
-  three-letter codes, dates to `YYYY-MM-DD`, and months to `YYYY-MM`.
+- Normalize categories/account keys to lowercase and currencies to uppercase
+  three-letter codes. Dates must be real calendar dates in `YYYY-MM-DD`, and
+  months must be valid calendar months in `YYYY-MM`.
 - Preserve the `@/` import alias, strict TypeScript, and `runtime = "nodejs"` on
   handlers that use Node APIs such as `crypto`.
 - `lib/repository.ts` contains compatibility retries for partially upgraded
@@ -110,8 +112,9 @@ check.
 ## Security sharp edges
 
 - Telegram Mini App `initData` is accepted for at most 24 hours and is the
-  authentication boundary. Do not add development bypasses or accept a user ID
-  from request JSON/query parameters.
+  authentication boundary; future timestamps and non-positive or non-integer
+  Telegram user IDs are rejected. Do not add development bypasses or accept a
+  user ID from request JSON/query parameters.
 - The active webhook currently does not verify Telegram's optional
   `X-Telegram-Bot-Api-Secret-Token`; it is a public endpoint that trusts update
   shape. Do not add privileged webhook actions based only on caller-supplied

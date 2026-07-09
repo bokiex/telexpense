@@ -42,10 +42,17 @@ and ID with a two-part cursor. Summary and history payloads retain
 breadcrumbs. Grouped transfer rows have a null category and expose their shared
 `transferGroupId`, `transferFromAccountId`, and `transferToAccountId`. The
 dashboard creates them through `POST /api/transfers` and edits both legs
-atomically through `PATCH /api/transfers/{transferGroupId}`; generic transaction
-create and edit routes reject transfers. Expense and income transactions still
-require a category. Summary responses include a `Server-Timing` duration for
-the summary operation.
+through `PATCH /api/transfers/{transferGroupId}`. Deletion uses the same grouped
+endpoint and a user-scoped Postgres function so either both legs are removed or
+neither is; generic transaction create, edit, and delete routes reject
+transfers. Expense and income transactions still require a category. Summary
+responses include a `Server-Timing` duration for the summary operation.
+
+Mutation routes validate safe integer cents and financial sign conventions,
+uppercase three-letter currencies, real calendar dates, and valid calendar
+months. Portfolio snapshots and recurring rules verify that referenced
+accounts belong to the authenticated Telegram user; recurring transfer
+endpoints also reject identical source and destination accounts.
 
 Account balances combine opening balances with all linked transactions. Asset
 balances are positive and loan/card liabilities are negative. Dashboard net
@@ -58,7 +65,11 @@ group identity.
 
 Telegram's Mini App docs describe multiple launch paths, including main app/profile button, inline keyboard button, keyboard button, and menu button. This project supports menu or inline button launch by returning an inline `web_app` button in bot replies. BotFather should also be used to configure the main Mini App or menu button for a one-tap dashboard.
 
-The Mini App must run on HTTPS outside Telegram's test environment. In production, never disable `initData` validation because it is the boundary that maps a dashboard API call to a Telegram user.
+The Mini App must run on HTTPS outside Telegram's test environment. In
+production, never disable `initData` validation because it is the boundary that
+maps a dashboard API call to a Telegram user. Validation requires a positive
+integer Telegram user ID and rejects authentication timestamps older than 24
+hours or in the future.
 
 ## Supabase Security
 

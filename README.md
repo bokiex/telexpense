@@ -9,7 +9,8 @@ The deployable version is a single Next.js app:
 - `/api/summary` returns dashboard data after validating `Telegram.WebApp.initData`.
 - `/api/transactions/history` returns cursor-paginated transaction history.
 - `/api/transfers` creates grouped transfers, and
-  `/api/transfers/{transferGroupId}` edits both legs of a grouped transfer.
+  `/api/transfers/{transferGroupId}` edits or deletes both legs of a grouped
+  transfer.
 - `/api/jobs/recurring` materializes recurring transactions from a Vercel cron.
 - Supabase Postgres stores users, transactions, and budgets.
 
@@ -92,6 +93,9 @@ curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
 
 `result.url` must be your deployed Vercel webhook URL. If it is empty, Telegram is not sending messages to your app.
 
+Sending `/start` initializes the Telegram user before returning the dashboard
+button.
+
 Before setting the webhook, confirm the deployment is alive:
 
 ```bash
@@ -145,8 +149,16 @@ actions.
   are created or edited and appear as category/subcategory breadcrumbs.
 - Dashboard transfers require source and destination accounts but no category.
   They are stored as two category-less rows sharing a `transferGroupId`; edits
-  update both rows through the grouped transfer endpoint. Expense and income
-  transactions continue to require a category.
+  update both rows and deletes remove both rows atomically through the grouped
+  transfer endpoint. Expense and income transactions continue to require a
+  category.
+- API monetary values must be safe integer cents. Expenses and ordinary
+  investments are negative, income is positive, and transfer amounts are
+  positive. Currencies are uppercase three-letter codes, dates must be real
+  calendar dates in `YYYY-MM-DD`, and months must be valid `YYYY-MM` values.
+- Portfolio snapshots and recurring rules accept only accounts owned by the
+  authenticated Telegram user. Recurring transfers require distinct source
+  and destination accounts.
 - Account balances are opening balance plus all account transactions. Assets
   are positive; loan and card liabilities are stored as negative values, while
   debt-only fields display their absolute amount.
