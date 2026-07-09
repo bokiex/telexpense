@@ -8,6 +8,8 @@ The deployable version is a single Next.js app:
 - `/api/telegram/webhook` receives Telegram bot updates.
 - `/api/summary` returns dashboard data after validating `Telegram.WebApp.initData`.
 - `/api/transactions/history` returns cursor-paginated transaction history.
+- `/api/transfers` creates grouped transfers, and
+  `/api/transfers/{transferGroupId}` edits both legs of a grouped transfer.
 - `/api/jobs/recurring` materializes recurring transactions from a Vercel cron.
 - Supabase Postgres stores users, transactions, and budgets.
 
@@ -141,6 +143,10 @@ actions.
   are clamped to 1–100; `month` must use `YYYY-MM`, and requests require
   `X-Telegram-Init-Data`. Stored subcategories are retained when transactions
   are created or edited and appear as category/subcategory breadcrumbs.
+- Dashboard transfers require source and destination accounts but no category.
+  They are stored as two category-less rows sharing a `transferGroupId`; edits
+  update both rows through the grouped transfer endpoint. Expense and income
+  transactions continue to require a category.
 - Account balances are opening balance plus all account transactions. Assets
   are positive; loan and card liabilities are stored as negative values, while
   debt-only fields display their absolute amount.

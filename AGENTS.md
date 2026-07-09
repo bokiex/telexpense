@@ -78,7 +78,9 @@ check.
 - Monetary values are integer cents throughout the TypeScript API and
   database. Expenses and ordinary investment transactions are negative;
   income is positive. Investment-transfer destination rows may be positive.
-  Transfers write two rows sharing `transfer_group_id`.
+  Transfers write two category-less rows sharing `transfer_group_id`; create
+  and edit them through the grouped transfer endpoints. Expense and income
+  transactions require a category.
 - Transactions may reference `subcategory_id`; it must belong to the selected
   user-owned category. Bot selection state is stored in
   `pending_transaction_captures`, keyed by a short callback token and always

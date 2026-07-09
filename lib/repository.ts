@@ -3,6 +3,7 @@ import type { ParsedTransaction } from "@/lib/parser";
 import { randomUUID } from "crypto";
 import { normalizeIdentity, resolveIdentity } from "@/lib/identity";
 import { loanMetrics, normalizeOpeningBalance } from "@/lib/finance";
+import { groupedTransactionEditError } from "@/lib/transactionCategory";
 
 export type CategorySpend = {
   category: string;
@@ -24,10 +25,12 @@ export type DailyPoint = {
 export type RecentTransaction = {
   id: number;
   kind: string;
-  category: string;
+  category: string | null;
   subcategoryId: number | null;
   accountId: number | null;
   transferGroupId: string | null;
+  transferFromAccountId: number | null;
+  transferToAccountId: number | null;
   recurringRuleId: number | null;
   description: string;
   amountCents: number;
@@ -242,7 +245,7 @@ export async function addTransactionFields(
   telegramUserId: number,
   values: {
     kind: ParsedTransaction["kind"];
-    category: string;
+    category: string | null;
     accountId: number;
     subcategoryId?: number | null;
     description: string;
@@ -251,16 +254,21 @@ export async function addTransactionFields(
     occurredOn: string;
   }
 ) {
+  if (values.kind === "transfer") throw new Error("Transfers must use grouped transfer persistence.");
   const supabase = createSupabaseAdmin();
+  if (!values.category) throw new Error("Category is required.");
   const category = await resolveCategoryIdentity(telegramUserId, values.category);
+  const subcategoryId = values.subcategoryId ?? null;
   await assertOwnedAccount(telegramUserId, values.accountId);
-  await assertOwnedSubcategory(telegramUserId, values.subcategoryId ?? null, category.categoryId);
+  if (category.categoryId !== null) {
+    await assertOwnedSubcategory(telegramUserId, subcategoryId, category.categoryId);
+  }
   const insert = {
     telegram_user_id: telegramUserId,
     kind: values.kind,
     category: category.category,
     category_id: category.categoryId,
-    subcategory_id: values.subcategoryId ?? null,
+    subcategory_id: subcategoryId,
     account_id: values.accountId,
     description: values.description,
     amount_cents: values.amountCents,
@@ -276,7 +284,6 @@ export async function addTransferFields(
   values: {
     fromAccountId: number;
     toAccountId: number;
-    category: string;
     description: string;
     amountCents: number;
     currency: string;
@@ -284,7 +291,6 @@ export async function addTransferFields(
   }
 ) {
   const supabase = createSupabaseAdmin();
-  const category = await resolveCategoryIdentity(telegramUserId, values.category);
   await Promise.all([
     assertOwnedAccount(telegramUserId, values.fromAccountId),
     assertOwnedAccount(telegramUserId, values.toAccountId)
@@ -295,8 +301,8 @@ export async function addTransferFields(
     {
       telegram_user_id: telegramUserId,
       kind: "expense",
-      category: category.category,
-      category_id: category.categoryId,
+      category: null,
+      category_id: null,
       account_id: values.fromAccountId,
       transfer_group_id: transferGroupId,
       description: values.description,
@@ -307,8 +313,8 @@ export async function addTransferFields(
     {
       telegram_user_id: telegramUserId,
       kind: await transferDestinationKind(telegramUserId, values.toAccountId),
-      category: category.category,
-      category_id: category.categoryId,
+      category: null,
+      category_id: null,
       account_id: values.toAccountId,
       transfer_group_id: transferGroupId,
       description: values.description,
@@ -318,6 +324,36 @@ export async function addTransferFields(
     }
   ];
   const { error } = await supabase.from("transactions").insert(rows);
+  if (error) throw error;
+}
+
+export async function updateTransferFields(
+  telegramUserId: number,
+  transferGroupId: string,
+  values: {
+    fromAccountId: number;
+    toAccountId: number;
+    description: string;
+    amountCents: number;
+    currency: string;
+    occurredOn: string;
+  }
+) {
+  await Promise.all([
+    assertOwnedAccount(telegramUserId, values.fromAccountId),
+    assertOwnedAccount(telegramUserId, values.toAccountId)
+  ]);
+  const supabase = createSupabaseAdmin();
+  const { error } = await supabase.rpc("update_transfer_group", {
+    target_user_id: telegramUserId,
+    target_transfer_group_id: transferGroupId,
+    from_account_id: values.fromAccountId,
+    to_account_id: values.toAccountId,
+    transfer_description: values.description,
+    transfer_amount_cents: Math.abs(values.amountCents),
+    transfer_currency: values.currency.toUpperCase(),
+    transfer_occurred_on: values.occurredOn
+  });
   if (error) throw error;
 }
 
@@ -346,7 +382,7 @@ export async function updateTransactionFields(
   transactionId: number,
   values: {
     kind: ParsedTransaction["kind"];
-    category: string;
+    category: string | null;
     accountId: number;
     subcategoryId?: number | null;
     description: string;
@@ -355,22 +391,47 @@ export async function updateTransactionFields(
     occurredOn: string;
   }
 ) {
+  if (values.kind === "transfer") throw new Error("Transfers must use grouped transfer persistence.");
   const supabase = createSupabaseAdmin();
+  await assertTransactionIsNotGrouped(supabase, telegramUserId, transactionId);
+  if (!values.category) throw new Error("Category is required.");
   const category = await resolveCategoryIdentity(telegramUserId, values.category);
+  const subcategoryId = values.subcategoryId ?? null;
   await assertOwnedAccount(telegramUserId, values.accountId);
-  await assertOwnedSubcategory(telegramUserId, values.subcategoryId ?? null, category.categoryId);
+  if (category.categoryId !== null) {
+    await assertOwnedSubcategory(telegramUserId, subcategoryId, category.categoryId);
+  }
   const accountName = await getAccountName(telegramUserId, values.accountId);
   await updateTransactionCompat(supabase, telegramUserId, transactionId, {
     kind: values.kind,
     category: category.category,
     category_id: category.categoryId,
-    subcategory_id: values.subcategoryId ?? null,
+    subcategory_id: subcategoryId,
     account_id: values.accountId,
     description: values.description,
     amount_cents: values.amountCents,
     currency: values.currency.toUpperCase(),
     occurred_on: values.occurredOn
   }, accountName.toLowerCase());
+}
+
+async function assertTransactionIsNotGrouped(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  telegramUserId: number,
+  transactionId: number
+) {
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("transfer_group_id")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("id", transactionId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingSchemaError(error)) return;
+    throw error;
+  }
+  const editError = groupedTransactionEditError(data?.transfer_group_id ?? null);
+  if (editError) throw new Error(editError);
 }
 
 export async function deleteTransaction(telegramUserId: number, transactionId: number) {
@@ -415,11 +476,18 @@ export async function listTransactions(
 
   const hasMore = rows.length > cursor.limit;
   const items = rows.slice(0, cursor.limit);
+  const transferAccounts = await getTransferAccountPairs(
+    supabase,
+    telegramUserId,
+    items.map((tx) => tx.transfer_group_id).filter(Boolean)
+  );
   const last = items.at(-1);
   return {
     items: items.map((tx) => ({
       id: tx.id, kind: tx.kind, category: tx.category, subcategoryId: tx.subcategory_id, accountId: tx.account_id,
       transferGroupId: tx.transfer_group_id, recurringRuleId: tx.recurring_rule_id,
+      transferFromAccountId: transferAccounts.get(tx.transfer_group_id)?.fromAccountId ?? null,
+      transferToAccountId: transferAccounts.get(tx.transfer_group_id)?.toAccountId ?? null,
       description: tx.description, amountCents: tx.amount_cents, currency: tx.currency, occurredOn: tx.occurred_on
     })),
     nextCursor: hasMore && last ? { beforeDate: last.occurred_on, beforeId: last.id } : null
@@ -762,7 +830,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   const daily = new Map<string, number>();
 
   for (const tx of transactions) {
-    if (tx.kind !== "expense" || tx.amount_cents >= 0) continue;
+    if (tx.kind !== "expense" || tx.amount_cents >= 0 || tx.transfer_group_id) continue;
     const spent = Math.abs(tx.amount_cents);
     const category = categories.get(tx.category) || { category: tx.category, spentCents: 0, currency: tx.currency };
     category.spentCents += spent;
@@ -807,6 +875,12 @@ export async function getSummary(telegramUserId: number, month: string) {
       subcategoryId: tx.subcategory_id,
       accountId: tx.account_id,
       transferGroupId: tx.transfer_group_id,
+      transferFromAccountId: tx.transfer_group_id
+        ? transactions.find((leg) => leg.transfer_group_id === tx.transfer_group_id && leg.amount_cents < 0)?.account_id ?? null
+        : null,
+      transferToAccountId: tx.transfer_group_id
+        ? transactions.find((leg) => leg.transfer_group_id === tx.transfer_group_id && leg.amount_cents > 0)?.account_id ?? null
+        : null,
       recurringRuleId: tx.recurring_rule_id,
       description: tx.description,
       amountCents: tx.amount_cents,
@@ -814,6 +888,29 @@ export async function getSummary(telegramUserId: number, month: string) {
       occurredOn: tx.occurred_on
     }))
   };
+}
+
+async function getTransferAccountPairs(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  telegramUserId: number,
+  transferGroupIds: string[]
+) {
+  const pairs = new Map<string, { fromAccountId: number | null; toAccountId: number | null }>();
+  const uniqueIds = Array.from(new Set(transferGroupIds));
+  if (!uniqueIds.length) return pairs;
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("transfer_group_id, account_id, amount_cents")
+    .eq("telegram_user_id", telegramUserId)
+    .in("transfer_group_id", uniqueIds);
+  if (error) throw error;
+  for (const row of data || []) {
+    const pair = pairs.get(row.transfer_group_id) || { fromAccountId: null, toAccountId: null };
+    if (row.amount_cents < 0) pair.fromAccountId = row.account_id;
+    if (row.amount_cents > 0) pair.toAccountId = row.account_id;
+    pairs.set(row.transfer_group_id, pair);
+  }
+  return pairs;
 }
 
 export async function getBudgetStatus(telegramUserId: number, month: string, category: string) {

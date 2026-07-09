@@ -5,6 +5,55 @@ import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
+import {
+  genericTransactionKindError,
+  groupedTransactionEditError,
+  transactionCategory,
+  transactionCategoryError
+} from "../lib/transactionCategory";
+import { transferAccounts } from "../lib/transfer";
+
+test("transfers omit categories while expense and income still require them", () => {
+  assert.equal(transactionCategory("transfer", undefined), null);
+  assert.equal(transactionCategory("transfer", "legacy-transfer-category"), null);
+  assert.equal(transactionCategory("expense", " Food "), "Food");
+  assert.equal(transactionCategory("expense", ""), null);
+  assert.equal(transactionCategory("income", undefined), null);
+  assert.equal(transactionCategoryError("transfer", null), null);
+  assert.equal(transactionCategoryError("expense", null), "Category is required.");
+  assert.equal(transactionCategoryError("income", null), "Category is required.");
+});
+
+test("generic transaction persistence rejects ungrouped transfers", () => {
+  assert.equal(genericTransactionKindError("transfer"), "Transfers must use the grouped transfer endpoint.");
+  assert.equal(genericTransactionKindError("expense"), null);
+  assert.equal(genericTransactionKindError("income"), null);
+  assert.equal(genericTransactionKindError("investment"), null);
+});
+
+test("generic transaction editing rejects grouped transfer legs", () => {
+  assert.equal(
+    groupedTransactionEditError("af39b195-e616-45a1-9974-f82ff1d837c6"),
+    "Grouped transfers must use the grouped transfer endpoint."
+  );
+  assert.equal(groupedTransactionEditError(null), null);
+});
+
+test("grouped transfer legs resolve edit source and destination accounts", () => {
+  const legs = [
+    { transferGroupId: "group", accountId: 10, amountCents: -500 },
+    { transferGroupId: "group", accountId: 20, amountCents: 500 }
+  ];
+  assert.deepEqual(transferAccounts(legs[1], legs), {
+    fromAccountId: 10,
+    toAccountId: 20
+  });
+  assert.deepEqual(transferAccounts({
+    transferGroupId: "group", accountId: 10, amountCents: -500,
+    transferFromAccountId: 10, transferToAccountId: 20
+  }, []), { fromAccountId: 10, toAccountId: 20 });
+  assert.equal(transferAccounts({ transferGroupId: null, accountId: 10, amountCents: -500 }, legs), null);
+});
 
 test("category identity collapses whitespace and case", () => {
   assert.equal(normalizeIdentity("  FoOd \t Delivery "), "food delivery");

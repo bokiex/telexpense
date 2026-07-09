@@ -39,13 +39,20 @@ Full transaction history is exposed separately at
 `/api/transactions/history`, scoped to the requested month and ordered by date
 and ID with a two-part cursor. Summary and history payloads retain
 `subcategoryId`, which the dashboard uses for editing and category/subcategory
-breadcrumbs. Summary responses include a `Server-Timing` duration for the
-summary operation.
+breadcrumbs. Grouped transfer rows have a null category and expose their shared
+`transferGroupId`, `transferFromAccountId`, and `transferToAccountId`. The
+dashboard creates them through `POST /api/transfers` and edits both legs
+atomically through `PATCH /api/transfers/{transferGroupId}`; generic transaction
+create and edit routes reject transfers. Expense and income transactions still
+require a category. Summary responses include a `Server-Timing` duration for
+the summary operation.
 
 Account balances combine opening balances with all linked transactions. Asset
 balances are positive and loan/card liabilities are negative. Dashboard net
 worth is grouped by currency and substitutes the latest portfolio valuation for
-an investment account's transaction-derived balance when available.
+an investment account's transaction-derived balance when available. Transfer
+legs are excluded from category spending summaries by their shared transfer
+group identity.
 
 ## Telegram Mini App Notes
 
