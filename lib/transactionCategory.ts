@@ -11,3 +11,7 @@ export function transactionCategoryError(kind: string, category: string | null):
 export function genericTransactionKindError(kind: string): string | null {
   return kind === "transfer" ? "Transfers must use the grouped transfer endpoint." : null;
 }
+
+export function groupedTransactionEditError(transferGroupId: string | null): string | null {
+  return transferGroupId ? "Grouped transfers must use the grouped transfer endpoint." : null;
+}

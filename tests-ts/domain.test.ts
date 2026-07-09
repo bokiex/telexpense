@@ -7,6 +7,7 @@ import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
 import {
   genericTransactionKindError,
+  groupedTransactionEditError,
   transactionCategory,
   transactionCategoryError
 } from "../lib/transactionCategory";
@@ -28,6 +29,14 @@ test("generic transaction persistence rejects ungrouped transfers", () => {
   assert.equal(genericTransactionKindError("expense"), null);
   assert.equal(genericTransactionKindError("income"), null);
   assert.equal(genericTransactionKindError("investment"), null);
+});
+
+test("generic transaction editing rejects grouped transfer legs", () => {
+  assert.equal(
+    groupedTransactionEditError("af39b195-e616-45a1-9974-f82ff1d837c6"),
+    "Grouped transfers must use the grouped transfer endpoint."
+  );
+  assert.equal(groupedTransactionEditError(null), null);
 });
 
 test("grouped transfer legs resolve edit source and destination accounts", () => {

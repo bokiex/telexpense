@@ -3,6 +3,7 @@ import type { ParsedTransaction } from "@/lib/parser";
 import { randomUUID } from "crypto";
 import { normalizeIdentity, resolveIdentity } from "@/lib/identity";
 import { loanMetrics, normalizeOpeningBalance } from "@/lib/finance";
+import { groupedTransactionEditError } from "@/lib/transactionCategory";
 
 export type CategorySpend = {
   category: string;
@@ -392,6 +393,7 @@ export async function updateTransactionFields(
 ) {
   if (values.kind === "transfer") throw new Error("Transfers must use grouped transfer persistence.");
   const supabase = createSupabaseAdmin();
+  await assertTransactionIsNotGrouped(supabase, telegramUserId, transactionId);
   if (!values.category) throw new Error("Category is required.");
   const category = await resolveCategoryIdentity(telegramUserId, values.category);
   const subcategoryId = values.subcategoryId ?? null;
@@ -411,6 +413,25 @@ export async function updateTransactionFields(
     currency: values.currency.toUpperCase(),
     occurred_on: values.occurredOn
   }, accountName.toLowerCase());
+}
+
+async function assertTransactionIsNotGrouped(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  telegramUserId: number,
+  transactionId: number
+) {
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("transfer_group_id")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("id", transactionId)
+    .maybeSingle();
+  if (error) {
+    if (isMissingSchemaError(error)) return;
+    throw error;
+  }
+  const editError = groupedTransactionEditError(data?.transfer_group_id ?? null);
+  if (editError) throw new Error(editError);
 }
 
 export async function deleteTransaction(telegramUserId: number, transactionId: number) {
