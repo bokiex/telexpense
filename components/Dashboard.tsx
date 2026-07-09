@@ -54,8 +54,16 @@ type CategorySpend = {
   currency: string;
 };
 
+type SubcategorySpend = {
+  category: string;
+  subcategoryId: number;
+  spentCents: number;
+  currency: string;
+};
+
 type Budget = {
   category: string;
+  subcategoryId: number | null;
   budgetCents: number;
   currency: string;
 };
@@ -89,6 +97,7 @@ type BudgetHealth = {
 type Summary = {
   month: string;
   categories: CategorySpend[];
+  subcategories: SubcategorySpend[];
   budgets: Budget[];
   health: BudgetHealth;
   daily: { date: string; spentCents: number }[];
@@ -122,6 +131,8 @@ type SubCategory = {
   name: string;
   categoryId: string;
   budget?: number;
+  spentCents?: number;
+  currency: string;
 };
 
 type Category = {
@@ -132,6 +143,7 @@ type Category = {
   color: string;
   icon: string;
   budget?: number;
+  spentCents?: number;
   currency: string;
   subcategories: SubCategory[];
   hidden?: boolean;
@@ -233,7 +245,7 @@ type ModalState =
   | { type: "add-category" }
   | { type: "edit-category"; categoryId: string }
   | { type: "add-subcategory"; categoryId: string }
-  | { type: "set-budget"; categoryId: string };
+  | { type: "set-budget"; categoryId: string; subcategoryId?: string };
 
 declare global {
   interface Window {
@@ -458,17 +470,36 @@ export default function Dashboard() {
     reload();
   }
 
-  async function saveBudget(categoryId: string, amount: number) {
+  async function saveBudget(categoryId: string, amount: number, subcategoryId?: string) {
     const category = data.categories.find((item) => item.id === categoryId);
     if (!category) return;
+    const storedSubcategoryId = storedSubcategoryNumber(subcategoryId);
     const response = await apiRequest("/api/budgets", "POST", {
       category: category.sourceName,
       month,
       amountCents: amount,
-      currency: category.currency
+      currency: category.currency,
+      subcategoryId: storedSubcategoryId
     });
     if (!response.ok) {
-      setError("Could not save budget.");
+      const result = await response.json().catch(() => null);
+      setError(result?.error || "Could not save budget.");
+      return;
+    }
+    setModal({ type: "none" });
+    reload();
+  }
+
+  async function deleteBudgetTarget(categoryId: string, subcategoryId?: string) {
+    const category = data.categories.find((item) => item.id === categoryId);
+    if (!category) return;
+    const params = new URLSearchParams({ category: category.sourceName, month });
+    const storedId = storedSubcategoryNumber(subcategoryId);
+    if (storedId !== null) params.set("subcategoryId", String(storedId));
+    const response = await apiRequest(`/api/budgets?${params.toString()}`, "DELETE");
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      setError(result?.error || "Could not delete budget.");
       return;
     }
     setModal({ type: "none" });
@@ -662,7 +693,13 @@ export default function Dashboard() {
               onDeleteRecurringRule={deleteRecurringRule}
             />
           ) : null}
-          {!loading && activeTab === "budget" ? <BudgetView data={data} summary={summary} onSetBudget={(categoryId) => setModal({ type: "set-budget", categoryId })} /> : null}
+          {!loading && activeTab === "budget" ? (
+            <BudgetView
+              data={data}
+              summary={summary}
+              onSetBudget={(categoryId, subcategoryId) => setModal({ type: "set-budget", categoryId, subcategoryId })}
+            />
+          ) : null}
           {!loading && activeTab === "categories" ? (
             <CategoriesView
               data={data}
@@ -694,7 +731,14 @@ export default function Dashboard() {
       ) : null}
 
       {modal.type === "set-budget" ? (
-        <BudgetModal data={data} categoryId={modal.categoryId} onSave={saveBudget} onClose={() => setModal({ type: "none" })} />
+        <BudgetModal
+          data={data}
+          categoryId={modal.categoryId}
+          subcategoryId={modal.subcategoryId}
+          onSave={saveBudget}
+          onDelete={deleteBudgetTarget}
+          onClose={() => setModal({ type: "none" })}
+        />
       ) : null}
 
       {modal.type === "add-account" || modal.type === "edit-account" ? (
@@ -1090,12 +1134,14 @@ function InvestmentAccountDetail({ account, snapshot }: { account: Account; snap
   );
 }
 
-function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Summary | null; onSetBudget: (categoryId: string) => void }) {
-  const totalBudget = summary?.health.budgetCents ?? data.categories.reduce((sum, category) => sum + (category.budget || 0), 0);
+function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Summary | null; onSetBudget: (categoryId: string, subcategoryId?: string) => void }) {
+  const activeCategories = data.categories.filter((category) => !category.hidden);
+  const totalBudget = summary?.health.budgetCents ?? effectiveBudgetTotal(data.categories);
   const totalSpent = summary?.health.spentCents ?? data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
   const budgetLeft = totalBudget - totalSpent;
   const usedPct = totalBudget ? Math.min(100, Math.round((totalSpent / totalBudget) * 100)) : 0;
   const currency = data.categories[0]?.currency || DEFAULT_CURRENCY;
+  const hasBudgetTargets = activeCategories.some((category) => category.budget !== undefined || category.subcategories.some((subcategory) => subcategory.budget !== undefined));
 
   return (
     <div className="screen-stack">
@@ -1115,9 +1161,9 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
       </section>
 
       {GROUPS.map((group) => {
-        const categories = data.categories.filter((category) => !category.hidden && category.group === group && category.budget !== undefined);
+        const categories = activeCategories.filter((category) => category.group === group);
         if (!categories.length) return null;
-        const groupBudget = categories.reduce((sum, category) => sum + (category.budget || 0), 0);
+        const groupBudget = effectiveBudgetTotal(categories);
         const groupSpent = categories.reduce((sum, category) => sum + spentForCategory(data, category.id), 0);
         const groupPct = groupBudget ? Math.min(100, Math.round((groupSpent / groupBudget) * 100)) : 0;
         return (
@@ -1136,17 +1182,43 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
               {categories.map((category) => {
                 const spent = spentForCategory(data, category.id);
                 const pct = category.budget ? Math.min(100, Math.round((spent / category.budget) * 100)) : 0;
+                const childBudget = category.subcategories.reduce((sum, subcategory) => sum + (subcategory.budget || 0), 0);
                 return (
-                  <div key={category.id} className="budget-row">
-                    <CategoryIcon category={category} />
-                    <div>
-                      <strong>{category.name}</strong>
-                      <Progress value={pct} color={pct > 90 ? "#f87171" : category.color} thin />
+                  <div key={category.id} className="budget-category-block">
+                    <div className="budget-row budget-row-parent">
+                      <CategoryIcon category={category} />
+                      <div>
+                        <strong>{category.name}</strong>
+                        <small>{category.subcategories.length ? `${category.subcategories.length} subcategories` : "Category budget"}</small>
+                        <Progress value={pct} color={pct > 90 ? "#f87171" : category.color} thin />
+                      </div>
+                      <span>{money(spent, category.currency)} / {category.budget !== undefined ? money(category.budget, category.currency) : "Not set"}</span>
+                      <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
+                        <Pencil size={11} />
+                      </button>
                     </div>
-                    <span>{money(spent, category.currency)} / {money(category.budget || 0, category.currency)}</span>
-                    <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
-                      <Pencil size={11} />
-                    </button>
+                    {category.subcategories.length ? (
+                      <div className="subcategory-budget-list">
+                        {category.subcategories.map((subcategory) => {
+                          const subSpent = spentForSubcategory(data, subcategory.id);
+                          const subPct = subcategory.budget ? Math.min(100, Math.round((subSpent / subcategory.budget) * 100)) : 0;
+                          return (
+                            <div key={subcategory.id} className="budget-row budget-row-child">
+                              <span className="subcategory-marker" aria-hidden="true" />
+                              <div>
+                                <strong>{subcategory.name}</strong>
+                                <Progress value={subPct} color={subPct > 90 ? "#f87171" : category.color} thin />
+                              </div>
+                              <span>{money(subSpent, subcategory.currency)} / {subcategory.budget !== undefined ? money(subcategory.budget, subcategory.currency) : "Not set"}</span>
+                              <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
+                                <Pencil size={11} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {category.budget === undefined && childBudget > 0 ? <small className="child-budget-note">Child targets total {money(childBudget, category.currency)}</small> : null}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -1154,6 +1226,8 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
           </section>
         );
       })}
+
+      {!hasBudgetTargets ? <EmptyState label="No budgets set for this month yet." /> : null}
 
       {summary?.loanProgress.length ? (
         <section className="mini-card grouped-card">
@@ -1814,9 +1888,26 @@ function TransactionModal({
   );
 }
 
-function BudgetModal({ data, categoryId, onSave, onClose }: { data: AppData; categoryId: string; onSave: (categoryId: string, amount: number) => Promise<void>; onClose: () => void }) {
+function BudgetModal({
+  data,
+  categoryId,
+  subcategoryId,
+  onSave,
+  onDelete,
+  onClose
+}: {
+  data: AppData;
+  categoryId: string;
+  subcategoryId?: string;
+  onSave: (categoryId: string, amount: number, subcategoryId?: string) => Promise<void>;
+  onDelete: (categoryId: string, subcategoryId?: string) => Promise<void>;
+  onClose: () => void;
+}) {
   const category = data.categories.find((item) => item.id === categoryId);
-  const [amount, setAmount] = useState(category?.budget ? String(category.budget / 100) : "");
+  const subcategory = category?.subcategories.find((item) => item.id === subcategoryId);
+  const targetBudget = subcategory ? subcategory.budget : category?.budget;
+  const targetCurrency = subcategory?.currency || category?.currency || DEFAULT_CURRENCY;
+  const [amount, setAmount] = useState(targetBudget ? String(targetBudget / 100) : "");
   const [error, setError] = useState("");
   const saveAction = usePendingAction();
 
@@ -1827,7 +1918,7 @@ function BudgetModal({ data, categoryId, onSave, onClose }: { data: AppData; cat
       setError("Enter a valid budget amount.");
       return;
     }
-    void saveAction.run(() => onSave(categoryId, cents));
+    void saveAction.run(() => onSave(categoryId, cents, subcategoryId));
   }
 
   return (
@@ -1835,8 +1926,8 @@ function BudgetModal({ data, categoryId, onSave, onClose }: { data: AppData; cat
       <form className="modal-form" onSubmit={submit}>
         <div className="budget-target">
           <small>Setting budget for</small>
-          <strong>{category?.name}</strong>
-          {category?.budget ? <small>Current: {money(category.budget, category.currency)}</small> : null}
+          <strong>{subcategory ? `${category?.name} / ${subcategory.name}` : category?.name}</strong>
+          {targetBudget !== undefined ? <small>Current: {money(targetBudget, targetCurrency)}</small> : <small>No budget set</small>}
         </div>
         <FieldLabel label="Budget Amount">
           <input value={amount} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setAmount(event.target.value)} />
@@ -1845,6 +1936,11 @@ function BudgetModal({ data, categoryId, onSave, onClose }: { data: AppData; cat
         <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
           Set Budget
         </PendingButton>
+        {targetBudget !== undefined ? (
+          <PendingButton className="secondary-action danger-action" type="button" pendingLabel="Deleting…" onAction={() => onDelete(categoryId, subcategoryId)}>
+            Delete Budget
+          </PendingButton>
+        ) : null}
       </form>
     </BottomSheet>
   );
@@ -1973,7 +2069,8 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
       color: FALLBACK_COLORS[categoryMap.size % FALLBACK_COLORS.length],
       icon: "Wallet"
     };
-    const budget = summary.budgets.find((item) => slug(item.category) === id);
+    const budget = summary.budgets.find((item) => item.subcategoryId === null && slug(item.category) === id);
+    const spend = summary.categories.find((item) => slug(item.category) === id);
     const stored = storedCategories.get(id);
     const category: Category = {
       id,
@@ -1983,6 +2080,7 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
       color: stored?.color || look.color,
       icon: stored?.icon || look.icon,
       budget: budget?.budgetCents,
+      spentCents: spend?.spentCents,
       currency: budget?.currency || currency,
       subcategories: [],
       hidden: stored?.active === false
@@ -2025,7 +2123,16 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
     for (const sub of stored.subcategories) {
       const id = `${stored.sourceKey}:stored-${sub.id}`;
       if (!category.subcategories.some((item) => item.id === id || item.name.toLowerCase() === sub.name.toLowerCase())) {
-        category.subcategories.push({ id, name: sub.name, categoryId: stored.sourceKey });
+        const budget = summary.budgets.find((item) => item.subcategoryId === sub.id);
+        const spend = summary.subcategories.find((item) => item.subcategoryId === sub.id);
+        category.subcategories.push({
+          id,
+          name: sub.name,
+          categoryId: stored.sourceKey,
+          budget: budget?.budgetCents,
+          spentCents: spend?.spentCents,
+          currency: budget?.currency || category.currency
+        });
       }
     }
   }
@@ -2038,7 +2145,28 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
 }
 
 function spentForCategory(data: AppData, categoryId: string) {
+  const category = data.categories.find((item) => item.id === categoryId);
+  if (category?.spentCents !== undefined) return category.spentCents;
   return data.transactions.filter((tx) => tx.type === "expense" && tx.categoryId === categoryId).reduce((sum, tx) => sum + tx.amount, 0);
+}
+
+function spentForSubcategory(data: AppData, subcategoryId: string) {
+  const subcategory = data.categories.flatMap((category) => category.subcategories).find((item) => item.id === subcategoryId);
+  if (subcategory?.spentCents !== undefined) return subcategory.spentCents;
+  return data.transactions.filter((tx) => tx.type === "expense" && tx.subcategoryId === subcategoryId).reduce((sum, tx) => sum + tx.amount, 0);
+}
+
+function effectiveBudgetTotal(categories: Category[]) {
+  return categories.reduce((sum, category) => {
+    if (category.budget !== undefined) return sum + category.budget;
+    return sum + category.subcategories.reduce((subSum, subcategory) => subSum + (subcategory.budget || 0), 0);
+  }, 0);
+}
+
+function storedSubcategoryNumber(subcategoryId?: string) {
+  if (!subcategoryId) return null;
+  const id = Number(subcategoryId.split("stored-").at(-1));
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 async function apiRequest(path: string, method: string, body?: unknown) {

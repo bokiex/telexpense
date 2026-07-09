@@ -5,6 +5,7 @@ import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
+import { effectiveBudgetCents } from "../lib/repository";
 import {
   genericTransactionKindError,
   groupedTransactionEditError,
@@ -34,6 +35,14 @@ test("calendar validation rejects normalized impossible dates and months", () =>
   assert.equal(isValidDate("2026-13-01"), false);
   assert.equal(isValidMonth("2026-12"), true);
   assert.equal(isValidMonth("2026-13"), false);
+});
+
+test("effective budget total does not double-count child subcategory targets", () => {
+  assert.equal(effectiveBudgetCents([
+    { category: "food", subcategoryId: null, budgetCents: 100_00, currency: "USD" },
+    { category: "food", subcategoryId: 10, budgetCents: 40_00, currency: "USD" },
+    { category: "transport", subcategoryId: 20, budgetCents: 25_00, currency: "USD" }
+  ]), 125_00);
 });
 
 test("transaction amounts enforce integer cents and kind sign invariants", () => {
