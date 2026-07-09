@@ -148,7 +148,7 @@ begin
   if (select count(*) <> 2 from public.transactions where telegram_user_id = target_user_id and transfer_group_id = target_transfer_group_id) then
     raise exception 'Transfer group is not available.';
   end if;
-  select case when account_type = 'investment' then 'investment' else 'income' end
+  select case when account_type = 'investment' then 'investment' else 'transfer' end
   into destination_kind
   from public.accounts
   where telegram_user_id = target_user_id and id = to_account_id;
