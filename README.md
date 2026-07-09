@@ -138,6 +138,10 @@ actions.
 
 ## Dashboard Behavior
 
+- User-triggered saves, deletes, and history pagination show an in-place wallet
+  loading indicator, announce their busy state to assistive technology, and
+  disable the initiating control until the request finishes to prevent
+  duplicate submissions.
 - Summary reads are read-only. The daily recurring job creates due transactions
   idempotently, in bounded batches, for the current UTC month.
 - Transaction history is loaded separately for the selected month and uses a
