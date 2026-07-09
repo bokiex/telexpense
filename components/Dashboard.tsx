@@ -40,6 +40,7 @@ import {
   X
 } from "lucide-react";
 import { transferAccounts } from "@/lib/transfer";
+import { PendingButton, usePendingAction } from "@/components/PendingButton";
 
 type BudgetGroup = "Needs" | "Wants" | "Savings";
 type TransactionType = "income" | "expense";
@@ -843,12 +844,12 @@ function TransactionListView({
   data: AppData;
   month: string;
   onEdit: (tx: Transaction) => void;
-  onDelete: (tx: Transaction) => void;
+  onDelete: (tx: Transaction) => Promise<void>;
   onAdd: () => void;
   loading: boolean;
   error: string;
   hasMore: boolean;
-  onLoadMore: () => void;
+  onLoadMore: () => Promise<void>;
   onRetry: () => void;
 }) {
   const [search, setSearch] = useState("");
@@ -931,7 +932,10 @@ function TransactionListView({
                   {deleteConfirm === tx.id ? (
                     <div className="confirm-row">
                       <button type="button" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-                      <button type="button" onClick={() => { onDelete(tx); setDeleteConfirm(null); }}>Delete</button>
+                      <PendingButton type="button" pendingLabel="Deleting…" onAction={async () => {
+                        await onDelete(tx);
+                        setDeleteConfirm(null);
+                      }}>Delete</PendingButton>
                     </div>
                   ) : null}
                 </div>
@@ -943,9 +947,9 @@ function TransactionListView({
 
       {error ? <div className="mini-error">{error} <button type="button" onClick={onRetry}>Retry</button></div> : null}
       {hasMore || loading ? (
-        <button className="link-button" type="button" disabled={loading} onClick={onLoadMore}>
-          {loading ? "Loading…" : "Load more"}
-        </button>
+        <PendingButton className="link-button" type="button" pending={loading} pendingLabel="Loading…" onAction={onLoadMore}>
+          Load more
+        </PendingButton>
       ) : null}
 
       <button className="primary-action" type="button" onClick={onAdd}>
@@ -974,7 +978,7 @@ function AccountsView({
   onSetSnapshot: (account: Account) => void;
   onAddRecurringRule: () => void;
   onEditRecurringRule: (rule: RecurringRule) => void;
-  onDeleteRecurringRule: (rule: RecurringRule) => void;
+  onDeleteRecurringRule: (rule: RecurringRule) => Promise<void>;
 }) {
   const totalByCurrency = netWorthByCurrency(accounts, snapshots);
 
@@ -1050,9 +1054,9 @@ function AccountsView({
                 <button type="button" onClick={() => onEditRecurringRule(rule)} aria-label={`Edit ${rule.name}`}>
                   <Pencil size={12} />
                 </button>
-                <button type="button" onClick={() => onDeleteRecurringRule(rule)} aria-label={`Remove ${rule.name}`}>
+                <PendingButton type="button" pendingLabel="Removing…" onAction={() => onDeleteRecurringRule(rule)} aria-label={`Remove ${rule.name}`}>
                   <Trash2 size={12} />
-                </button>
+                </PendingButton>
               </div>
             </article>
           )) : <EmptyState label="No monthly rules yet" />}
@@ -1189,7 +1193,7 @@ function CategoriesView({
   onAddCategory: () => void;
   onEditCategory: (categoryId: string) => void;
   onAddSubcategory: (categoryId: string) => void;
-  onDeleteCategory: (categoryId: string) => void;
+  onDeleteCategory: (categoryId: string) => Promise<void>;
 }) {
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -1233,7 +1237,10 @@ function CategoriesView({
                     {deleteConfirm === category.id ? (
                       <div className="confirm-row category-confirm">
                         <button type="button" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-                        <button type="button" onClick={() => { onDeleteCategory(category.id); setDeleteConfirm(null); }}>Delete</button>
+                        <PendingButton type="button" pendingLabel="Deleting…" onAction={async () => {
+                          await onDeleteCategory(category.id);
+                          setDeleteConfirm(null);
+                        }}>Delete</PendingButton>
                       </div>
                     ) : null}
                     {expanded ? (
@@ -1269,7 +1276,7 @@ function CategoryModal({
 }: {
   category?: Category;
   currency: string;
-  onSave: (categoryId: string | null, values: { name: string; group: BudgetGroup; color: string; icon: string; budgetCents: number }) => void;
+  onSave: (categoryId: string | null, values: { name: string; group: BudgetGroup; color: string; icon: string; budgetCents: number }) => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState(category?.name || "");
@@ -1278,6 +1285,7 @@ function CategoryModal({
   const [icon, setIcon] = useState(category?.icon || "Wallet");
   const [budget, setBudget] = useState(category?.budget ? String(category.budget / 100) : "0");
   const [error, setError] = useState("");
+  const saveAction = usePendingAction();
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -1290,7 +1298,7 @@ function CategoryModal({
       setError("Budget is not valid.");
       return;
     }
-    onSave(category?.id || null, { name: name.trim(), group, color, icon, budgetCents });
+    void saveAction.run(() => onSave(category?.id || null, { name: name.trim(), group, color, icon, budgetCents }));
   }
 
   return (
@@ -1338,7 +1346,9 @@ function CategoryModal({
           </div>
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-action" type="submit">{category ? "Save Category" : "Add Category"}</button>
+        <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
+          {category ? "Save Category" : "Add Category"}
+        </PendingButton>
       </form>
     </BottomSheet>
   );
@@ -1350,11 +1360,12 @@ function SubcategoryModal({
   onClose
 }: {
   category?: Category;
-  onSave: (categoryId: string, name: string) => void;
+  onSave: (categoryId: string, name: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const saveAction = usePendingAction();
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -1363,7 +1374,7 @@ function SubcategoryModal({
       setError("Sub-category name is required.");
       return;
     }
-    onSave(category.id, name);
+    void saveAction.run(() => onSave(category.id, name));
   }
 
   return (
@@ -1377,7 +1388,9 @@ function SubcategoryModal({
           <input value={name} placeholder="Sub-category name" autoFocus onChange={(event) => setName(event.target.value)} />
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-action" type="submit">Add Sub-category</button>
+        <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Adding…">
+          Add Sub-category
+        </PendingButton>
       </form>
     </BottomSheet>
   );
@@ -1398,7 +1411,7 @@ function AccountModal({
     currency: string;
     color: string;
     icon: string;
-  }) => void;
+  }) => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState(account?.name || "");
@@ -1409,6 +1422,7 @@ function AccountModal({
   const [color, setColor] = useState(account?.color || "#60a5fa");
   const [icon, setIcon] = useState(account?.icon || "Wallet");
   const [error, setError] = useState("");
+  const saveAction = usePendingAction();
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -1421,7 +1435,7 @@ function AccountModal({
       setError("Opening balance is not valid.");
       return;
     }
-    onSave({
+    void saveAction.run(() => onSave({
       accountKey: account?.accountKey || `${slug(name)}-${Date.now().toString(36)}`,
       name: name.trim(),
       institution: institution.trim(),
@@ -1430,7 +1444,7 @@ function AccountModal({
       currency: currency.trim().toUpperCase() || DEFAULT_CURRENCY,
       color,
       icon
-    });
+    }));
   }
 
   return (
@@ -1486,7 +1500,9 @@ function AccountModal({
           </div>
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-action" type="submit">{account ? "Save Account" : "Add Account"}</button>
+        <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
+          {account ? "Save Account" : "Add Account"}
+        </PendingButton>
       </form>
     </BottomSheet>
   );
@@ -1502,11 +1518,12 @@ function PortfolioSnapshotModal({
   account: Account;
   month: string;
   snapshot?: PortfolioSnapshot;
-  onSave: (account: Account, portfolioValueCents: number) => void;
+  onSave: (account: Account, portfolioValueCents: number) => Promise<void>;
   onClose: () => void;
 }) {
   const [value, setValue] = useState(snapshot ? String(snapshot.portfolioValueCents / 100) : "");
   const [error, setError] = useState("");
+  const saveAction = usePendingAction();
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -1515,7 +1532,7 @@ function PortfolioSnapshotModal({
       setError("Portfolio value is not valid.");
       return;
     }
-    onSave(account, cents);
+    void saveAction.run(() => onSave(account, cents));
   }
 
   return (
@@ -1529,7 +1546,9 @@ function PortfolioSnapshotModal({
           <input value={value} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setValue(event.target.value)} />
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-action" type="submit">Save Value</button>
+        <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
+          Save Value
+        </PendingButton>
       </form>
     </BottomSheet>
   );
@@ -1543,7 +1562,7 @@ function RecurringRuleModal({
 }: {
   data: AppData;
   rule: RecurringRule | null;
-  onSave: (rule: Omit<RecurringRule, "id"> & { id?: number | null }) => void;
+  onSave: (rule: Omit<RecurringRule, "id"> & { id?: number | null }) => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState(rule?.name || "");
@@ -1556,6 +1575,7 @@ function RecurringRuleModal({
   const [dayOfMonth, setDayOfMonth] = useState(rule ? String(rule.dayOfMonth) : "1");
   const [active, setActive] = useState(rule?.active ?? true);
   const [error, setError] = useState("");
+  const saveAction = usePendingAction();
   const needsDestination = ruleType === "investment_transfer" || ruleType === "loan_payment";
   const destinationAccounts = data.accounts.filter((account) => {
     if (ruleType === "investment_transfer") return account.accountType === "investment";
@@ -1581,7 +1601,7 @@ function RecurringRuleModal({
       setError("Day must be between 1 and 31.");
       return;
     }
-    onSave({
+    void saveAction.run(() => onSave({
       id: rule?.id || null,
       name: name.trim(),
       ruleType,
@@ -1592,7 +1612,7 @@ function RecurringRuleModal({
       toAccountId: needsDestination ? toId : null,
       dayOfMonth: day,
       active
-    });
+    }));
   }
 
   return (
@@ -1647,7 +1667,9 @@ function RecurringRuleModal({
           </FieldLabel>
         </div>
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-action" type="submit">{rule ? "Save Rule" : "Add Rule"}</button>
+        <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
+          {rule ? "Save Rule" : "Add Rule"}
+        </PendingButton>
       </form>
     </BottomSheet>
   );
@@ -1661,7 +1683,7 @@ function TransactionModal({
 }: {
   data: AppData;
   editTx: Transaction | null;
-  onSave: (tx: TransactionFormValues) => void;
+  onSave: (tx: TransactionFormValues) => Promise<void>;
   onClose: () => void;
 }) {
   const [type, setType] = useState<"income" | "expense" | "transfer">(editTx?.transferGroupId ? "transfer" : editTx?.kind === "transfer" ? "transfer" : editTx?.type ?? "expense");
@@ -1675,6 +1697,7 @@ function TransactionModal({
   const [toAccountChoice, setToAccountChoice] = useState(initialToAccount?.accountKey || "");
   const [date, setDate] = useState(editTx?.date ?? new Date().toISOString().split("T")[0]);
   const [error, setError] = useState("");
+  const saveAction = usePendingAction();
   const selectedCategory = data.categories.find((category) => category.id === categoryId);
   const selectedAccount = data.accounts.find((item) => item.accountKey === accountChoice);
   const toAccount = data.accounts.find((item) => item.accountKey === toAccountChoice);
@@ -1695,24 +1718,26 @@ function TransactionModal({
         setError("Select a different destination account.");
         return;
       }
-      onSave({
+      const fromAccountId = selectedAccount.id;
+      const toAccountId = toAccount.id;
+      void saveAction.run(() => onSave({
         id: editTx?.id,
         sourceId: editTx?.sourceId,
         transferGroupId: editTx?.transferGroupId || undefined,
         type,
         amount: cents,
-        accountId: selectedAccount.id,
-        toAccountId: toAccount.id,
+        accountId: fromAccountId,
+        toAccountId,
         description: description.trim(),
         date
-      });
+      }));
       return;
     }
     if (!categoryId) {
       setError("Select a category.");
       return;
     }
-    onSave({
+    void saveAction.run(() => onSave({
       id: editTx?.id,
       sourceId: editTx?.sourceId,
       type,
@@ -1723,7 +1748,7 @@ function TransactionModal({
       description: description.trim(),
       date,
       currency: editTx?.currency
-    });
+    }));
   }
 
   return (
@@ -1781,16 +1806,19 @@ function TransactionModal({
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-action" type="submit">{editTx ? "Save Changes" : "Add Transaction"}</button>
+        <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
+          {editTx ? "Save Changes" : "Add Transaction"}
+        </PendingButton>
       </form>
     </BottomSheet>
   );
 }
 
-function BudgetModal({ data, categoryId, onSave, onClose }: { data: AppData; categoryId: string; onSave: (categoryId: string, amount: number) => void; onClose: () => void }) {
+function BudgetModal({ data, categoryId, onSave, onClose }: { data: AppData; categoryId: string; onSave: (categoryId: string, amount: number) => Promise<void>; onClose: () => void }) {
   const category = data.categories.find((item) => item.id === categoryId);
   const [amount, setAmount] = useState(category?.budget ? String(category.budget / 100) : "");
   const [error, setError] = useState("");
+  const saveAction = usePendingAction();
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -1799,7 +1827,7 @@ function BudgetModal({ data, categoryId, onSave, onClose }: { data: AppData; cat
       setError("Enter a valid budget amount.");
       return;
     }
-    onSave(categoryId, cents);
+    void saveAction.run(() => onSave(categoryId, cents));
   }
 
   return (
@@ -1814,7 +1842,9 @@ function BudgetModal({ data, categoryId, onSave, onClose }: { data: AppData; cat
           <input value={amount} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setAmount(event.target.value)} />
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
-        <button className="primary-action" type="submit">Set Budget</button>
+        <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
+          Set Budget
+        </PendingButton>
       </form>
     </BottomSheet>
   );
@@ -1880,7 +1910,7 @@ function RowActions({
   tx: Transaction;
   confirming: boolean;
   onEdit: (tx: Transaction) => void;
-  onDelete: (tx: Transaction) => void;
+  onDelete: (tx: Transaction) => Promise<void>;
   onToggleDelete: (id: string | null) => void;
 }) {
   return (
