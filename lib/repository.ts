@@ -24,7 +24,7 @@ export type DailyPoint = {
 export type RecentTransaction = {
   id: number;
   kind: string;
-  category: string;
+  category: string | null;
   subcategoryId: number | null;
   accountId: number | null;
   transferGroupId: string | null;
@@ -242,7 +242,7 @@ export async function addTransactionFields(
   telegramUserId: number,
   values: {
     kind: ParsedTransaction["kind"];
-    category: string;
+    category: string | null;
     accountId: number;
     subcategoryId?: number | null;
     description: string;
@@ -252,15 +252,24 @@ export async function addTransactionFields(
   }
 ) {
   const supabase = createSupabaseAdmin();
-  const category = await resolveCategoryIdentity(telegramUserId, values.category);
+  let category: { category: string | null; categoryId: number | null };
+  if (values.kind === "transfer") {
+    category = { category: null, categoryId: null };
+  } else {
+    if (!values.category) throw new Error("Category is required.");
+    category = await resolveCategoryIdentity(telegramUserId, values.category);
+  }
+  const subcategoryId = values.kind === "transfer" ? null : values.subcategoryId ?? null;
   await assertOwnedAccount(telegramUserId, values.accountId);
-  await assertOwnedSubcategory(telegramUserId, values.subcategoryId ?? null, category.categoryId);
+  if (category.categoryId !== null) {
+    await assertOwnedSubcategory(telegramUserId, subcategoryId, category.categoryId);
+  }
   const insert = {
     telegram_user_id: telegramUserId,
     kind: values.kind,
     category: category.category,
     category_id: category.categoryId,
-    subcategory_id: values.subcategoryId ?? null,
+    subcategory_id: subcategoryId,
     account_id: values.accountId,
     description: values.description,
     amount_cents: values.amountCents,
@@ -276,7 +285,6 @@ export async function addTransferFields(
   values: {
     fromAccountId: number;
     toAccountId: number;
-    category: string;
     description: string;
     amountCents: number;
     currency: string;
@@ -284,7 +292,6 @@ export async function addTransferFields(
   }
 ) {
   const supabase = createSupabaseAdmin();
-  const category = await resolveCategoryIdentity(telegramUserId, values.category);
   await Promise.all([
     assertOwnedAccount(telegramUserId, values.fromAccountId),
     assertOwnedAccount(telegramUserId, values.toAccountId)
@@ -295,8 +302,8 @@ export async function addTransferFields(
     {
       telegram_user_id: telegramUserId,
       kind: "expense",
-      category: category.category,
-      category_id: category.categoryId,
+      category: null,
+      category_id: null,
       account_id: values.fromAccountId,
       transfer_group_id: transferGroupId,
       description: values.description,
@@ -307,8 +314,8 @@ export async function addTransferFields(
     {
       telegram_user_id: telegramUserId,
       kind: await transferDestinationKind(telegramUserId, values.toAccountId),
-      category: category.category,
-      category_id: category.categoryId,
+      category: null,
+      category_id: null,
       account_id: values.toAccountId,
       transfer_group_id: transferGroupId,
       description: values.description,
@@ -346,7 +353,7 @@ export async function updateTransactionFields(
   transactionId: number,
   values: {
     kind: ParsedTransaction["kind"];
-    category: string;
+    category: string | null;
     accountId: number;
     subcategoryId?: number | null;
     description: string;
@@ -356,15 +363,24 @@ export async function updateTransactionFields(
   }
 ) {
   const supabase = createSupabaseAdmin();
-  const category = await resolveCategoryIdentity(telegramUserId, values.category);
+  let category: { category: string | null; categoryId: number | null };
+  if (values.kind === "transfer") {
+    category = { category: null, categoryId: null };
+  } else {
+    if (!values.category) throw new Error("Category is required.");
+    category = await resolveCategoryIdentity(telegramUserId, values.category);
+  }
+  const subcategoryId = values.kind === "transfer" ? null : values.subcategoryId ?? null;
   await assertOwnedAccount(telegramUserId, values.accountId);
-  await assertOwnedSubcategory(telegramUserId, values.subcategoryId ?? null, category.categoryId);
+  if (category.categoryId !== null) {
+    await assertOwnedSubcategory(telegramUserId, subcategoryId, category.categoryId);
+  }
   const accountName = await getAccountName(telegramUserId, values.accountId);
   await updateTransactionCompat(supabase, telegramUserId, transactionId, {
     kind: values.kind,
     category: category.category,
     category_id: category.categoryId,
-    subcategory_id: values.subcategoryId ?? null,
+    subcategory_id: subcategoryId,
     account_id: values.accountId,
     description: values.description,
     amount_cents: values.amountCents,
@@ -762,7 +778,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   const daily = new Map<string, number>();
 
   for (const tx of transactions) {
-    if (tx.kind !== "expense" || tx.amount_cents >= 0) continue;
+    if (tx.kind !== "expense" || tx.amount_cents >= 0 || tx.transfer_group_id) continue;
     const spent = Math.abs(tx.amount_cents);
     const category = categories.get(tx.category) || { category: tx.category, spentCents: 0, currency: tx.currency };
     category.spentCents += spent;

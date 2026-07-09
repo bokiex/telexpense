@@ -5,6 +5,18 @@ import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
+import { transactionCategory, transactionCategoryError } from "../lib/transactionCategory";
+
+test("transfers omit categories while expense and income still require them", () => {
+  assert.equal(transactionCategory("transfer", undefined), null);
+  assert.equal(transactionCategory("transfer", "legacy-transfer-category"), null);
+  assert.equal(transactionCategory("expense", " Food "), "Food");
+  assert.equal(transactionCategory("expense", ""), null);
+  assert.equal(transactionCategory("income", undefined), null);
+  assert.equal(transactionCategoryError("transfer", null), null);
+  assert.equal(transactionCategoryError("expense", null), "Category is required.");
+  assert.equal(transactionCategoryError("income", null), "Category is required.");
+});
 
 test("category identity collapses whitespace and case", () => {
   assert.equal(normalizeIdentity("  FoOd \t Delivery "), "food delivery");

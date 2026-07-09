@@ -26,7 +26,7 @@ create table if not exists public.transactions (
   id bigint primary key generated always as identity,
   telegram_user_id bigint not null references public.users(telegram_user_id) on delete cascade,
   kind text not null check (kind in ('expense', 'income', 'investment', 'transfer')),
-  category text not null,
+  category text,
   category_id bigint,
   subcategory_id bigint,
   account_id bigint references public.accounts(id) on delete set null,
@@ -116,6 +116,9 @@ alter table public.transactions
 
 alter table public.transactions
   add column if not exists transfer_group_id uuid;
+
+alter table public.transactions
+  alter column category drop not null;
 
 alter table public.transactions
   add column if not exists recurring_rule_id bigint references public.recurring_rules(id) on delete set null;

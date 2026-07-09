@@ -3,6 +3,7 @@ import { addTransactionFields } from "@/lib/repository";
 import { validateTelegramInitData } from "@/lib/telegram";
 import { requireEnv } from "@/lib/env";
 import type { ParsedTransaction } from "@/lib/parser";
+import { transactionCategory, transactionCategoryError } from "@/lib/transactionCategory";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
     const { user } = validateTelegramInitData(initData, requireEnv("TELEGRAM_BOT_TOKEN"));
     const body = await request.json();
     const kind = String(body.kind || "").trim().toLowerCase();
-    const category = String(body.category || "").trim();
+    const category = transactionCategory(kind, body.category);
     const accountId = body.accountId === null || body.accountId === undefined || body.accountId === "" ? NaN : Number(body.accountId);
     const subcategoryId = body.subcategoryId === null || body.subcategoryId === undefined || body.subcategoryId === "" ? null : Number(body.subcategoryId);
     const description = String(body.description || "").trim();
@@ -23,7 +24,8 @@ export async function POST(request: NextRequest) {
     const occurredOn = String(body.occurredOn || "").trim();
 
     if (!kinds.has(kind)) return NextResponse.json({ error: "Transaction kind is not valid." }, { status: 400 });
-    if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
+    const categoryError = transactionCategoryError(kind, category);
+    if (categoryError) return NextResponse.json({ error: categoryError }, { status: 400 });
     if (!Number.isFinite(accountId)) return NextResponse.json({ error: "Account id is required." }, { status: 400 });
     if (subcategoryId !== null && !Number.isSafeInteger(subcategoryId)) return NextResponse.json({ error: "Subcategory id is not valid." }, { status: 400 });
     if (!description) return NextResponse.json({ error: "Description is required." }, { status: 400 });

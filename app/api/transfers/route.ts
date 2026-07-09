@@ -12,7 +12,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const fromAccountId = Number(body.fromAccountId);
     const toAccountId = Number(body.toAccountId);
-    const category = String(body.category || "transfer").trim().toLowerCase();
     const description = String(body.description || "").trim();
     const amountCents = Number(body.amountCents);
     const currency = String(body.currency || "SGD").trim().toUpperCase();
@@ -21,7 +20,6 @@ export async function POST(request: NextRequest) {
     if (!Number.isFinite(fromAccountId)) return NextResponse.json({ error: "From account is required." }, { status: 400 });
     if (!Number.isFinite(toAccountId)) return NextResponse.json({ error: "To account is required." }, { status: 400 });
     if (fromAccountId === toAccountId) return NextResponse.json({ error: "From and to accounts must be different." }, { status: 400 });
-    if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
     if (!description) return NextResponse.json({ error: "Description is required." }, { status: 400 });
     if (!Number.isFinite(amountCents) || amountCents <= 0) return NextResponse.json({ error: "Amount is not valid." }, { status: 400 });
     if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
@@ -32,7 +30,6 @@ export async function POST(request: NextRequest) {
     await addTransferFields(user.id, {
       fromAccountId,
       toAccountId,
-      category,
       description,
       amountCents: Math.round(amountCents),
       currency,

@@ -61,7 +61,7 @@ type Budget = {
 type RecentTransaction = {
   id: number;
   kind: "expense" | "income" | "investment" | "transfer";
-  category: string;
+  category: string | null;
   subcategoryId: number | null;
   accountId: number | null;
   transferGroupId: string | null;
@@ -154,7 +154,6 @@ type TransactionFormValues =
       sourceId?: number;
       type: "transfer";
       amount: number;
-      category: string;
       accountId: number;
       toAccountId: number;
       description: string;
@@ -399,7 +398,6 @@ export default function Dashboard() {
       const response = await apiRequest("/api/transfers", "POST", {
         fromAccountId: fromAccount?.id,
         toAccountId: toAccount?.id,
-        category: tx.category,
         description: tx.description,
         amountCents: tx.amount,
         currency: fromAccount?.currency || toAccount?.currency || DEFAULT_CURRENCY,
@@ -1660,7 +1658,6 @@ function TransactionModal({
   const [amount, setAmount] = useState(editTx ? String(editTx.amount / 100) : "");
   const [description, setDescription] = useState(editTx?.description ?? "");
   const [categoryId, setCategoryId] = useState(editTx?.categoryId ?? data.categories[0]?.id ?? "");
-  const [transferCategory, setTransferCategory] = useState("transfer");
   const [subcategoryId, setSubcategoryId] = useState(editTx?.subcategoryId ?? "");
   const initialAccount = data.accounts.find((item) => item.id === editTx?.accountId);
   const [accountChoice, setAccountChoice] = useState(initialAccount?.accountKey || "");
@@ -1692,7 +1689,6 @@ function TransactionModal({
         sourceId: editTx?.sourceId,
         type,
         amount: cents,
-        category: transferCategory.trim() || "transfer",
         accountId: selectedAccount.id,
         toAccountId: toAccount.id,
         description: description.trim(),
@@ -1732,11 +1728,7 @@ function TransactionModal({
         <FieldLabel label="Description">
           <input value={description} placeholder="What was this for?" onChange={(event) => setDescription(event.target.value)} />
         </FieldLabel>
-        {type === "transfer" ? (
-          <FieldLabel label="Category">
-            <input value={transferCategory} onChange={(event) => setTransferCategory(event.target.value)} />
-          </FieldLabel>
-        ) : (
+        {type !== "transfer" ? (
           <>
             <FieldLabel label="Category">
               <select value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setSubcategoryId(""); }}>
@@ -1750,7 +1742,7 @@ function TransactionModal({
               </select>
             </FieldLabel>
           </>
-        )}
+        ) : null}
         <FieldLabel label={type === "transfer" ? "From Account" : "Account"}>
           <select value={accountChoice} onChange={(event) => setAccountChoice(event.target.value)}>
             <option value="">Select account</option>
@@ -1959,11 +1951,13 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
 
   for (const item of summary.categories) addCategory(item.category, item.currency);
   for (const item of summary.budgets) addCategory(item.category, item.currency);
-  for (const item of history || summary.recent) addCategory(item.category, item.currency);
+  for (const item of history || summary.recent) {
+    if (item.category) addCategory(item.category, item.currency);
+  }
   for (const stored of summary.storedCategories) addCategory(stored.sourceName);
 
   const transactions = (history || summary.recent).map((tx) => {
-    const category = addCategory(tx.category, tx.currency);
+    const category = tx.category ? addCategory(tx.category, tx.currency) : null;
     return {
       id: String(tx.id),
       sourceId: tx.id,
@@ -1971,8 +1965,8 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
       currency: tx.currency,
       type: tx.kind === "income" || tx.amountCents > 0 ? "income" : "expense",
       kind: tx.kind,
-      categoryId: category.id,
-      subcategoryId: tx.subcategoryId === null ? undefined : `${category.id}:stored-${tx.subcategoryId}`,
+      categoryId: category?.id || "",
+      subcategoryId: tx.subcategoryId === null || !category ? undefined : `${category.id}:stored-${tx.subcategoryId}`,
       accountId: tx.accountId,
       description: tx.description,
       date: tx.occurredOn
