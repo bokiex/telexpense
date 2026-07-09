@@ -6,6 +6,7 @@ import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTrans
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
 import { transactionCategory, transactionCategoryError } from "../lib/transactionCategory";
+import { transferAccounts } from "../lib/transfer";
 
 test("transfers omit categories while expense and income still require them", () => {
   assert.equal(transactionCategory("transfer", undefined), null);
@@ -16,6 +17,22 @@ test("transfers omit categories while expense and income still require them", ()
   assert.equal(transactionCategoryError("transfer", null), null);
   assert.equal(transactionCategoryError("expense", null), "Category is required.");
   assert.equal(transactionCategoryError("income", null), "Category is required.");
+});
+
+test("grouped transfer legs resolve edit source and destination accounts", () => {
+  const legs = [
+    { transferGroupId: "group", accountId: 10, amountCents: -500 },
+    { transferGroupId: "group", accountId: 20, amountCents: 500 }
+  ];
+  assert.deepEqual(transferAccounts(legs[1], legs), {
+    fromAccountId: 10,
+    toAccountId: 20
+  });
+  assert.deepEqual(transferAccounts({
+    transferGroupId: "group", accountId: 10, amountCents: -500,
+    transferFromAccountId: 10, transferToAccountId: 20
+  }, []), { fromAccountId: 10, toAccountId: 20 });
+  assert.equal(transferAccounts({ transferGroupId: null, accountId: 10, amountCents: -500 }, legs), null);
 });
 
 test("category identity collapses whitespace and case", () => {

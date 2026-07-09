@@ -39,6 +39,7 @@ import {
   Wallet,
   X
 } from "lucide-react";
+import { transferAccounts } from "@/lib/transfer";
 
 type BudgetGroup = "Needs" | "Wants" | "Savings";
 type TransactionType = "income" | "expense";
@@ -65,6 +66,8 @@ type RecentTransaction = {
   subcategoryId: number | null;
   accountId: number | null;
   transferGroupId: string | null;
+  transferFromAccountId: number | null;
+  transferToAccountId: number | null;
   recurringRuleId: number | null;
   description: string;
   amountCents: number;
@@ -140,18 +143,21 @@ type Transaction = {
   currency: string;
   type: TransactionType;
   kind: RecentTransaction["kind"];
+  transferGroupId: string | null;
   categoryId: string;
   subcategoryId?: string;
   accountId?: number | null;
+  toAccountId?: number | null;
   description: string;
   date: string;
 };
 
 type TransactionFormValues =
-  | (Omit<Transaction, "id" | "sourceId" | "kind" | "currency"> & { id?: string; sourceId?: number; currency?: string; type: "income" | "expense" })
+  | (Omit<Transaction, "id" | "sourceId" | "kind" | "currency" | "transferGroupId" | "toAccountId"> & { id?: string; sourceId?: number; currency?: string; type: "income" | "expense" })
   | {
       id?: string;
       sourceId?: number;
+      transferGroupId?: string;
       type: "transfer";
       amount: number;
       accountId: number;
@@ -395,7 +401,8 @@ export default function Dashboard() {
     if (tx.type === "transfer") {
       const fromAccount = data.accounts.find((item) => item.id === tx.accountId);
       const toAccount = data.accounts.find((item) => item.id === tx.toAccountId);
-      const response = await apiRequest("/api/transfers", "POST", {
+      const path = tx.transferGroupId ? `/api/transfers/${tx.transferGroupId}` : "/api/transfers";
+      const response = await apiRequest(path, tx.transferGroupId ? "PATCH" : "POST", {
         fromAccountId: fromAccount?.id,
         toAccountId: toAccount?.id,
         description: tx.description,
@@ -1654,14 +1661,15 @@ function TransactionModal({
   onSave: (tx: TransactionFormValues) => void;
   onClose: () => void;
 }) {
-  const [type, setType] = useState<"income" | "expense" | "transfer">(editTx?.kind === "transfer" ? "transfer" : editTx?.type ?? "expense");
+  const [type, setType] = useState<"income" | "expense" | "transfer">(editTx?.transferGroupId ? "transfer" : editTx?.kind === "transfer" ? "transfer" : editTx?.type ?? "expense");
   const [amount, setAmount] = useState(editTx ? String(editTx.amount / 100) : "");
   const [description, setDescription] = useState(editTx?.description ?? "");
   const [categoryId, setCategoryId] = useState(editTx?.categoryId ?? data.categories[0]?.id ?? "");
   const [subcategoryId, setSubcategoryId] = useState(editTx?.subcategoryId ?? "");
   const initialAccount = data.accounts.find((item) => item.id === editTx?.accountId);
   const [accountChoice, setAccountChoice] = useState(initialAccount?.accountKey || "");
-  const [toAccountChoice, setToAccountChoice] = useState("");
+  const initialToAccount = data.accounts.find((item) => item.id === editTx?.toAccountId);
+  const [toAccountChoice, setToAccountChoice] = useState(initialToAccount?.accountKey || "");
   const [date, setDate] = useState(editTx?.date ?? new Date().toISOString().split("T")[0]);
   const [error, setError] = useState("");
   const selectedCategory = data.categories.find((category) => category.id === categoryId);
@@ -1687,6 +1695,7 @@ function TransactionModal({
       onSave({
         id: editTx?.id,
         sourceId: editTx?.sourceId,
+        transferGroupId: editTx?.transferGroupId || undefined,
         type,
         amount: cents,
         accountId: selectedAccount.id,
@@ -1956,18 +1965,22 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
   }
   for (const stored of summary.storedCategories) addCategory(stored.sourceName);
 
-  const transactions = (history || summary.recent).map((tx) => {
+  const sourceTransactions = history || summary.recent;
+  const transactions = sourceTransactions.map((tx) => {
     const category = tx.category ? addCategory(tx.category, tx.currency) : null;
+    const transfer = transferAccounts(tx, sourceTransactions);
     return {
       id: String(tx.id),
       sourceId: tx.id,
       amount: Math.abs(tx.amountCents),
       currency: tx.currency,
       type: tx.kind === "income" || tx.amountCents > 0 ? "income" : "expense",
-      kind: tx.kind,
+      kind: tx.transferGroupId ? "transfer" : tx.kind,
+      transferGroupId: tx.transferGroupId,
       categoryId: category?.id || "",
       subcategoryId: tx.subcategoryId === null || !category ? undefined : `${category.id}:stored-${tx.subcategoryId}`,
-      accountId: tx.accountId,
+      accountId: transfer?.fromAccountId ?? tx.accountId,
+      toAccountId: transfer?.toAccountId ?? null,
       description: tx.description,
       date: tx.occurredOn
     } satisfies Transaction;
