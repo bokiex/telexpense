@@ -5,7 +5,11 @@ import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
-import { transactionCategory, transactionCategoryError } from "../lib/transactionCategory";
+import {
+  genericTransactionKindError,
+  transactionCategory,
+  transactionCategoryError
+} from "../lib/transactionCategory";
 import { transferAccounts } from "../lib/transfer";
 
 test("transfers omit categories while expense and income still require them", () => {
@@ -17,6 +21,13 @@ test("transfers omit categories while expense and income still require them", ()
   assert.equal(transactionCategoryError("transfer", null), null);
   assert.equal(transactionCategoryError("expense", null), "Category is required.");
   assert.equal(transactionCategoryError("income", null), "Category is required.");
+});
+
+test("generic transaction persistence rejects ungrouped transfers", () => {
+  assert.equal(genericTransactionKindError("transfer"), "Transfers must use the grouped transfer endpoint.");
+  assert.equal(genericTransactionKindError("expense"), null);
+  assert.equal(genericTransactionKindError("income"), null);
+  assert.equal(genericTransactionKindError("investment"), null);
 });
 
 test("grouped transfer legs resolve edit source and destination accounts", () => {

@@ -3,7 +3,11 @@ import { addTransactionFields } from "@/lib/repository";
 import { validateTelegramInitData } from "@/lib/telegram";
 import { requireEnv } from "@/lib/env";
 import type { ParsedTransaction } from "@/lib/parser";
-import { transactionCategory, transactionCategoryError } from "@/lib/transactionCategory";
+import {
+  genericTransactionKindError,
+  transactionCategory,
+  transactionCategoryError
+} from "@/lib/transactionCategory";
 
 export const runtime = "nodejs";
 
@@ -24,6 +28,8 @@ export async function POST(request: NextRequest) {
     const occurredOn = String(body.occurredOn || "").trim();
 
     if (!kinds.has(kind)) return NextResponse.json({ error: "Transaction kind is not valid." }, { status: 400 });
+    const kindError = genericTransactionKindError(kind);
+    if (kindError) return NextResponse.json({ error: kindError }, { status: 400 });
     const categoryError = transactionCategoryError(kind, category);
     if (categoryError) return NextResponse.json({ error: categoryError }, { status: 400 });
     if (!Number.isFinite(accountId)) return NextResponse.json({ error: "Account id is required." }, { status: 400 });

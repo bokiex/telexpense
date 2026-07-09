@@ -253,15 +253,11 @@ export async function addTransactionFields(
     occurredOn: string;
   }
 ) {
+  if (values.kind === "transfer") throw new Error("Transfers must use grouped transfer persistence.");
   const supabase = createSupabaseAdmin();
-  let category: { category: string | null; categoryId: number | null };
-  if (values.kind === "transfer") {
-    category = { category: null, categoryId: null };
-  } else {
-    if (!values.category) throw new Error("Category is required.");
-    category = await resolveCategoryIdentity(telegramUserId, values.category);
-  }
-  const subcategoryId = values.kind === "transfer" ? null : values.subcategoryId ?? null;
+  if (!values.category) throw new Error("Category is required.");
+  const category = await resolveCategoryIdentity(telegramUserId, values.category);
+  const subcategoryId = values.subcategoryId ?? null;
   await assertOwnedAccount(telegramUserId, values.accountId);
   if (category.categoryId !== null) {
     await assertOwnedSubcategory(telegramUserId, subcategoryId, category.categoryId);
@@ -394,15 +390,11 @@ export async function updateTransactionFields(
     occurredOn: string;
   }
 ) {
+  if (values.kind === "transfer") throw new Error("Transfers must use grouped transfer persistence.");
   const supabase = createSupabaseAdmin();
-  let category: { category: string | null; categoryId: number | null };
-  if (values.kind === "transfer") {
-    category = { category: null, categoryId: null };
-  } else {
-    if (!values.category) throw new Error("Category is required.");
-    category = await resolveCategoryIdentity(telegramUserId, values.category);
-  }
-  const subcategoryId = values.kind === "transfer" ? null : values.subcategoryId ?? null;
+  if (!values.category) throw new Error("Category is required.");
+  const category = await resolveCategoryIdentity(telegramUserId, values.category);
+  const subcategoryId = values.subcategoryId ?? null;
   await assertOwnedAccount(telegramUserId, values.accountId);
   if (category.categoryId !== null) {
     await assertOwnedSubcategory(telegramUserId, subcategoryId, category.categoryId);
