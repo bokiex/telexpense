@@ -83,8 +83,7 @@ create table if not exists public.budgets (
   category text not null,
   month text not null,
   amount_cents integer not null,
-  currency text not null default 'SGD',
-  unique (telegram_user_id, category, month)
+  currency text not null default 'SGD'
 );
 
 create table if not exists public.categories (
@@ -110,6 +109,9 @@ create table if not exists public.subcategories (
   created_at timestamptz not null default now(),
   unique (telegram_user_id, category_id, name)
 );
+
+alter table public.budgets
+  add column if not exists subcategory_id bigint references public.subcategories(id) on delete cascade;
 
 alter table public.transactions
   add column if not exists account_id bigint references public.accounts(id) on delete set null;
@@ -647,7 +649,7 @@ begin
   if exists (
     select 1
     from public.budgets
-    group by telegram_user_id, public.normalize_identity(category), month
+    group by telegram_user_id, public.normalize_identity(category), month, subcategory_id
     having count(distinct upper(currency)) > 1
   ) then
     raise exception 'Cannot merge canonical duplicate budgets with conflicting currencies';
@@ -655,15 +657,15 @@ begin
 end $$;
 
 with combined as (
-  select telegram_user_id, public.normalize_identity(category) category, month,
+  select telegram_user_id, public.normalize_identity(category) category, subcategory_id, month,
          sum(amount_cents)::integer amount_cents, min(upper(currency)) currency
   from public.budgets
-  group by telegram_user_id, public.normalize_identity(category), month
+  group by telegram_user_id, public.normalize_identity(category), subcategory_id, month
 ), removed as (
   delete from public.budgets returning *
 )
-insert into public.budgets (telegram_user_id, category, month, amount_cents, currency)
-select telegram_user_id, category, month, amount_cents, currency from combined;
+insert into public.budgets (telegram_user_id, category, subcategory_id, month, amount_cents, currency)
+select telegram_user_id, category, subcategory_id, month, amount_cents, currency from combined;
 
 update public.transactions t
 set category_id = c.id
@@ -692,9 +694,21 @@ alter table public.categories
 alter table public.subcategories
   add constraint subcategories_telegram_user_id_category_id_name_key
   unique (telegram_user_id, category_id, name);
+
 alter table public.budgets
-  add constraint budgets_telegram_user_id_category_month_key
-  unique (telegram_user_id, category, month);
+  drop constraint if exists budgets_telegram_user_id_category_month_key;
+
+create unique index if not exists budgets_user_category_month_uidx
+  on public.budgets (telegram_user_id, category, month)
+  where subcategory_id is null;
+
+create unique index if not exists budgets_user_subcategory_month_uidx
+  on public.budgets (telegram_user_id, subcategory_id, month)
+  where subcategory_id is not null;
+
+create index if not exists budgets_user_subcategory_idx
+  on public.budgets (telegram_user_id, subcategory_id)
+  where subcategory_id is not null;
 
 create or replace function public.materialize_recurring_transactions(
   target_month text,

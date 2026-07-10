@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addSubcategory, deleteBudget, deleteCategoryMetadata, upsertCategory } from "@/lib/repository";
+import { addSubcategory, deleteCategoryBudgets, deleteCategoryMetadata, upsertCategory } from "@/lib/repository";
 import { requireEnv } from "@/lib/env";
 import { validateTelegramInitData } from "@/lib/telegram";
 import type { BudgetGroup } from "@/lib/repository";
@@ -68,7 +68,7 @@ export async function DELETE(request: NextRequest) {
 
     await deleteCategoryMetadata(userId, sourceKey, sourceName);
     if (/^\d{4}-\d{2}$/.test(month)) {
-      await deleteBudget(userId, sourceName, month);
+      await deleteCategoryBudgets(userId, sourceName, month);
     }
 
     return NextResponse.json({ ok: true });

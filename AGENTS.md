@@ -88,6 +88,10 @@ check.
   user-owned category. Bot selection state is stored in
   `pending_transaction_captures`, keyed by a short callback token and always
   queried with `telegram_user_id`, so it survives serverless invocations.
+- Budgets may reference `subcategory_id` for child-subcategory targets; it must
+  belong to the selected user-owned parent category. A parent-category budget
+  takes precedence in effective monthly totals, and child budgets roll up only
+  when no parent budget exists for that category.
 - User isolation is by `telegram_user_id`. Every dashboard API must validate
   the `X-Telegram-Init-Data` header with `validateTelegramInitData`, then scope
   every repository query/mutation to the resulting user ID.
@@ -101,7 +105,7 @@ check.
   handlers that use Node APIs such as `crypto`.
 - `lib/repository.ts` contains compatibility retries for partially upgraded
   Supabase schemas. Do not remove them without confirming all deployed
-  databases have the new account columns.
+  databases have the new account and budget subcategory columns.
 - Keep `supabase/schema.sql` safe to re-run when evolving the schema, and update
   repository types/queries and dashboard API payloads together.
 - Evolve deployed data with versioned files created by `supabase migration new`;

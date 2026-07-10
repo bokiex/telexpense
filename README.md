@@ -8,6 +8,8 @@ The deployable version is a single Next.js app:
 - `/api/telegram/webhook` receives Telegram bot updates.
 - `/api/summary` returns dashboard data after validating `Telegram.WebApp.initData`.
 - `/api/transactions/history` returns cursor-paginated transaction history.
+- `/api/budgets` sets or deletes monthly parent-category and child-subcategory
+  budgets.
 - `/api/transfers` creates grouped transfers, and
   `/api/transfers/{transferGroupId}` edits or deletes both legs of a grouped
   transfer.
@@ -32,8 +34,9 @@ This works well because Telegram Mini Apps require HTTPS in production, and Verc
    [supabase/migrations](supabase/migrations) in timestamp order and keep the
    migration history recorded. The canonical-identity migration stops rather
    than guessing if duplicate categories or accounts have conflicting metadata,
-   duplicate portfolio snapshots disagree, or duplicate budgets use different
-   currencies; reconcile those rows and rerun the migration.
+   duplicate portfolio snapshots disagree, or duplicate budgets for the same
+   parent category, subcategory, and month use different currencies; reconcile
+   those rows and rerun the migration.
 4. Copy your Project URL, publishable key, and server-side secret key.
 
 Server-side routes use `SUPABASE_SECRET_KEY` or legacy `SUPABASE_SERVICE_ROLE_KEY`. Do not expose this key in frontend code.
@@ -136,12 +139,21 @@ subcategories, the bot asks you to add one in the dashboard and retry.
 Confirmations show the category/subcategory breadcrumb with Edit and Undo
 actions.
 
+The `/budget` bot command sets parent-category monthly budgets. Use the Mini
+App budget tab to set or delete budgets for child subcategories.
+
 ## Dashboard Behavior
 
 - User-triggered saves, deletes, and history pagination show an in-place wallet
   loading indicator, announce their busy state to assistive technology, and
   disable the initiating control until the request finishes to prevent
   duplicate submissions.
+- The monthly budget tab groups parent categories with their child
+  subcategories. Parent-category and subcategory budgets can be set or deleted
+  for the selected month; child budgets are shown with their own spend progress.
+  Overall budget health counts a parent budget when one exists, otherwise it
+  rolls up that category's child budgets so subcategory targets are not
+  double-counted.
 - Summary reads are read-only. The daily recurring job creates due transactions
   idempotently, in bounded batches, for the current UTC month.
 - Transaction history is loaded separately for the selected month and uses a
@@ -150,7 +162,9 @@ actions.
   `nextCursor.beforeDate` and `nextCursor.beforeId` on the next request. Limits
   are clamped to 1–100; `month` must use `YYYY-MM`, and requests require
   `X-Telegram-Init-Data`. Stored subcategories are retained when transactions
-  are created or edited and appear as category/subcategory breadcrumbs.
+  are created or edited and appear as category/subcategory breadcrumbs. Summary
+  responses include category spend, subcategory spend, and budgets with a
+  nullable `subcategoryId`.
 - Dashboard transfers require source and destination accounts but no category.
   They are stored as two category-less rows sharing a `transferGroupId`; edits
   update both rows and deletes remove both rows atomically through the grouped

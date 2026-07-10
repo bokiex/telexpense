@@ -11,8 +11,16 @@ export type CategorySpend = {
   currency: string;
 };
 
+export type SubcategorySpend = {
+  category: string;
+  subcategoryId: number;
+  spentCents: number;
+  currency: string;
+};
+
 export type Budget = {
   category: string;
+  subcategoryId: number | null;
   budgetCents: number;
   currency: string;
 };
@@ -515,30 +523,127 @@ export async function listTransactions(
   };
 }
 
-export async function setBudget(telegramUserId: number, category: string, month: string, amountCents: number, currency = "USD") {
+export async function setBudget(telegramUserId: number, category: string, month: string, amountCents: number, currency = "USD", subcategoryId?: number | null) {
   const supabase = createSupabaseAdmin();
-  const { error } = await supabase.from("budgets").upsert(
-    {
+  const normalizedCategory = normalizeIdentity(category);
+  const normalizedSubcategoryId = await assertBudgetSubcategory(telegramUserId, normalizedCategory, subcategoryId ?? null);
+  if (await budgetsMissingSubcategoryColumn(supabase)) {
+    if (normalizedSubcategoryId !== null) throw new Error("Subcategory budgets require the latest database migration.");
+    const { error } = await supabase.from("budgets").upsert(
+      { telegram_user_id: telegramUserId, category: normalizedCategory, month, amount_cents: amountCents, currency },
+      { onConflict: "telegram_user_id,category,month" }
+    );
+    if (error) throw error;
+    return;
+  }
+  const existingQuery = supabase
+    .from("budgets")
+    .select("id")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("category", normalizedCategory)
+    .eq("month", month);
+  const existing = normalizedSubcategoryId === null
+    ? await existingQuery.is("subcategory_id", null).maybeSingle()
+    : await existingQuery.eq("subcategory_id", normalizedSubcategoryId).maybeSingle();
+  if (existing.error && !isMissingSchemaError(existing.error)) throw existing.error;
+
+  if (existing.data) {
+    const { error } = await supabase
+      .from("budgets")
+      .update({ amount_cents: amountCents, currency })
+      .eq("telegram_user_id", telegramUserId)
+      .eq("id", existing.data.id);
+    if (error) throw error;
+    return;
+  }
+
+  const insert: Record<string, unknown> = {
       telegram_user_id: telegramUserId,
-      category: category.toLowerCase(),
+      category: normalizedCategory,
       month,
       amount_cents: amountCents,
       currency
-    },
-    { onConflict: "telegram_user_id,category,month" }
-  );
+    };
+  if (normalizedSubcategoryId !== null) insert.subcategory_id = normalizedSubcategoryId;
+  const { error } = await supabase.from("budgets").insert(insert);
   if (error) throw error;
 }
 
-export async function deleteBudget(telegramUserId: number, category: string, month: string) {
+export async function deleteBudget(telegramUserId: number, category: string, month: string, subcategoryId?: number | null) {
   const supabase = createSupabaseAdmin();
+  const normalizedCategory = normalizeIdentity(category);
+  const normalizedSubcategoryId = await assertBudgetSubcategory(telegramUserId, normalizedCategory, subcategoryId ?? null);
+  if (await budgetsMissingSubcategoryColumn(supabase)) {
+    if (normalizedSubcategoryId !== null) throw new Error("Subcategory budgets require the latest database migration.");
+    const { error } = await supabase
+      .from("budgets")
+      .delete()
+      .eq("telegram_user_id", telegramUserId)
+      .eq("category", normalizedCategory)
+      .eq("month", month);
+    if (error) throw error;
+    return;
+  }
+  let query = supabase
+    .from("budgets")
+    .delete()
+    .eq("telegram_user_id", telegramUserId)
+    .eq("category", normalizedCategory)
+    .eq("month", month);
+  query = normalizedSubcategoryId === null ? query.is("subcategory_id", null) : query.eq("subcategory_id", normalizedSubcategoryId);
+  const { error } = await query;
+  if (error) throw error;
+}
+
+export async function deleteCategoryBudgets(telegramUserId: number, category: string, month: string) {
+  const supabase = createSupabaseAdmin();
+  const normalizedCategory = normalizeIdentity(category);
   const { error } = await supabase
     .from("budgets")
     .delete()
     .eq("telegram_user_id", telegramUserId)
-    .eq("category", category.toLowerCase())
+    .eq("category", normalizedCategory)
     .eq("month", month);
   if (error) throw error;
+}
+
+async function assertBudgetSubcategory(telegramUserId: number, category: string, subcategoryId: number | null) {
+  if (subcategoryId === null) return null;
+  const categories = await getStoredCategories(telegramUserId);
+  const parent = categories.find((item) => normalizeIdentity(item.sourceName) === category || normalizeIdentity(item.sourceKey) === category);
+  if (!parent || !parent.subcategories.some((item) => item.id === subcategoryId)) {
+    throw new Error("Subcategory does not belong to the selected category.");
+  }
+  return subcategoryId;
+}
+
+async function budgetsMissingSubcategoryColumn(supabase: ReturnType<typeof createSupabaseAdmin>) {
+  const probe = await supabase.from("budgets").select("subcategory_id").limit(1);
+  if (!probe.error) return false;
+  if (isMissingSchemaError(probe.error)) return true;
+  throw probe.error;
+}
+
+async function selectBudgetsForMonth(supabase: ReturnType<typeof createSupabaseAdmin>, telegramUserId: number, month: string) {
+  const withSubcategory = await supabase
+    .from("budgets")
+    .select("category, subcategory_id, amount_cents, currency")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("month", month)
+    .order("category");
+  if (!withSubcategory.error) return withSubcategory;
+  if (!isMissingSchemaError(withSubcategory.error)) return withSubcategory;
+
+  const legacy = await supabase
+    .from("budgets")
+    .select("category, amount_cents, currency")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("month", month)
+    .order("category");
+  return {
+    ...legacy,
+    data: (legacy.data || []).map((row) => ({ ...row, subcategory_id: null }))
+  };
 }
 
 export async function upsertAccount(
@@ -841,12 +946,7 @@ export async function getSummary(telegramUserId: number, month: string) {
 
   const [transactions, budgetsRes, storedCategories, storedAccounts, accountBalances, recurringRules] = await Promise.all([
     getSummaryTransactions(telegramUserId, start, end),
-    supabase
-      .from("budgets")
-      .select("category, amount_cents, currency")
-      .eq("telegram_user_id", telegramUserId)
-      .eq("month", month)
-      .order("category"),
+    selectBudgetsForMonth(supabase, telegramUserId, month),
     getStoredCategories(telegramUserId),
     getStoredAccounts(telegramUserId),
     getAccountBalances(telegramUserId),
@@ -857,11 +957,13 @@ export async function getSummary(telegramUserId: number, month: string) {
 
   const budgets = (budgetsRes.data || []).map((row) => ({
     category: row.category,
+    subcategoryId: row.subcategory_id === null || row.subcategory_id === undefined ? null : Number(row.subcategory_id),
     budgetCents: row.amount_cents,
     currency: row.currency
   }));
 
   const categories = new Map<string, CategorySpend>();
+  const subcategories = new Map<number, SubcategorySpend>();
   const daily = new Map<string, number>();
 
   for (const tx of transactions) {
@@ -870,12 +972,18 @@ export async function getSummary(telegramUserId: number, month: string) {
     const category = categories.get(tx.category) || { category: tx.category, spentCents: 0, currency: tx.currency };
     category.spentCents += spent;
     categories.set(tx.category, category);
+    if (tx.subcategory_id !== null && tx.subcategory_id !== undefined) {
+      const subcategoryId = Number(tx.subcategory_id);
+      const subcategory = subcategories.get(subcategoryId) || { category: tx.category, subcategoryId, spentCents: 0, currency: tx.currency };
+      subcategory.spentCents += spent;
+      subcategories.set(subcategoryId, subcategory);
+    }
     daily.set(tx.occurred_on, (daily.get(tx.occurred_on) || 0) + spent);
   }
 
   const categoryList = Array.from(categories.values()).sort((a, b) => b.spentCents - a.spentCents);
   const spentCents = categoryList.reduce((sum, item) => sum + item.spentCents, 0);
-  const budgetCents = budgets.reduce((sum, item) => sum + item.budgetCents, 0);
+  const budgetCents = effectiveBudgetCents(budgets);
   const daysElapsed = daysElapsedInMonth(month);
   const daysLeft = daysLeftInMonth(month);
   const accounts = buildAccountsFromBalances(storedAccounts, accountBalances);
@@ -885,6 +993,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   return {
     month,
     categories: categoryList,
+    subcategories: Array.from(subcategories.values()).sort((a, b) => b.spentCents - a.spentCents),
     budgets,
     health: {
       spentCents,
@@ -954,7 +1063,7 @@ export async function getBudgetStatus(telegramUserId: number, month: string, cat
   const start = `${month}-01`;
   const end = nextMonthStart(month);
   const [budgetRes, transactionsRes] = await Promise.all([
-    supabase.from("budgets").select("category, amount_cents").eq("telegram_user_id", telegramUserId).eq("month", month).eq("category", normalized).maybeSingle(),
+    selectParentBudgetForStatus(supabase, telegramUserId, month, normalized),
     supabase.from("transactions").select("amount_cents").eq("telegram_user_id", telegramUserId).eq("category", normalized)
       .eq("kind", "expense").lt("amount_cents", 0).gte("occurred_on", start).lt("occurred_on", end)
   ]);
@@ -969,6 +1078,25 @@ export async function getBudgetStatus(telegramUserId: number, month: string, cat
     budgetCents,
     ratio: budgetCents ? spent / budgetCents : 0
   };
+}
+
+async function selectParentBudgetForStatus(supabase: ReturnType<typeof createSupabaseAdmin>, telegramUserId: number, month: string, category: string) {
+  const withSubcategory = await supabase
+    .from("budgets")
+    .select("category, amount_cents")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("month", month)
+    .eq("category", category)
+    .is("subcategory_id", null)
+    .maybeSingle();
+  if (!withSubcategory.error || !isMissingSchemaError(withSubcategory.error)) return withSubcategory;
+  return supabase
+    .from("budgets")
+    .select("category, amount_cents")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("month", month)
+    .eq("category", category)
+    .maybeSingle();
 }
 
 async function getPortfolioSnapshots(
@@ -1314,6 +1442,14 @@ function buildAccountsFromBalances(
     ...account,
     balanceCents: account.openingBalanceCents + (account.id ? totals.get(account.id) || 0 : 0)
   })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function effectiveBudgetCents(budgets: Budget[]) {
+  const parentBudgetCategories = new Set(budgets.filter((item) => item.subcategoryId === null).map((item) => item.category));
+  return budgets.reduce((sum, item) => {
+    if (item.subcategoryId !== null && parentBudgetCategories.has(item.category)) return sum;
+    return sum + item.budgetCents;
+  }, 0);
 }
 
 function buildAccounts(
