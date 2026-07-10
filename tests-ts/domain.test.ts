@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { formatAmount } from "../lib/amountFormat";
 import { debtAmount, loanMetrics, netWorth, netWorthByCurrency, normalizeOpeningBalance } from "../lib/finance";
 import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
-import { effectiveBudgetCents } from "../lib/repository";
+import { effectiveBudgetCents, subcategoryDisplayName } from "../lib/repository";
+import { themeBudgetCategory } from "../lib/budgetThemes";
 import {
   genericTransactionKindError,
   groupedTransactionEditError,
@@ -43,6 +45,25 @@ test("effective budget total does not double-count child subcategory targets", (
     { category: "food", subcategoryId: 10, budgetCents: 40_00, currency: "USD" },
     { category: "transport", subcategoryId: 20, budgetCents: 25_00, currency: "USD" }
   ]), 125_00);
+});
+
+test("effective budget total ignores synthetic theme targets", () => {
+  assert.equal(effectiveBudgetCents([
+    { category: themeBudgetCategory("Needs"), subcategoryId: null, budgetCents: 500_00, currency: "USD" },
+    { category: "food", subcategoryId: null, budgetCents: 100_00, currency: "USD" },
+    { category: "transport", subcategoryId: 20, budgetCents: 25_00, currency: "USD" }
+  ]), 125_00);
+});
+
+test("frontend amount display omits currency markers", () => {
+  const displayed = formatAmount(123_45);
+
+  assert.equal(displayed, "123.45");
+  assert.doesNotMatch(displayed, /US\$|\$|USD|SGD|currency/i);
+});
+
+test("subcategory display names preserve typed casing", () => {
+  assert.equal(subcategoryDisplayName("  Grab Rides  "), "Grab Rides");
 });
 
 test("transaction amounts enforce integer cents and kind sign invariants", () => {

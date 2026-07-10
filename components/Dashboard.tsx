@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { netWorthByCurrency } from "@/lib/finance";
+import { formatAmount } from "@/lib/amountFormat";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -40,6 +41,7 @@ import {
   X
 } from "lucide-react";
 import { transferAccounts } from "@/lib/transfer";
+import { THEME_BUDGET_CATEGORY_PREFIX, isThemeBudgetCategory, themeBudgetCategory } from "@/lib/budgetThemes";
 import { PendingButton, usePendingAction } from "@/components/PendingButton";
 
 type BudgetGroup = "Needs" | "Wants" | "Savings";
@@ -290,6 +292,7 @@ const CATEGORY_ICONS = ["Wallet", "Home", "ShoppingCart", "Car", "Tv", "Shopping
 const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "loan", "other"];
 const RECURRING_TYPES: RecurringRuleType[] = ["subscription", "investment_transfer", "loan_payment"];
 const DEFAULT_CURRENCY = "SGD";
+const THEME_TARGET_PREFIX = "theme:";
 
 export default function Dashboard() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -471,6 +474,24 @@ export default function Dashboard() {
   }
 
   async function saveBudget(categoryId: string, amount: number, subcategoryId?: string) {
+    const theme = themeFromTarget(categoryId);
+    if (theme) {
+      const response = await apiRequest("/api/budgets", "POST", {
+        category: themeBudgetCategory(theme),
+        month,
+        amountCents: amount,
+        currency: summary?.recent[0]?.currency || data.categories[0]?.currency || DEFAULT_CURRENCY,
+        subcategoryId: null
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        setError(result?.error || "Could not save budget.");
+        return;
+      }
+      setModal({ type: "none" });
+      reload();
+      return;
+    }
     const category = data.categories.find((item) => item.id === categoryId);
     if (!category) return;
     const storedSubcategoryId = storedSubcategoryNumber(subcategoryId);
@@ -491,6 +512,19 @@ export default function Dashboard() {
   }
 
   async function deleteBudgetTarget(categoryId: string, subcategoryId?: string) {
+    const theme = themeFromTarget(categoryId);
+    if (theme) {
+      const params = new URLSearchParams({ category: themeBudgetCategory(theme), month });
+      const response = await apiRequest(`/api/budgets?${params.toString()}`, "DELETE");
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        setError(result?.error || "Could not delete budget.");
+        return;
+      }
+      setModal({ type: "none" });
+      reload();
+      return;
+    }
     const category = data.categories.find((item) => item.id === categoryId);
     if (!category) return;
     const params = new URLSearchParams({ category: category.sourceName, month });
@@ -733,6 +767,7 @@ export default function Dashboard() {
       {modal.type === "set-budget" ? (
         <BudgetModal
           data={data}
+          summary={summary}
           categoryId={modal.categoryId}
           subcategoryId={modal.subcategoryId}
           onSave={saveBudget}
@@ -767,7 +802,6 @@ export default function Dashboard() {
       {modal.type === "edit-category" ? (
         <CategoryModal
           category={data.categories.find((category) => category.id === modal.categoryId)}
-          currency={data.categories.find((category) => category.id === modal.categoryId)?.currency || DEFAULT_CURRENCY}
           onSave={saveCategory}
           onClose={() => setModal({ type: "none" })}
         />
@@ -775,7 +809,6 @@ export default function Dashboard() {
 
       {modal.type === "add-category" ? (
         <CategoryModal
-          currency={summary?.recent[0]?.currency || DEFAULT_CURRENCY}
           onSave={saveCategory}
           onClose={() => setModal({ type: "none" })}
         />
@@ -823,7 +856,6 @@ function HomeView({
   const totalExpense = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
   const netWorthTotals = Object.entries(netWorthByCurrency(data.accounts, summary?.portfolioSnapshots));
   const recent = data.transactions.slice(0, 5);
-  const currency = data.transactions[0]?.currency || summary?.budgets[0]?.currency || DEFAULT_CURRENCY;
 
   return (
     <div className="screen-stack">
@@ -832,8 +864,8 @@ function HomeView({
         <div className="balance-row">
           <div className="account-total-list">
             {netWorthTotals.length ? netWorthTotals.map(([accountCurrency, total]) => (
-              <h1 key={accountCurrency}>{balanceVisible ? money(total, accountCurrency) : "••••••"}</h1>
-            )) : <h1>{balanceVisible ? money(0, DEFAULT_CURRENCY) : "••••••"}</h1>}
+              <h1 key={accountCurrency}>{balanceVisible ? money(total) : "••••••"}</h1>
+            )) : <h1>{balanceVisible ? money(0) : "••••••"}</h1>}
           </div>
           <button className="ghost-button" type="button" onClick={onToggleBalance} aria-label="Toggle balance visibility">
             {balanceVisible ? <Eye size={18} /> : <EyeOff size={18} />}
@@ -849,8 +881,8 @@ function HomeView({
           </button>
         </div>
         <div className="overview-grid">
-          <Metric icon={<TrendingUp size={13} />} label="Income" value={money(totalIncome, currency)} positive masked={!balanceVisible} />
-          <Metric icon={<TrendingDown size={13} />} label="Expense" value={money(totalExpense, currency)} masked={!balanceVisible} />
+          <Metric icon={<TrendingUp size={13} />} label="Income" value={money(totalIncome)} positive masked={!balanceVisible} />
+          <Metric icon={<TrendingDown size={13} />} label="Expense" value={money(totalExpense)} masked={!balanceVisible} />
         </div>
       </section>
 
@@ -1032,8 +1064,8 @@ function AccountsView({
         <p className="eyebrow">Net Worth Across Accounts</p>
         <div className="account-total-list">
           {Object.entries(totalByCurrency).length ? Object.entries(totalByCurrency).map(([currency, total]) => (
-            <strong key={currency}>{money(total, currency)}</strong>
-          )) : <strong>{money(0, DEFAULT_CURRENCY)}</strong>}
+            <strong key={currency}>{money(total)}</strong>
+          )) : <strong>{money(0)}</strong>}
         </div>
       </section>
 
@@ -1051,8 +1083,8 @@ function AccountsView({
               <span>{account.institution || accountTypeLabel(account.accountType)} · {accountTypeLabel(account.accountType)}</span>
             </div>
             <div className="account-balance">
-              <strong>{account.accountType === "loan" ? money(Math.max(0, -account.balanceCents), account.currency) : money(account.balanceCents, account.currency)}</strong>
-              <span>{account.accountType === "loan" ? "Original debt" : "Opening"} {money(account.accountType === "loan" ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents, account.currency)}</span>
+              <strong>{account.accountType === "loan" ? money(Math.max(0, -account.balanceCents)) : money(account.balanceCents)}</strong>
+              <span>{account.accountType === "loan" ? "Original debt" : "Opening"} {money(account.accountType === "loan" ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents)}</span>
             </div>
             <div className="card-actions">
               {account.accountType === "investment" ? (
@@ -1091,7 +1123,7 @@ function AccountsView({
                 <span>{recurringTypeLabel(rule.ruleType)} · day {rule.dayOfMonth}</span>
               </div>
               <div className="account-balance">
-                <strong>{money(rule.amountCents, rule.currency)}</strong>
+                <strong>{money(rule.amountCents)}</strong>
                 <span>{rule.active ? "Active" : "Inactive"}</span>
               </div>
               <div className="card-actions">
@@ -1114,19 +1146,19 @@ function InvestmentAccountDetail({ account, snapshot }: { account: Account; snap
   if (!snapshot) {
     return (
       <div className="account-detail">
-        <ValueLine label="Portfolio value" value="Not set" />
-        <ValueLine label="Contributions" value={money(Math.max(0, account.balanceCents), account.currency)} />
+        <ValueLine label="Portfolio value" value="No value yet" />
+        <ValueLine label="Contributions" value={money(Math.max(0, account.balanceCents))} />
       </div>
     );
   }
   return (
     <div className="account-detail">
-      <ValueLine label="Portfolio value" value={money(snapshot.portfolioValueCents, snapshot.currency)} />
-      <ValueLine label="Total contributions" value={money(snapshot.contributionCents, snapshot.currency)} />
-      <ValueLine label="This month contributions" value={money(snapshot.monthlyContributionCents, snapshot.currency)} />
+      <ValueLine label="Portfolio value" value={money(snapshot.portfolioValueCents)} />
+      <ValueLine label="Total contributions" value={money(snapshot.contributionCents)} />
+      <ValueLine label="This month contributions" value={money(snapshot.monthlyContributionCents)} />
       <ValueLine
         label="Market movement"
-        value={`${snapshot.marketGainLossCents >= 0 ? "+" : "-"}${money(Math.abs(snapshot.marketGainLossCents), snapshot.currency)}`}
+        value={`${snapshot.marketGainLossCents >= 0 ? "+" : "-"}${money(Math.abs(snapshot.marketGainLossCents))}`}
         positive={snapshot.marketGainLossCents >= 0}
         danger={snapshot.marketGainLossCents < 0}
       />
@@ -1136,12 +1168,12 @@ function InvestmentAccountDetail({ account, snapshot }: { account: Account; snap
 
 function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Summary | null; onSetBudget: (categoryId: string, subcategoryId?: string) => void }) {
   const activeCategories = data.categories.filter((category) => !category.hidden);
-  const totalBudget = summary?.health.budgetCents ?? effectiveBudgetTotal(data.categories);
+  const totalBudget = effectiveBudgetTotalWithThemes(activeCategories, summary);
   const totalSpent = summary?.health.spentCents ?? data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
   const budgetLeft = totalBudget - totalSpent;
   const usedPct = totalBudget ? Math.min(100, Math.round((totalSpent / totalBudget) * 100)) : 0;
-  const currency = data.categories[0]?.currency || DEFAULT_CURRENCY;
-  const hasBudgetTargets = activeCategories.some((category) => category.budget !== undefined || category.subcategories.some((subcategory) => subcategory.budget !== undefined));
+  const hasBudgetTargets = GROUPS.some((group) => themeBudget(summary, group) !== undefined)
+    || activeCategories.some((category) => category.budget !== undefined || category.subcategories.some((subcategory) => subcategory.budget !== undefined));
 
   return (
     <div className="screen-stack">
@@ -1153,17 +1185,17 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
             <small>used</small>
           </div>
           <div className="summary-list">
-            <ValueLine label="Total Budget" value={money(totalBudget, currency)} />
-            <ValueLine label="Used" value={money(totalSpent, currency)} danger />
-            <ValueLine label="Budget Left" value={`${money(Math.abs(budgetLeft), currency)}${budgetLeft < 0 ? " over" : ""}`} positive={budgetLeft >= 0} danger={budgetLeft < 0} />
+            <ValueLine label="Total Budget" value={money(totalBudget)} />
+            <ValueLine label="Used" value={money(totalSpent)} danger />
+            <ValueLine label="Budget Left" value={`${money(Math.abs(budgetLeft))}${budgetLeft < 0 ? " over" : ""}`} positive={budgetLeft >= 0} danger={budgetLeft < 0} />
           </div>
         </div>
       </section>
 
       {GROUPS.map((group) => {
         const categories = activeCategories.filter((category) => category.group === group);
-        if (!categories.length) return null;
-        const groupBudget = effectiveBudgetTotal(categories);
+        const groupThemeBudget = themeBudget(summary, group);
+        const groupBudget = groupThemeBudget;
         const groupSpent = categories.reduce((sum, category) => sum + spentForCategory(data, category.id), 0);
         const groupPct = groupBudget ? Math.min(100, Math.round((groupSpent / groupBudget) * 100)) : 0;
         return (
@@ -1176,10 +1208,13 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
                 <strong>{group}</strong>
                 <Progress value={groupPct} color={groupPct > 90 ? "#f87171" : GROUP_COLORS[group]} />
               </div>
-              <span>{groupPct}%</span>
+              <span>{groupBudget !== undefined ? `${money(groupSpent)} / ${money(groupBudget)}` : money(groupSpent)}</span>
+              <button className="tiny-icon" type="button" onClick={() => onSetBudget(themeTarget(group))} aria-label={`Set ${group} budget`}>
+                <Pencil size={11} />
+              </button>
             </div>
             <div className="nested-list">
-              {categories.map((category) => {
+              {categories.length ? categories.map((category) => {
                 const spent = spentForCategory(data, category.id);
                 const pct = category.budget ? Math.min(100, Math.round((spent / category.budget) * 100)) : 0;
                 const childBudget = category.subcategories.reduce((sum, subcategory) => sum + (subcategory.budget || 0), 0);
@@ -1192,7 +1227,7 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
                         <small>{category.subcategories.length ? `${category.subcategories.length} subcategories` : "Category budget"}</small>
                         <Progress value={pct} color={pct > 90 ? "#f87171" : category.color} thin />
                       </div>
-                      <span>{money(spent, category.currency)} / {category.budget !== undefined ? money(category.budget, category.currency) : "Not set"}</span>
+                      <span>{budgetRowAmount(spent, category.budget)}</span>
                       <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
                         <Pencil size={11} />
                       </button>
@@ -1209,19 +1244,19 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
                                 <strong>{subcategory.name}</strong>
                                 <Progress value={subPct} color={subPct > 90 ? "#f87171" : category.color} thin />
                               </div>
-                              <span>{money(subSpent, subcategory.currency)} / {subcategory.budget !== undefined ? money(subcategory.budget, subcategory.currency) : "Not set"}</span>
+                              <span>{budgetRowAmount(subSpent, subcategory.budget)}</span>
                               <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
                                 <Pencil size={11} />
                               </button>
                             </div>
                           );
                         })}
-                        {category.budget === undefined && childBudget > 0 ? <small className="child-budget-note">Child targets total {money(childBudget, category.currency)}</small> : null}
+                        {category.budget === undefined && childBudget > 0 ? <small className="child-budget-note">Child targets total {money(childBudget)}</small> : null}
                       </div>
                     ) : null}
                   </div>
                 );
-              })}
+              }) : <EmptyState label={`No ${group.toLowerCase()} categories yet`} />}
             </div>
           </section>
         );
@@ -1244,8 +1279,8 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
                 </div>
                 <div className="loan-values">
                   <span>{loan.payoffProgress}% paid</span>
-                  <span>{money(Math.max(0, -loan.balanceCents), loan.currency)} left</span>
-                  <span>{money(loan.repaymentThisMonthCents, loan.currency)} this month</span>
+                  <span>{money(Math.max(0, -loan.balanceCents))} left</span>
+                  <span>{money(loan.repaymentThisMonthCents)} this month</span>
                 </div>
               </div>
             ))}
@@ -1344,12 +1379,10 @@ function CategoriesView({
 
 function CategoryModal({
   category,
-  currency,
   onSave,
   onClose
 }: {
   category?: Category;
-  currency: string;
   onSave: (categoryId: string | null, values: { name: string; group: BudgetGroup; color: string; icon: string; budgetCents: number }) => Promise<void>;
   onClose: () => void;
 }) {
@@ -1390,7 +1423,7 @@ function CategoryModal({
             ))}
           </div>
         </FieldLabel>
-        <FieldLabel label={`Monthly Budget (${currency})`}>
+        <FieldLabel label="Monthly Budget">
           <input value={budget} inputMode="decimal" placeholder="0.00" onChange={(event) => setBudget(event.target.value)} />
         </FieldLabel>
         <FieldLabel label="Color">
@@ -1492,7 +1525,7 @@ function AccountModal({
   const [institution, setInstitution] = useState(account?.institution || "");
   const [accountType, setAccountType] = useState<AccountType>(account?.accountType || "bank");
   const [openingBalance, setOpeningBalance] = useState(account ? String((account.accountType === "loan" || account.accountType === "card" ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents) / 100) : "0");
-  const [currency, setCurrency] = useState(account?.currency || DEFAULT_CURRENCY);
+  const currency = account?.currency || DEFAULT_CURRENCY;
   const [color, setColor] = useState(account?.color || "#60a5fa");
   const [icon, setIcon] = useState(account?.icon || "Wallet");
   const [error, setError] = useState("");
@@ -1542,9 +1575,6 @@ function AccountModal({
         <div className="form-grid-2">
           <FieldLabel label={accountType === "loan" || accountType === "card" ? "Opening Debt" : "Opening Balance"}>
             <input value={openingBalance} inputMode="decimal" onChange={(event) => setOpeningBalance(event.target.value)} />
-          </FieldLabel>
-          <FieldLabel label="Currency">
-            <input value={currency} maxLength={3} onChange={(event) => setCurrency(event.target.value)} />
           </FieldLabel>
         </div>
         <FieldLabel label="Color">
@@ -1616,7 +1646,7 @@ function PortfolioSnapshotModal({
           <small>{month}</small>
           <strong>{account.name}</strong>
         </div>
-        <FieldLabel label={`Portfolio Value (${account.currency})`}>
+        <FieldLabel label="Portfolio Value">
           <input value={value} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setValue(event.target.value)} />
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
@@ -1642,7 +1672,7 @@ function RecurringRuleModal({
   const [name, setName] = useState(rule?.name || "");
   const [ruleType, setRuleType] = useState<RecurringRuleType>(rule?.ruleType || "subscription");
   const [amount, setAmount] = useState(rule ? String(rule.amountCents / 100) : "");
-  const [currency, setCurrency] = useState(rule?.currency || DEFAULT_CURRENCY);
+  const currency = rule?.currency || DEFAULT_CURRENCY;
   const [category, setCategory] = useState(rule?.category || data.categories[0]?.sourceName || "subscription");
   const [fromAccountId, setFromAccountId] = useState(rule?.fromAccountId ? String(rule.fromAccountId) : "");
   const [toAccountId, setToAccountId] = useState(rule?.toAccountId ? String(rule.toAccountId) : "");
@@ -1707,9 +1737,6 @@ function RecurringRuleModal({
         <div className="form-grid-2">
           <FieldLabel label="Amount">
             <input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
-          </FieldLabel>
-          <FieldLabel label="Currency">
-            <input value={currency} maxLength={3} onChange={(event) => setCurrency(event.target.value)} />
           </FieldLabel>
         </div>
         <FieldLabel label="Category">
@@ -1890,6 +1917,7 @@ function TransactionModal({
 
 function BudgetModal({
   data,
+  summary,
   categoryId,
   subcategoryId,
   onSave,
@@ -1897,6 +1925,7 @@ function BudgetModal({
   onClose
 }: {
   data: AppData;
+  summary: Summary | null;
   categoryId: string;
   subcategoryId?: string;
   onSave: (categoryId: string, amount: number, subcategoryId?: string) => Promise<void>;
@@ -1904,9 +1933,9 @@ function BudgetModal({
   onClose: () => void;
 }) {
   const category = data.categories.find((item) => item.id === categoryId);
+  const theme = themeFromTarget(categoryId);
   const subcategory = category?.subcategories.find((item) => item.id === subcategoryId);
-  const targetBudget = subcategory ? subcategory.budget : category?.budget;
-  const targetCurrency = subcategory?.currency || category?.currency || DEFAULT_CURRENCY;
+  const targetBudget = theme ? themeBudget(summary, theme) : subcategory ? subcategory.budget : category?.budget;
   const [amount, setAmount] = useState(targetBudget ? String(targetBudget / 100) : "");
   const [error, setError] = useState("");
   const saveAction = usePendingAction();
@@ -1926,8 +1955,8 @@ function BudgetModal({
       <form className="modal-form" onSubmit={submit}>
         <div className="budget-target">
           <small>Setting budget for</small>
-          <strong>{subcategory ? `${category?.name} / ${subcategory.name}` : category?.name}</strong>
-          {targetBudget !== undefined ? <small>Current: {money(targetBudget, targetCurrency)}</small> : <small>No budget set</small>}
+          <strong>{theme || (subcategory ? `${category?.name} / ${subcategory.name}` : category?.name)}</strong>
+          {targetBudget !== undefined ? <small>Current: {money(targetBudget)}</small> : <small>No budget set</small>}
         </div>
         <FieldLabel label="Budget Amount">
           <input value={amount} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setAmount(event.target.value)} />
@@ -1986,7 +2015,7 @@ function TransactionCard({ tx, data, actions }: { tx: Transaction; data: AppData
         <span>{[category?.name || tx.categoryId, sub?.name].filter(Boolean).join(" › ")} · {formatDate(tx.date)}</span>
       </div>
       <div className="transaction-amount">
-        <strong className={isPositive ? "positive-text" : "danger-text"}>{isPositive ? "+" : "-"}{money(tx.amount, tx.currency)}</strong>
+        <strong className={isPositive ? "positive-text" : "danger-text"}>{isPositive ? "+" : "-"}{money(tx.amount)}</strong>
         <span className={isPositive ? "positive-text" : "danger-text"}>
           {isPositive ? <ArrowUpRight size={11} /> : <ArrowDownLeft size={11} />}
           {label}
@@ -2090,7 +2119,9 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
   };
 
   for (const item of summary.categories) addCategory(item.category, item.currency);
-  for (const item of summary.budgets) addCategory(item.category, item.currency);
+  for (const item of summary.budgets) {
+    if (!isThemeBudgetCategory(item.category)) addCategory(item.category, item.currency);
+  }
   for (const item of history || summary.recent) {
     if (item.category) addCategory(item.category, item.currency);
   }
@@ -2163,6 +2194,38 @@ function effectiveBudgetTotal(categories: Category[]) {
   }, 0);
 }
 
+function effectiveBudgetTotalWithThemes(categories: Category[], summary: Summary | null) {
+  return GROUPS.reduce((sum, group) => {
+    const groupBudget = themeBudget(summary, group);
+    if (groupBudget !== undefined) return sum + groupBudget;
+    return sum + effectiveBudgetTotal(categories.filter((category) => category.group === group));
+  }, 0);
+}
+
+function budgetRowAmount(spent: number, budget?: number) {
+  return budget !== undefined ? `${money(spent)} / ${money(budget)}` : money(spent);
+}
+
+function themeTarget(group: BudgetGroup) {
+  return `${THEME_TARGET_PREFIX}${group}`;
+}
+
+function themeFromTarget(value: string): BudgetGroup | null {
+  if (!value.startsWith(THEME_TARGET_PREFIX)) return null;
+  const group = value.slice(THEME_TARGET_PREFIX.length);
+  return GROUPS.includes(group as BudgetGroup) ? group as BudgetGroup : null;
+}
+
+function themeFromBudgetCategory(category: string): BudgetGroup | null {
+  if (!isThemeBudgetCategory(category)) return null;
+  const normalized = category.slice(THEME_BUDGET_CATEGORY_PREFIX.length).toLowerCase();
+  return GROUPS.find((group) => group.toLowerCase() === normalized) || null;
+}
+
+function themeBudget(summary: Summary | null, group: BudgetGroup) {
+  return summary?.budgets.find((item) => themeFromBudgetCategory(item.category) === group && item.subcategoryId === null)?.budgetCents;
+}
+
 function storedSubcategoryNumber(subcategoryId?: string) {
   if (!subcategoryId) return null;
   const id = Number(subcategoryId.split("stored-").at(-1));
@@ -2185,8 +2248,8 @@ function signedCents(type: TransactionType, cents: number) {
   return type === "income" ? Math.abs(cents) : -Math.abs(cents);
 }
 
-function money(cents: number, currency = DEFAULT_CURRENCY) {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(cents / 100);
+export function money(cents: number) {
+  return formatAmount(cents);
 }
 
 function formatDate(dateStr: string) {

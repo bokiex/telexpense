@@ -89,9 +89,12 @@ check.
   `pending_transaction_captures`, keyed by a short callback token and always
   queried with `telegram_user_id`, so it survives serverless invocations.
 - Budgets may reference `subcategory_id` for child-subcategory targets; it must
-  belong to the selected user-owned parent category. A parent-category budget
-  takes precedence in effective monthly totals, and child budgets roll up only
-  when no parent budget exists for that category.
+  belong to the selected user-owned parent category. Needs, Wants, and Savings
+  theme targets are stored as synthetic parent budget rows using the
+  `__budget_group__:` category prefix and no `subcategory_id`. A
+  parent-category budget takes precedence over child budgets; dashboard totals
+  count a theme target when one exists for that group, otherwise child budgets
+  roll up only when no parent budget exists for that category.
 - User isolation is by `telegram_user_id`. Every dashboard API must validate
   the `X-Telegram-Init-Data` header with `validateTelegramInitData`, then scope
   every repository query/mutation to the resulting user ID.
@@ -99,8 +102,10 @@ check.
   client; RLS is enabled with no anonymous policies because the privileged key
   bypasses RLS. Correct repository scoping is therefore a security boundary.
 - Normalize categories/account keys to lowercase and currencies to uppercase
-  three-letter codes. Dates must be real calendar dates in `YYYY-MM-DD`, and
-  months must be valid calendar months in `YYYY-MM`.
+  three-letter codes. Preserve newly added subcategory display casing while
+  continuing to match subcategory identities case-insensitively after whitespace
+  normalization. Dates must be real calendar dates in `YYYY-MM-DD`, and months
+  must be valid calendar months in `YYYY-MM`.
 - Preserve the `@/` import alias, strict TypeScript, and `runtime = "nodejs"` on
   handlers that use Node APIs such as `crypto`.
 - `lib/repository.ts` contains compatibility retries for partially upgraded

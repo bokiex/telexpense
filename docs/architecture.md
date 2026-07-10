@@ -51,11 +51,15 @@ responses include a `Server-Timing` duration for the summary operation.
 
 Monthly budgets are managed through `POST /api/budgets` and
 `DELETE /api/budgets`, with an optional `subcategoryId` for child-subcategory
-targets. Summary responses include category spend, subcategory spend, and
-budgets with nullable `subcategoryId`. The dashboard groups those rows under
-their parent categories. A parent-category budget overrides its child budgets
-for total budget health; when no parent budget exists, child budgets roll up to
-the effective monthly total.
+targets. Needs, Wants, and Savings theme targets are stored as synthetic
+category budget rows prefixed with `__budget_group__:` and no `subcategoryId`.
+Summary responses include category spend, subcategory spend, and budgets with
+nullable `subcategoryId`. The dashboard groups ordinary rows under their parent
+categories and keeps synthetic theme rows out of the category list.
+Parent-category budgets override child budgets; when no parent budget exists,
+child budgets roll up to the effective category total. The dashboard's monthly
+total counts a theme budget for a group when one exists, otherwise it uses that
+group's effective category total.
 
 Mutation routes validate safe integer cents and financial sign conventions,
 uppercase three-letter currencies, real calendar dates, and valid calendar
@@ -72,6 +76,11 @@ an investment account's transaction-derived balance when available. Transfer
 legs are excluded from category spending summaries by their shared transfer
 group identity.
 
+The Mini App intentionally formats displayed amounts without currency symbols
+or currency controls. Currency codes remain in API payloads, validation, and
+stored rows so existing persisted data and non-dashboard integrations stay
+compatible.
+
 ## Telegram Mini App Notes
 
 Telegram's Mini App docs describe multiple launch paths, including main app/profile button, inline keyboard button, keyboard button, and menu button. This project supports menu or inline button launch by returning an inline `web_app` button in bot replies. BotFather should also be used to configure the main Mini App or menu button for a one-tap dashboard.
@@ -80,6 +89,10 @@ Dashboard mutations and transaction-history pagination use the shared
 `PendingButton` and `usePendingAction` primitives. They disable only the
 initiating control while its request is pending, preserve its layout, and
 expose the state through `aria-busy` and a polite status announcement.
+
+Subcategory names added in the Mini App preserve the user's typed casing for
+display. Matching still normalizes whitespace and case when resolving bot input
+or preventing duplicate subcategories.
 
 The Mini App must run on HTTPS outside Telegram's test environment. In
 production, never disable `initData` validation because it is the boundary that

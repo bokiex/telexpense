@@ -8,8 +8,8 @@ The deployable version is a single Next.js app:
 - `/api/telegram/webhook` receives Telegram bot updates.
 - `/api/summary` returns dashboard data after validating `Telegram.WebApp.initData`.
 - `/api/transactions/history` returns cursor-paginated transaction history.
-- `/api/budgets` sets or deletes monthly parent-category and child-subcategory
-  budgets.
+- `/api/budgets` sets or deletes monthly theme, parent-category, and
+  child-subcategory budgets.
 - `/api/transfers` creates grouped transfers, and
   `/api/transfers/{transferGroupId}` edits or deletes both legs of a grouped
   transfer.
@@ -130,7 +130,8 @@ them in bot messages.
 
 Transaction categories and accounts must already exist and be active. Names,
 keys, and subcategory names are matched case-insensitively after whitespace
-normalization. The concise `amount subcategory` form infers the parent category
+normalization; newly added subcategory display names keep the casing typed in
+the Mini App. The concise `amount subcategory` form infers the parent category
 and uses the sole active account without prompting. Unknown or ambiguous
 subcategories and multiple accounts are resolved with inline keyboard choices;
 duplicate subcategory names require an explicit parent-category choice.
@@ -140,7 +141,8 @@ Confirmations show the category/subcategory breadcrumb with Edit and Undo
 actions.
 
 The `/budget` bot command sets parent-category monthly budgets. Use the Mini
-App budget tab to set or delete budgets for child subcategories.
+App budget tab to set or delete budgets for Needs, Wants, and Savings themes,
+parent categories, or child subcategories.
 
 ## Dashboard Behavior
 
@@ -148,12 +150,14 @@ App budget tab to set or delete budgets for child subcategories.
   loading indicator, announce their busy state to assistive technology, and
   disable the initiating control until the request finishes to prevent
   duplicate submissions.
+- The Mini App displays amounts without currency symbols or currency controls,
+  while the API and database still persist currency codes for compatibility.
 - The monthly budget tab groups parent categories with their child
-  subcategories. Parent-category and subcategory budgets can be set or deleted
-  for the selected month; child budgets are shown with their own spend progress.
-  Overall budget health counts a parent budget when one exists, otherwise it
-  rolls up that category's child budgets so subcategory targets are not
-  double-counted.
+  subcategories under Needs, Wants, and Savings themes. Theme, parent-category,
+  and subcategory budgets can be set or deleted for the selected month; rows
+  without a target show spent amount only. Overall dashboard totals count a
+  theme budget when one exists, otherwise they count parent budgets or roll up
+  child budgets so subcategory targets are not double-counted.
 - Summary reads are read-only. The daily recurring job creates due transactions
   idempotently, in bounded batches, for the current UTC month.
 - Transaction history is loaded separately for the selected month and uses a
