@@ -24,7 +24,8 @@
    to the Telegram user so it survives serverless invocations.
 6. `lib/repository` stores the transaction in Supabase as integer cents and
    links canonical category, subcategory, and account IDs.
-7. `lib/budget` checks current monthly category spend against budgets.
+7. `lib/budget` checks current monthly category spend against parent-category
+   budgets.
 8. Bot replies with a breadcrumb save confirmation, Edit and Undo actions, and
    an optional warning.
 9. Mini App calls `/api/summary` with `X-Telegram-Init-Data`.
@@ -48,11 +49,21 @@ neither is; generic transaction create, edit, and delete routes reject
 transfers. Expense and income transactions still require a category. Summary
 responses include a `Server-Timing` duration for the summary operation.
 
+Monthly budgets are managed through `POST /api/budgets` and
+`DELETE /api/budgets`, with an optional `subcategoryId` for child-subcategory
+targets. Summary responses include category spend, subcategory spend, and
+budgets with nullable `subcategoryId`. The dashboard groups those rows under
+their parent categories. A parent-category budget overrides its child budgets
+for total budget health; when no parent budget exists, child budgets roll up to
+the effective monthly total.
+
 Mutation routes validate safe integer cents and financial sign conventions,
 uppercase three-letter currencies, real calendar dates, and valid calendar
 months. Portfolio snapshots and recurring rules verify that referenced
 accounts belong to the authenticated Telegram user; recurring transfer
-endpoints also reject identical source and destination accounts.
+endpoints also reject identical source and destination accounts. Budget
+mutations also verify that a supplied subcategory belongs to the selected
+user-owned parent category.
 
 Account balances combine opening balances with all linked transactions. Asset
 balances are positive and loan/card liabilities are negative. Dashboard net
