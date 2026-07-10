@@ -7,6 +7,7 @@ import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTrans
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
 import { effectiveBudgetCents, subcategoryDisplayName } from "../lib/repository";
+import { themeBudgetCategory } from "../lib/budgetThemes";
 import {
   genericTransactionKindError,
   groupedTransactionEditError,
@@ -42,6 +43,14 @@ test("effective budget total does not double-count child subcategory targets", (
   assert.equal(effectiveBudgetCents([
     { category: "food", subcategoryId: null, budgetCents: 100_00, currency: "USD" },
     { category: "food", subcategoryId: 10, budgetCents: 40_00, currency: "USD" },
+    { category: "transport", subcategoryId: 20, budgetCents: 25_00, currency: "USD" }
+  ]), 125_00);
+});
+
+test("effective budget total ignores synthetic theme targets", () => {
+  assert.equal(effectiveBudgetCents([
+    { category: themeBudgetCategory("Needs"), subcategoryId: null, budgetCents: 500_00, currency: "USD" },
+    { category: "food", subcategoryId: null, budgetCents: 100_00, currency: "USD" },
     { category: "transport", subcategoryId: 20, budgetCents: 25_00, currency: "USD" }
   ]), 125_00);
 });

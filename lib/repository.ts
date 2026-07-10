@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { normalizeIdentity, resolveIdentity } from "@/lib/identity";
 import { loanMetrics, normalizeOpeningBalance } from "@/lib/finance";
 import { groupedTransactionEditError } from "@/lib/transactionCategory";
+import { isThemeBudgetCategory } from "@/lib/budgetThemes";
 
 export type CategorySpend = {
   category: string;
@@ -862,24 +863,51 @@ export async function addSubcategory(
     icon: values.icon
   });
   const supabase = createSupabaseAdmin();
+  const displayName = subcategoryDisplayName(values.name);
+  const existing = await findSubcategoryByNormalizedName(supabase, telegramUserId, categoryId, displayName);
+  if (existing !== null) return existing;
   const { data, error } = await supabase
     .from("subcategories")
-    .upsert(
-      {
-        telegram_user_id: telegramUserId,
-        category_id: categoryId,
-        name: subcategoryDisplayName(values.name)
-      },
-      { onConflict: "telegram_user_id,category_id,name" }
-    )
+    .insert({
+      telegram_user_id: telegramUserId,
+      category_id: categoryId,
+      name: displayName
+    })
     .select("id")
     .single();
-  if (error) throw error;
+  if (error) {
+    if (isUniqueViolation(error)) {
+      const raced = await findSubcategoryByNormalizedName(supabase, telegramUserId, categoryId, displayName);
+      if (raced !== null) return raced;
+    }
+    throw error;
+  }
   return Number(data.id);
 }
 
 export function subcategoryDisplayName(value: string) {
   return value.trim();
+}
+
+async function findSubcategoryByNormalizedName(
+  supabase: ReturnType<typeof createSupabaseAdmin>,
+  telegramUserId: number,
+  categoryId: number,
+  name: string
+) {
+  const { data, error } = await supabase
+    .from("subcategories")
+    .select("id, name")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("category_id", categoryId);
+  if (error) throw error;
+  const normalized = normalizeIdentity(name);
+  const match = (data || []).find((item) => normalizeIdentity(item.name) === normalized);
+  return match ? Number(match.id) : null;
+}
+
+function isUniqueViolation(error: { code?: string }) {
+  return error.code === "23505";
 }
 
 export async function deleteCategoryMetadata(telegramUserId: number, sourceKey: string, sourceName: string) {
@@ -1449,8 +1477,9 @@ function buildAccountsFromBalances(
 }
 
 export function effectiveBudgetCents(budgets: Budget[]) {
-  const parentBudgetCategories = new Set(budgets.filter((item) => item.subcategoryId === null).map((item) => item.category));
-  return budgets.reduce((sum, item) => {
+  const ordinaryBudgets = budgets.filter((item) => !isThemeBudgetCategory(item.category));
+  const parentBudgetCategories = new Set(ordinaryBudgets.filter((item) => item.subcategoryId === null).map((item) => item.category));
+  return ordinaryBudgets.reduce((sum, item) => {
     if (item.subcategoryId !== null && parentBudgetCategories.has(item.category)) return sum;
     return sum + item.budgetCents;
   }, 0);

@@ -41,6 +41,7 @@ import {
   X
 } from "lucide-react";
 import { transferAccounts } from "@/lib/transfer";
+import { THEME_BUDGET_CATEGORY_PREFIX, isThemeBudgetCategory, themeBudgetCategory } from "@/lib/budgetThemes";
 import { PendingButton, usePendingAction } from "@/components/PendingButton";
 
 type BudgetGroup = "Needs" | "Wants" | "Savings";
@@ -291,7 +292,6 @@ const CATEGORY_ICONS = ["Wallet", "Home", "ShoppingCart", "Car", "Tv", "Shopping
 const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "loan", "other"];
 const RECURRING_TYPES: RecurringRuleType[] = ["subscription", "investment_transfer", "loan_payment"];
 const DEFAULT_CURRENCY = "SGD";
-const THEME_BUDGET_PREFIX = "__budget_group__:";
 const THEME_TARGET_PREFIX = "theme:";
 
 export default function Dashboard() {
@@ -2216,17 +2216,9 @@ function themeFromTarget(value: string): BudgetGroup | null {
   return GROUPS.includes(group as BudgetGroup) ? group as BudgetGroup : null;
 }
 
-function themeBudgetCategory(group: BudgetGroup) {
-  return `${THEME_BUDGET_PREFIX}${group.toLowerCase()}`;
-}
-
-function isThemeBudgetCategory(category: string) {
-  return category.startsWith(THEME_BUDGET_PREFIX);
-}
-
 function themeFromBudgetCategory(category: string): BudgetGroup | null {
   if (!isThemeBudgetCategory(category)) return null;
-  const normalized = category.slice(THEME_BUDGET_PREFIX.length).toLowerCase();
+  const normalized = category.slice(THEME_BUDGET_CATEGORY_PREFIX.length).toLowerCase();
   return GROUPS.find((group) => group.toLowerCase() === normalized) || null;
 }
 
