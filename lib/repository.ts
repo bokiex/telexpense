@@ -868,7 +868,7 @@ export async function addSubcategory(
       {
         telegram_user_id: telegramUserId,
         category_id: categoryId,
-        name: normalizeIdentity(values.name)
+        name: subcategoryDisplayName(values.name)
       },
       { onConflict: "telegram_user_id,category_id,name" }
     )
@@ -876,6 +876,10 @@ export async function addSubcategory(
     .single();
   if (error) throw error;
   return Number(data.id);
+}
+
+export function subcategoryDisplayName(value: string) {
+  return value.trim();
 }
 
 export async function deleteCategoryMetadata(telegramUserId: number, sourceKey: string, sourceName: string) {
