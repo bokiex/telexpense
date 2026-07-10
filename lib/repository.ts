@@ -595,6 +595,18 @@ export async function deleteBudget(telegramUserId: number, category: string, mon
   if (error) throw error;
 }
 
+export async function deleteCategoryBudgets(telegramUserId: number, category: string, month: string) {
+  const supabase = createSupabaseAdmin();
+  const normalizedCategory = normalizeIdentity(category);
+  const { error } = await supabase
+    .from("budgets")
+    .delete()
+    .eq("telegram_user_id", telegramUserId)
+    .eq("category", normalizedCategory)
+    .eq("month", month);
+  if (error) throw error;
+}
+
 async function assertBudgetSubcategory(telegramUserId: number, category: string, subcategoryId: number | null) {
   if (subcategoryId === null) return null;
   const categories = await getStoredCategories(telegramUserId);
