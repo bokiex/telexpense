@@ -88,6 +88,10 @@ type RecentTransaction = {
 
 type BudgetHealth = {
   spentCents: number;
+  ordinarySpentCents?: number;
+  savingsAllocatedCents?: number;
+  progressCents?: number;
+  progressByGroup?: Record<BudgetGroup, number>;
   budgetCents: number;
   remainingCents: number;
   budgetUsed: number;
@@ -1167,27 +1171,55 @@ function InvestmentAccountDetail({ account, snapshot }: { account: Account; snap
 }
 
 function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Summary | null; onSetBudget: (categoryId: string, subcategoryId?: string) => void }) {
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(() => new Set());
   const activeCategories = data.categories.filter((category) => !category.hidden);
   const totalBudget = effectiveBudgetTotalWithThemes(activeCategories, summary);
-  const totalSpent = summary?.health.spentCents ?? data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
-  const budgetLeft = totalBudget - totalSpent;
-  const usedPct = totalBudget ? Math.min(100, Math.round((totalSpent / totalBudget) * 100)) : 0;
+  const fallbackSpent = data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
+  const ordinarySpent = summary?.health.ordinarySpentCents ?? summary?.health.spentCents ?? fallbackSpent;
+  const savingsAllocated = summary?.health.savingsAllocatedCents ?? 0;
+  const budgetProgress = summary?.health.progressCents ?? ordinarySpent + savingsAllocated;
+  const budgetLeft = totalBudget - budgetProgress;
+  const budgetUsedPct = totalBudget ? Math.min(100, Math.round((budgetProgress / totalBudget) * 100)) : 0;
+  const progressByGroup = budgetProgressByGroup(activeCategories, data, summary);
+  const donutSegments = budgetDonutSegments(progressByGroup, totalBudget);
+  const donutBackground = donutSegments.length
+    ? `conic-gradient(${donutSegments.map((segment) => `${segment.color} ${segment.start}% ${segment.end}%`).join(", ")}, var(--secondary) ${donutSegments.at(-1)?.end || 0}% 100%)`
+    : "var(--secondary)";
   const hasBudgetTargets = GROUPS.some((group) => themeBudget(summary, group) !== undefined)
     || activeCategories.some((category) => category.budget !== undefined || category.subcategories.some((subcategory) => subcategory.budget !== undefined));
+  const toggleCategory = (categoryId: string) => {
+    setExpandedCategories((current) => {
+      const next = new Set(current);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  };
 
   return (
     <div className="screen-stack">
       <section className="mini-card budget-summary">
         <p className="eyebrow">Monthly Budget</p>
         <div className="budget-overview">
-          <div className="donut" style={{ "--donut": usedPct } as React.CSSProperties}>
-            <span>{usedPct}%</span>
-            <small>used</small>
+          <div className="budget-donut-wrap">
+            <div className="donut budget-donut" style={{ background: donutBackground }}>
+              <span>{money(Math.abs(budgetLeft))}</span>
+              <small>{budgetLeft < 0 ? "over" : "available"}</small>
+            </div>
+            <div className="budget-legend" aria-label="Budget progress by group">
+              {GROUPS.map((group) => (
+                <span key={group}>
+                  <i style={{ backgroundColor: GROUP_COLORS[group] }} aria-hidden="true" />
+                  {group}
+                </span>
+              ))}
+            </div>
           </div>
           <div className="summary-list">
-            <ValueLine label="Total Budget" value={money(totalBudget)} />
-            <ValueLine label="Used" value={money(totalSpent)} danger />
-            <ValueLine label="Budget Left" value={`${money(Math.abs(budgetLeft))}${budgetLeft < 0 ? " over" : ""}`} positive={budgetLeft >= 0} danger={budgetLeft < 0} />
+            <ValueLine label="Budget" value={money(totalBudget)} />
+            <ValueLine label="Ordinary spend" value={money(ordinarySpent)} danger />
+            <ValueLine label="Saved/invested" value={money(savingsAllocated)} positive={savingsAllocated > 0} />
+            <ValueLine label={`${budgetUsedPct}% allocated`} value={`${money(Math.abs(budgetLeft))}${budgetLeft < 0 ? " over" : " left"}`} positive={budgetLeft >= 0} danger={budgetLeft < 0} />
           </div>
         </div>
       </section>
@@ -1196,8 +1228,8 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
         const categories = activeCategories.filter((category) => category.group === group);
         const groupThemeBudget = themeBudget(summary, group);
         const groupBudget = groupThemeBudget;
-        const groupSpent = categories.reduce((sum, category) => sum + spentForCategory(data, category.id), 0);
-        const groupPct = groupBudget ? Math.min(100, Math.round((groupSpent / groupBudget) * 100)) : 0;
+        const groupActivity = progressByGroup[group];
+        const groupPct = groupBudget ? Math.min(100, Math.round((groupActivity / groupBudget) * 100)) : 0;
         return (
           <section key={group} className="mini-card grouped-card">
             <div className="group-head">
@@ -1208,7 +1240,7 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
                 <strong>{group}</strong>
                 <Progress value={groupPct} color={groupPct > 90 ? "#f87171" : GROUP_COLORS[group]} />
               </div>
-              <span>{groupBudget !== undefined ? `${money(groupSpent)} / ${money(groupBudget)}` : money(groupSpent)}</span>
+              <span>{groupBudget !== undefined ? `${money(groupActivity)} / ${money(groupBudget)}` : money(groupActivity)}</span>
               <button className="tiny-icon" type="button" onClick={() => onSetBudget(themeTarget(group))} aria-label={`Set ${group} budget`}>
                 <Pencil size={11} />
               </button>
@@ -1218,9 +1250,23 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
                 const spent = spentForCategory(data, category.id);
                 const pct = category.budget ? Math.min(100, Math.round((spent / category.budget) * 100)) : 0;
                 const childBudget = category.subcategories.reduce((sum, subcategory) => sum + (subcategory.budget || 0), 0);
+                const isExpanded = expandedCategories.has(category.id);
+                const childListId = `budget-subcategories-${category.id}`;
                 return (
                   <div key={category.id} className="budget-category-block">
                     <div className="budget-row budget-row-parent">
+                      {category.subcategories.length ? (
+                        <button
+                          className="tiny-icon collapse-toggle"
+                          type="button"
+                          onClick={() => toggleCategory(category.id)}
+                          aria-expanded={isExpanded}
+                          aria-controls={childListId}
+                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${category.name} subcategories`}
+                        >
+                          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        </button>
+                      ) : <span className="collapse-spacer" aria-hidden="true" />}
                       <CategoryIcon category={category} />
                       <div>
                         <strong>{category.name}</strong>
@@ -1232,8 +1278,8 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
                         <Pencil size={11} />
                       </button>
                     </div>
-                    {category.subcategories.length ? (
-                      <div className="subcategory-budget-list">
+                    {category.subcategories.length && isExpanded ? (
+                      <div className="subcategory-budget-list" id={childListId}>
                         {category.subcategories.map((subcategory) => {
                           const subSpent = spentForSubcategory(data, subcategory.id);
                           const subPct = subcategory.budget ? Math.min(100, Math.round((subSpent / subcategory.budget) * 100)) : 0;
@@ -2200,6 +2246,28 @@ function effectiveBudgetTotalWithThemes(categories: Category[], summary: Summary
     if (groupBudget !== undefined) return sum + groupBudget;
     return sum + effectiveBudgetTotal(categories.filter((category) => category.group === group));
   }, 0);
+}
+
+function budgetProgressByGroup(categories: Category[], data: AppData, summary: Summary | null): Record<BudgetGroup, number> {
+  if (summary?.health.progressByGroup) return summary.health.progressByGroup;
+  return GROUPS.reduce((totals, group) => {
+    totals[group] = categories
+      .filter((category) => category.group === group)
+      .reduce((sum, category) => sum + spentForCategory(data, category.id), 0);
+    return totals;
+  }, { Needs: 0, Wants: 0, Savings: 0 } as Record<BudgetGroup, number>);
+}
+
+function budgetDonutSegments(progressByGroup: Record<BudgetGroup, number>, totalBudget: number) {
+  if (totalBudget <= 0) return [];
+  let cursor = 0;
+  return GROUPS.flatMap((group) => {
+    const value = Math.max(0, progressByGroup[group]);
+    if (!value) return [];
+    const start = cursor;
+    cursor = Math.min(100, cursor + (value / totalBudget) * 100);
+    return [{ group, color: GROUP_COLORS[group], start, end: cursor }];
+  });
 }
 
 function budgetRowAmount(spent: number, budget?: number) {

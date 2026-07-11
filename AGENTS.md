@@ -94,7 +94,11 @@ check.
   `__budget_group__:` category prefix and no `subcategory_id`. A
   parent-category budget takes precedence over child budgets; dashboard totals
   count a theme target when one exists for that group, otherwise child budgets
-  roll up only when no parent budget exists for that category.
+  roll up only when no parent budget exists for that category. Summary budget
+  health distinguishes ordinary Needs/Wants spending from Savings allocation:
+  Savings-category expenses and investment transactions count toward budget
+  progress and Savings progress, but not ordinary `spentCents` or projected
+  ordinary spend.
 - User isolation is by `telegram_user_id`. Every dashboard API must validate
   the `X-Telegram-Init-Data` header with `validateTelegramInitData`, then scope
   every repository query/mutation to the resulting user ID.
