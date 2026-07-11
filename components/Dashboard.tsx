@@ -31,7 +31,6 @@ import {
   Shield,
   ShoppingBag,
   ShoppingCart,
-  Tag,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -48,7 +47,7 @@ type BudgetGroup = "Needs" | "Wants" | "Savings";
 type TransactionType = "income" | "expense";
 type AccountType = "cash" | "bank" | "card" | "investment" | "loan" | "other";
 type RecurringRuleType = "subscription" | "investment_transfer" | "loan_payment";
-type Tab = "home" | "transactions" | "accounts" | "budget" | "categories";
+type Tab = "home" | "transactions" | "accounts" | "budget";
 
 type CategorySpend = {
   category: string;
@@ -675,9 +674,9 @@ export default function Dashboard() {
     { id: "home", label: "Home", icon: <LayoutDashboard size={20} /> },
     { id: "transactions", label: "History", icon: <List size={20} /> },
     { id: "accounts", label: "Accounts", icon: <Wallet size={20} /> },
-    { id: "budget", label: "Budget", icon: <PieChart size={20} /> },
-    { id: "categories", label: "Categories", icon: <Tag size={20} /> }
+    { id: "budget", label: "Budget", icon: <PieChart size={20} /> }
   ];
+  const primaryAction = contextualPrimaryAction(activeTab, () => setModal({ type: "add-transaction" }), () => setModal({ type: "add-account" }), () => setModal({ type: "add-category" }));
 
   return (
     <main className="mini-root">
@@ -736,11 +735,6 @@ export default function Dashboard() {
               data={data}
               summary={summary}
               onSetBudget={(categoryId, subcategoryId) => setModal({ type: "set-budget", categoryId, subcategoryId })}
-            />
-          ) : null}
-          {!loading && activeTab === "categories" ? (
-            <CategoriesView
-              data={data}
               onAddCategory={() => setModal({ type: "add-category" })}
               onEditCategory={(categoryId) => setModal({ type: "edit-category", categoryId })}
               onAddSubcategory={(categoryId) => setModal({ type: "add-subcategory", categoryId })}
@@ -750,7 +744,16 @@ export default function Dashboard() {
         </div>
 
         <nav className="bottom-tabs" aria-label="App sections">
-          {tabs.map((tab) => (
+          {tabs.slice(0, 2).map((tab) => (
+            <button key={tab.id} className={activeTab === tab.id ? "active" : ""} type="button" onClick={() => setActiveTab(tab.id)}>
+              {tab.icon}
+              <span>{tab.label}</span>
+            </button>
+          ))}
+          <button className="bottom-tabs-action" type="button" onClick={primaryAction.onClick} aria-label={primaryAction.label}>
+            <Plus size={26} />
+          </button>
+          {tabs.slice(2).map((tab) => (
             <button key={tab.id} className={activeTab === tab.id ? "active" : ""} type="button" onClick={() => setActiveTab(tab.id)}>
               {tab.icon}
               <span>{tab.label}</span>
@@ -1170,8 +1173,25 @@ function InvestmentAccountDetail({ account, snapshot }: { account: Account; snap
   );
 }
 
-function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Summary | null; onSetBudget: (categoryId: string, subcategoryId?: string) => void }) {
+function BudgetView({
+  data,
+  summary,
+  onSetBudget,
+  onAddCategory,
+  onEditCategory,
+  onAddSubcategory,
+  onDeleteCategory
+}: {
+  data: AppData;
+  summary: Summary | null;
+  onSetBudget: (categoryId: string, subcategoryId?: string) => void;
+  onAddCategory: () => void;
+  onEditCategory: (categoryId: string) => void;
+  onAddSubcategory: (categoryId: string) => void;
+  onDeleteCategory: (categoryId: string) => Promise<void>;
+}) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(() => new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const activeCategories = data.categories.filter((category) => !category.hidden);
   const totalBudget = effectiveBudgetTotalWithThemes(activeCategories, summary);
   const fallbackSpent = data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
@@ -1199,7 +1219,12 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
   return (
     <div className="screen-stack">
       <section className="mini-card budget-summary">
-        <p className="eyebrow">Monthly Budget</p>
+        <div className="section-line">
+          <p className="eyebrow">Monthly Budget</p>
+          <button className="inline-add" type="button" onClick={onAddCategory}>
+            <Plus size={14} /> Add Category
+          </button>
+        </div>
         <div className="budget-overview">
           <div className="budget-donut-wrap">
             <div className="donut budget-donut" style={{ background: donutBackground }}>
@@ -1278,6 +1303,29 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
                         <Pencil size={11} />
                       </button>
                     </div>
+                    <div className="budget-management-row" aria-label={`${category.name} category management`}>
+                      <button type="button" onClick={() => onEditCategory(category.id)} aria-label={`Edit ${category.name}`}>
+                        <Pencil size={11} />
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => onAddSubcategory(category.id)} aria-label={`Add subcategory to ${category.name}`}>
+                        <Plus size={11} />
+                        Subcategory
+                      </button>
+                      <button className="danger" type="button" onClick={() => setDeleteConfirm(deleteConfirm === category.id ? null : category.id)} aria-label={`Delete ${category.name}`}>
+                        <Trash2 size={11} />
+                        Delete
+                      </button>
+                    </div>
+                    {deleteConfirm === category.id ? (
+                      <div className="confirm-row category-confirm">
+                        <button type="button" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+                        <PendingButton type="button" pendingLabel="Deleting..." onAction={async () => {
+                          await onDeleteCategory(category.id);
+                          setDeleteConfirm(null);
+                        }}>Delete</PendingButton>
+                      </div>
+                    ) : null}
                     {category.subcategories.length && isExpanded ? (
                       <div className="subcategory-budget-list" id={childListId}>
                         {category.subcategories.map((subcategory) => {
@@ -1333,92 +1381,6 @@ function BudgetView({ data, summary, onSetBudget }: { data: AppData; summary: Su
           </div>
         </section>
       ) : null}
-    </div>
-  );
-}
-
-function CategoriesView({
-  data,
-  onAddCategory,
-  onEditCategory,
-  onAddSubcategory,
-  onDeleteCategory
-}: {
-  data: AppData;
-  onAddCategory: () => void;
-  onEditCategory: (categoryId: string) => void;
-  onAddSubcategory: (categoryId: string) => void;
-  onDeleteCategory: (categoryId: string) => Promise<void>;
-}) {
-  const [expandedCat, setExpandedCat] = useState<string | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-
-  return (
-    <div className="screen-stack">
-      <p className="helper-copy">Edit names, groups, colors, icons, and add sub-categories for faster transaction entry.</p>
-      <button className="primary-action" type="button" onClick={onAddCategory}>
-        <Plus size={16} /> Add Category
-      </button>
-      {GROUPS.map((group) => {
-        const categories = data.categories.filter((category) => !category.hidden && category.group === group);
-        return (
-          <section key={group}>
-            <div className="category-group-label">
-              <span style={{ backgroundColor: GROUP_COLORS[group] }} />
-              <p>{group}</p>
-              <small>({categories.length})</small>
-            </div>
-            <div className="row-stack">
-              {categories.length ? categories.map((category) => {
-                const expanded = expandedCat === category.id;
-                return (
-                  <div key={category.id} className="mini-card category-card">
-                    <button className="category-main" type="button" onClick={() => setExpandedCat(expanded ? null : category.id)}>
-                      <CategoryIcon category={category} />
-                      <span>
-                        <strong>{category.name}</strong>
-                        <small>{category.subcategories.length} sub-categories</small>
-                      </span>
-                      {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    </button>
-                    <div className="category-actions">
-                      <button className="tiny-icon" type="button" onClick={() => onEditCategory(category.id)} aria-label={`Edit ${category.name}`}>
-                        <Pencil size={11} />
-                      </button>
-                      <button className="tiny-icon danger" type="button" onClick={() => setDeleteConfirm(deleteConfirm === category.id ? null : category.id)} aria-label={`Delete ${category.name}`}>
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                    {deleteConfirm === category.id ? (
-                      <div className="confirm-row category-confirm">
-                        <button type="button" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-                        <PendingButton type="button" pendingLabel="Deleting…" onAction={async () => {
-                          await onDeleteCategory(category.id);
-                          setDeleteConfirm(null);
-                        }}>Delete</PendingButton>
-                      </div>
-                    ) : null}
-                    {expanded ? (
-                      <div className="subcategory-list">
-                        {category.subcategories.length ? category.subcategories.map((sub) => (
-                          <div key={sub.id}>
-                            <span style={{ backgroundColor: category.color }} />
-                            <p>{sub.name}</p>
-                          </div>
-                        )) : <div><span style={{ backgroundColor: category.color }} /><p>No sub-categories yet</p></div>}
-                        <button type="button" onClick={() => onAddSubcategory(category.id)}>
-                          <Plus size={12} />
-                          Add sub-category
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              }) : <EmptyState label={`No ${group.toLowerCase()} categories yet`} />}
-            </div>
-          </section>
-        );
-      })}
     </div>
   );
 }
@@ -2380,8 +2342,13 @@ function headerTitle(tab: Tab) {
   if (tab === "transactions") return "All Transactions";
   if (tab === "accounts") return "Accounts";
   if (tab === "budget") return "Monthly Budget";
-  if (tab === "categories") return "Categories";
   return "Halo, User";
+}
+
+function contextualPrimaryAction(tab: Tab, addTransaction: () => void, addAccount: () => void, addCategory: () => void) {
+  if (tab === "accounts") return { label: "Add account", onClick: addAccount };
+  if (tab === "budget") return { label: "Add category", onClick: addCategory };
+  return { label: "Add transaction", onClick: addTransaction };
 }
 
 function friendlyError(error: string) {
