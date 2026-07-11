@@ -67,6 +67,13 @@ transactions and expenses in Savings categories, and `progressCents` plus
 amount, and the dashboard donut. Daily spend and projected spend remain based
 on ordinary spend only.
 
+Category management is integrated into the Budget tab rather than a separate
+Mini App section. The same budget rows expose add, edit, delete, and
+subcategory actions, while the bottom navigation keeps only Home, History,
+Accounts, and Budget. Its centered plus button opens the action for the current
+section: add transaction on Home or History, add account on Accounts, and add
+category on Budget.
+
 Mutation routes validate safe integer cents and financial sign conventions,
 uppercase three-letter currencies, real calendar dates, and valid calendar
 months. Portfolio snapshots and recurring rules verify that referenced
@@ -96,9 +103,9 @@ Dashboard mutations and transaction-history pagination use the shared
 initiating control while its request is pending, preserve its layout, and
 expose the state through `aria-busy` and a polite status announcement.
 
-Subcategory names added in the Mini App preserve the user's typed casing for
-display. Matching still normalizes whitespace and case when resolving bot input
-or preventing duplicate subcategories.
+Subcategory names added from the Budget tab preserve the user's typed casing
+for display. Matching still normalizes whitespace and case when resolving bot
+input or preventing duplicate subcategories.
 
 The Mini App must run on HTTPS outside Telegram's test environment. In
 production, never disable `initData` validation because it is the boundary that

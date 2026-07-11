@@ -125,8 +125,8 @@ income, salary, debit card, paycheck, $5000
 ```
 
 Default transaction kind is `expense`; otherwise put the kind first, before the
-category. Add any other categories and accounts in the Mini App before using
-them in bot messages.
+category. Add categories from the Mini App Budget tab and accounts from the
+Accounts tab before using them in bot messages.
 
 Transaction categories and accounts must already exist and be active. Names,
 keys, and subcategory names are matched case-insensitively after whitespace
@@ -136,7 +136,7 @@ and uses the sole active account without prompting. Unknown or ambiguous
 subcategories and multiple accounts are resolved with inline keyboard choices;
 duplicate subcategory names require an explicit parent-category choice.
 Selections expire after 15 minutes. If the selected category has no
-subcategories, the bot asks you to add one in the dashboard and retry.
+subcategories, the bot asks you to add one from the Budget tab and retry.
 Confirmations show the category/subcategory breadcrumb with Edit and Undo
 actions.
 
@@ -152,17 +152,21 @@ parent categories, or child subcategories.
   duplicate submissions.
 - The Mini App displays amounts without currency symbols or currency controls,
   while the API and database still persist currency codes for compatibility.
+- Bottom navigation has four sections: Home, History, Accounts, and Budget.
+  The centered plus action is contextual: Home and History add a transaction,
+  Accounts adds an account, and Budget adds a category.
 - The monthly budget tab groups parent categories with their child
   subcategories under Needs, Wants, and Savings themes. Theme, parent-category,
   and subcategory budgets can be set or deleted for the selected month; rows
   without a target show activity amount only. Parent category rows are visible
-  by default and child subcategories expand on demand. Overall dashboard totals
-  count a theme budget when one exists, otherwise they count parent budgets or
-  roll up child budgets so subcategory targets are not double-counted. The
-  budget overview donut uses Needs, Wants, and Savings progress to show monthly
-  budget left or overage; ordinary Needs/Wants spending is reported separately
-  from Savings allocated through Savings-category expenses and investment
-  transactions.
+  by default and child subcategories expand on demand. Category management is
+  part of this tab: add, edit, delete, and add subcategories directly beside
+  the budget rows. Overall dashboard totals count a theme budget when one
+  exists, otherwise they count parent budgets or roll up child budgets so
+  subcategory targets are not double-counted. The budget overview donut uses
+  Needs, Wants, and Savings progress to show monthly budget left or overage;
+  ordinary Needs/Wants spending is reported separately from Savings allocated
+  through Savings-category expenses and investment transactions.
 - Summary reads are read-only. The daily recurring job creates due transactions
   idempotently, in bounded batches, for the current UTC month.
 - Transaction history is loaded separately for the selected month and uses a
