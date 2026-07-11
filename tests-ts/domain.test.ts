@@ -58,6 +58,7 @@ test("effective budget total ignores synthetic theme targets", () => {
 test("budget activity separates ordinary spending from savings allocation", () => {
   const totals = budgetActivityTotals([
     { kind: "expense", category: "food", amount_cents: -40_00, transfer_group_id: null },
+    { kind: "investment", category: "investments", amount_cents: -25_00, transfer_group_id: null },
     { kind: "investment", category: null, amount_cents: 100_00, transfer_group_id: "transfer" },
     { kind: "transfer", category: null, amount_cents: -100_00, transfer_group_id: "transfer" }
   ], [
@@ -66,9 +67,9 @@ test("budget activity separates ordinary spending from savings allocation", () =
   ]);
 
   assert.equal(totals.ordinarySpentCents, 40_00);
-  assert.equal(totals.savingsAllocatedCents, 100_00);
-  assert.equal(totals.progressCents, 140_00);
-  assert.deepEqual(totals.progressByGroup, { Needs: 40_00, Wants: 0, Savings: 100_00 });
+  assert.equal(totals.savingsAllocatedCents, 125_00);
+  assert.equal(totals.progressCents, 165_00);
+  assert.deepEqual(totals.progressByGroup, { Needs: 40_00, Wants: 0, Savings: 125_00 });
 });
 
 test("savings category expenses count as allocated progress, not ordinary spending", () => {

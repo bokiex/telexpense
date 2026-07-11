@@ -1004,7 +1004,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   const activity = budgetActivityTotals(transactions, storedCategories);
 
   for (const tx of transactions) {
-    const savingsAllocation = tx.kind === "investment" && tx.amount_cents > 0;
+    const savingsAllocation = tx.kind === "investment";
     const ordinaryExpense = tx.kind === "expense" && tx.amount_cents < 0 && !tx.transfer_group_id;
     if (!savingsAllocation && !ordinaryExpense) continue;
     if (!tx.category) continue;
@@ -1514,7 +1514,7 @@ export function budgetActivityTotals(
 
   for (const tx of transactions) {
     const amount = Math.abs(tx.amount_cents);
-    if (tx.kind === "investment" && tx.amount_cents > 0) {
+    if (tx.kind === "investment") {
       savingsAllocatedCents += amount;
       progressByGroup.Savings += amount;
       continue;
