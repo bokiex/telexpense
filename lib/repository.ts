@@ -48,10 +48,15 @@ export type RecentTransaction = {
 };
 
 export type BudgetHealth = {
+  /** Backward-compatible alias for ordinary spending only. */
   spentCents: number;
+  /** Non-transfer expense activity outside Savings categories. */
   ordinarySpentCents: number;
+  /** Investment transactions and Savings-category expenses. */
   savingsAllocatedCents: number;
+  /** Combined ordinary spend and savings allocation used for budget progress. */
   progressCents: number;
+  /** Budget progress split by Needs, Wants, and Savings. */
   progressByGroup: Record<BudgetGroup, number>;
   budgetCents: number;
   remainingCents: number;

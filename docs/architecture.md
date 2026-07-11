@@ -59,7 +59,13 @@ categories and keeps synthetic theme rows out of the category list.
 Parent-category budgets override child budgets; when no parent budget exists,
 child budgets roll up to the effective category total. The dashboard's monthly
 total counts a theme budget for a group when one exists, otherwise it uses that
-group's effective category total.
+group's effective category total. Summary budget health keeps ordinary spend
+separate from Savings allocation: `ordinarySpentCents` covers non-transfer
+expense activity outside Savings, `savingsAllocatedCents` covers investment
+transactions and expenses in Savings categories, and `progressCents` plus
+`progressByGroup` drive budget remaining, budget-used percentage, daily safe
+amount, and the dashboard donut. Daily spend and projected spend remain based
+on ordinary spend only.
 
 Mutation routes validate safe integer cents and financial sign conventions,
 uppercase three-letter currencies, real calendar dates, and valid calendar

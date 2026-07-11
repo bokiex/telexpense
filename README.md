@@ -155,9 +155,14 @@ parent categories, or child subcategories.
 - The monthly budget tab groups parent categories with their child
   subcategories under Needs, Wants, and Savings themes. Theme, parent-category,
   and subcategory budgets can be set or deleted for the selected month; rows
-  without a target show spent amount only. Overall dashboard totals count a
-  theme budget when one exists, otherwise they count parent budgets or roll up
-  child budgets so subcategory targets are not double-counted.
+  without a target show activity amount only. Parent category rows are visible
+  by default and child subcategories expand on demand. Overall dashboard totals
+  count a theme budget when one exists, otherwise they count parent budgets or
+  roll up child budgets so subcategory targets are not double-counted. The
+  budget overview donut uses Needs, Wants, and Savings progress to show monthly
+  budget left or overage; ordinary Needs/Wants spending is reported separately
+  from Savings allocated through Savings-category expenses and investment
+  transactions.
 - Summary reads are read-only. The daily recurring job creates due transactions
   idempotently, in bounded batches, for the current UTC month.
 - Transaction history is loaded separately for the selected month and uses a
@@ -167,8 +172,10 @@ parent categories, or child subcategories.
   are clamped to 1–100; `month` must use `YYYY-MM`, and requests require
   `X-Telegram-Init-Data`. Stored subcategories are retained when transactions
   are created or edited and appear as category/subcategory breadcrumbs. Summary
-  responses include category spend, subcategory spend, and budgets with a
-  nullable `subcategoryId`.
+  responses include category spend, subcategory spend, budgets with a nullable
+  `subcategoryId`, and budget health fields that distinguish
+  `ordinarySpentCents`, `savingsAllocatedCents`, and combined budget
+  `progressCents`.
 - Dashboard transfers require source and destination accounts but no category.
   They are stored as two category-less rows sharing a `transferGroupId`; edits
   update both rows and deletes remove both rows atomically through the grouped
