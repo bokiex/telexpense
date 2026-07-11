@@ -49,6 +49,10 @@ export type RecentTransaction = {
 
 export type BudgetHealth = {
   spentCents: number;
+  ordinarySpentCents: number;
+  savingsAllocatedCents: number;
+  progressCents: number;
+  progressByGroup: Record<BudgetGroup, number>;
   budgetCents: number;
   remainingCents: number;
   budgetUsed: number;
@@ -997,9 +1001,13 @@ export async function getSummary(telegramUserId: number, month: string) {
   const categories = new Map<string, CategorySpend>();
   const subcategories = new Map<number, SubcategorySpend>();
   const daily = new Map<string, number>();
+  const activity = budgetActivityTotals(transactions, storedCategories);
 
   for (const tx of transactions) {
-    if (tx.kind !== "expense" || tx.amount_cents >= 0 || tx.transfer_group_id) continue;
+    const savingsAllocation = tx.kind === "investment" && tx.amount_cents > 0;
+    const ordinaryExpense = tx.kind === "expense" && tx.amount_cents < 0 && !tx.transfer_group_id;
+    if (!savingsAllocation && !ordinaryExpense) continue;
+    if (!tx.category) continue;
     const spent = Math.abs(tx.amount_cents);
     const category = categories.get(tx.category) || { category: tx.category, spentCents: 0, currency: tx.currency };
     category.spentCents += spent;
@@ -1010,11 +1018,10 @@ export async function getSummary(telegramUserId: number, month: string) {
       subcategory.spentCents += spent;
       subcategories.set(subcategoryId, subcategory);
     }
-    daily.set(tx.occurred_on, (daily.get(tx.occurred_on) || 0) + spent);
+    if (ordinaryExpense) daily.set(tx.occurred_on, (daily.get(tx.occurred_on) || 0) + spent);
   }
 
   const categoryList = Array.from(categories.values()).sort((a, b) => b.spentCents - a.spentCents);
-  const spentCents = categoryList.reduce((sum, item) => sum + item.spentCents, 0);
   const budgetCents = effectiveBudgetCents(budgets);
   const daysElapsed = daysElapsedInMonth(month);
   const daysLeft = daysLeftInMonth(month);
@@ -1028,13 +1035,17 @@ export async function getSummary(telegramUserId: number, month: string) {
     subcategories: Array.from(subcategories.values()).sort((a, b) => b.spentCents - a.spentCents),
     budgets,
     health: {
-      spentCents,
+      spentCents: activity.ordinarySpentCents,
+      ordinarySpentCents: activity.ordinarySpentCents,
+      savingsAllocatedCents: activity.savingsAllocatedCents,
+      progressCents: activity.progressCents,
+      progressByGroup: activity.progressByGroup,
       budgetCents,
-      remainingCents: budgetCents - spentCents,
-      budgetUsed: budgetCents ? Math.round((spentCents / budgetCents) * 100) : 0,
+      remainingCents: budgetCents - activity.progressCents,
+      budgetUsed: budgetCents ? Math.round((activity.progressCents / budgetCents) * 100) : 0,
       daysLeft,
-      dailySafeCents: daysLeft > 0 ? Math.floor(Math.max(0, budgetCents - spentCents) / daysLeft) : 0,
-      projectedSpendCents: daysElapsed > 0 ? Math.round((spentCents / daysElapsed) * daysInMonth(month)) : spentCents
+      dailySafeCents: daysLeft > 0 ? Math.floor(Math.max(0, budgetCents - activity.progressCents) / daysLeft) : 0,
+      projectedSpendCents: daysElapsed > 0 ? Math.round((activity.ordinarySpentCents / daysElapsed) * daysInMonth(month)) : activity.ordinarySpentCents
     },
     daily: Array.from(daily.entries())
       .map(([date, spentCents]) => ({ date, spentCents }))
@@ -1483,6 +1494,49 @@ export function effectiveBudgetCents(budgets: Budget[]) {
     if (item.subcategoryId !== null && parentBudgetCategories.has(item.category)) return sum;
     return sum + item.budgetCents;
   }, 0);
+}
+
+type BudgetActivityTransaction = {
+  kind: string;
+  category: string | null;
+  amount_cents: number;
+  transfer_group_id?: string | null;
+};
+
+export function budgetActivityTotals(
+  transactions: BudgetActivityTransaction[],
+  storedCategories: Pick<StoredCategory, "sourceName" | "group">[]
+) {
+  const groupByCategory = new Map(storedCategories.map((category) => [normalizeIdentity(category.sourceName), category.group]));
+  const progressByGroup: Record<BudgetGroup, number> = { Needs: 0, Wants: 0, Savings: 0 };
+  let ordinarySpentCents = 0;
+  let savingsAllocatedCents = 0;
+
+  for (const tx of transactions) {
+    const amount = Math.abs(tx.amount_cents);
+    if (tx.kind === "investment" && tx.amount_cents > 0) {
+      savingsAllocatedCents += amount;
+      progressByGroup.Savings += amount;
+      continue;
+    }
+    if (tx.kind !== "expense" || tx.amount_cents >= 0 || tx.transfer_group_id) continue;
+
+    const group = tx.category ? groupByCategory.get(normalizeIdentity(tx.category)) : undefined;
+    if (group === "Savings") {
+      savingsAllocatedCents += amount;
+      progressByGroup.Savings += amount;
+      continue;
+    }
+    ordinarySpentCents += amount;
+    progressByGroup[group || "Needs"] += amount;
+  }
+
+  return {
+    ordinarySpentCents,
+    savingsAllocatedCents,
+    progressCents: ordinarySpentCents + savingsAllocatedCents,
+    progressByGroup
+  };
 }
 
 function buildAccounts(
