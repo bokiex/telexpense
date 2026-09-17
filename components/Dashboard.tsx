@@ -659,8 +659,8 @@ export default function Dashboard() {
   const primaryAction = contextualPrimaryAction(activeTab, () => setModal({ type: "add-transaction" }), () => setModal({ type: "add-account" }), () => setModal({ type: "add-category" }));
 
   return (
-    <main className="mini-root" aria-hidden={modal.type !== "none" || undefined} inert={modal.type !== "none" || undefined}>
-      <section className="phone-frame" aria-label="Telexpense mini app">
+    <main className="mini-root">
+      <section className="phone-frame" aria-label="Telexpense mini app" aria-hidden={modal.type !== "none" || undefined} inert={modal.type !== "none" || undefined}>
         <header className="mini-header">
           <div>
             <p className="eyebrow">{headerTitle(activeTab)}</p>
