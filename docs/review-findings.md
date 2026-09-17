@@ -7,16 +7,16 @@ cover the deployed Next.js application, not the legacy Python prototype.
 
 | ID | Priority | Status | Finding |
 | --- | --- | --- | --- |
-| 1 | Critical | In progress | Authenticate Telegram webhook requests with Telegram's secret-token header. |
-| 2 | High | In progress | Reject ungrouped `transfer` messages received through the bot parser flow. |
-| 3 | High | In progress | Keep recurring subscriptions out of transfer groups, and repair existing affected rows. |
-| 4 | High | Open | Exclude grouped investment-transfer destination legs from Savings allocation. |
+| 1 | Critical | Complete | Authenticate Telegram webhook requests with Telegram's secret-token header. |
+| 2 | High | Complete | Reject ungrouped `transfer` messages received through the bot parser flow. |
+| 3 | High | Complete | Keep recurring subscriptions out of transfer groups, and repair existing affected rows. |
+| 4 | High | Complete | Exclude grouped investment-transfer destination legs from Savings allocation. |
 | 5 | High | Replaced | Replaced by the SGD-only model. Currency columns and API fields are removed, so cross-currency transfers cannot exist. |
-| 6 | Medium | Open | Render a grouped transfer as one history entry and keep pagination coherent. |
-| 7 | Medium | Open | Display credit-card debt as a positive debt amount, like loan debt. |
-| 8 | Medium | Open | Make budget creation safe under concurrent first saves. |
-| 9 | Medium | Open | Exclude grouped transfer legs from Telegram budget-warning totals. |
-| 10 | Medium | Open | Give bottom sheets correct modal-dialog semantics and focus behavior. |
+| 6 | Medium | Complete | Render a grouped transfer as one history entry and keep pagination coherent. |
+| 7 | Medium | Complete | Display credit-card debt as a positive debt amount, like loan debt. |
+| 8 | Medium | Complete | Make budget creation safe under concurrent first saves. |
+| 9 | Medium | Complete | Exclude grouped transfer legs from Telegram budget-warning totals. |
+| 10 | Medium | Complete | Give bottom sheets correct modal-dialog semantics and focus behavior. |
 
 ## Finding details
 
