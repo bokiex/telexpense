@@ -31,6 +31,10 @@ export function parseTransactionMessage(text: string): ParsedTransaction {
     kind = body.shift()?.toLowerCase() as ParsedTransaction["kind"];
   }
 
+  if (kind === "transfer") {
+    throw new Error("Transfers must be created in the dashboard.");
+  }
+
   if (body.length < 2) throw new Error("Use: category, account, description, $amount");
 
   let amountCents = rawAmountCents;

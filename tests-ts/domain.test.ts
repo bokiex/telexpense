@@ -183,6 +183,13 @@ test("Telegram parser normalizes category/account and signs expense", () => {
   assert.equal(parsed.amountCents, -420);
 });
 
+test("Telegram comma parser rejects transfers before identity resolution", () => {
+  assert.throws(
+    () => parseTransactionMessage("transfer, savings, checking, $20"),
+    /Transfers must be created in the dashboard\./
+  );
+});
+
 test("concise Telegram parser extracts amount and subcategory text", () => {
   assert.deepEqual(parseConciseTransactionMessage("4.20 eat out"), {
     kind: "expense", description: "eat out", amountCents: -420, currency: "USD"
