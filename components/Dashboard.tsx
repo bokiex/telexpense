@@ -19,7 +19,6 @@ import {
   Filter,
   Heart,
   Home,
-  LayoutDashboard,
   List,
   Music,
   Pencil,
@@ -229,7 +228,7 @@ type LoanProgress = {
 
 type ModalState =
   | { type: "none" }
-  | { type: "add-transaction" }
+  | { type: "add-transaction"; categoryId?: string; repeat?: Transaction }
   | { type: "edit-transaction"; tx: Transaction }
   | { type: "add-account" }
   | { type: "edit-account"; account: Account }
@@ -651,12 +650,11 @@ export default function Dashboard() {
   }
 
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
-    { id: "home", label: "Home", icon: <LayoutDashboard size={20} /> },
+    { id: "home", label: "Add", icon: <Plus size={20} /> },
     { id: "transactions", label: "History", icon: <List size={20} /> },
-    { id: "accounts", label: "Accounts", icon: <Wallet size={20} /> },
-    { id: "budget", label: "Budget", icon: <PieChart size={20} /> }
+    { id: "budget", label: "Budget", icon: <PieChart size={20} /> },
+    { id: "accounts", label: "Accounts", icon: <Wallet size={20} /> }
   ];
-  const primaryAction = contextualPrimaryAction(activeTab, () => setModal({ type: "add-transaction" }), () => setModal({ type: "add-account" }), () => setModal({ type: "add-category" }));
 
   return (
     <main className="mini-root">
@@ -680,7 +678,8 @@ export default function Dashboard() {
               balanceVisible={balanceVisible}
               onToggleBalance={() => setBalanceVisible((value) => !value)}
               onViewAllTransactions={() => setActiveTab("transactions")}
-              onAddTransaction={() => setModal({ type: "add-transaction" })}
+              onAddTransaction={(categoryId) => setModal({ type: "add-transaction", categoryId })}
+              onRepeat={(tx) => setModal({ type: "add-transaction", repeat: tx })}
             />
           ) : null}
           {!loading && activeTab === "transactions" ? (
@@ -724,16 +723,7 @@ export default function Dashboard() {
         </div>
 
         <nav className="bottom-tabs" aria-label="App sections">
-          {tabs.slice(0, 2).map((tab) => (
-            <button key={tab.id} className={activeTab === tab.id ? "active" : ""} type="button" onClick={() => setActiveTab(tab.id)}>
-              {tab.icon}
-              <span>{tab.label}</span>
-            </button>
-          ))}
-          <button className="bottom-tabs-action" type="button" onClick={primaryAction.onClick} aria-label={primaryAction.label}>
-            <Plus size={26} />
-          </button>
-          {tabs.slice(2).map((tab) => (
+          {tabs.map((tab) => (
             <button key={tab.id} className={activeTab === tab.id ? "active" : ""} type="button" onClick={() => setActiveTab(tab.id)}>
               {tab.icon}
               <span>{tab.label}</span>
@@ -746,6 +736,8 @@ export default function Dashboard() {
         <TransactionModal
           data={data}
           editTx={modal.type === "edit-transaction" ? modal.tx : null}
+          defaultCategoryId={modal.type === "add-transaction" ? modal.categoryId : undefined}
+          repeatTx={modal.type === "add-transaction" ? modal.repeat : undefined}
           onSave={saveTransaction}
           onClose={() => setModal({ type: "none" })}
         />
@@ -830,60 +822,67 @@ function HomeView({
   balanceVisible,
   onToggleBalance,
   onViewAllTransactions,
-  onAddTransaction
+  onAddTransaction,
+  onRepeat
 }: {
   data: AppData;
   summary: Summary | null;
   balanceVisible: boolean;
   onToggleBalance: () => void;
   onViewAllTransactions: () => void;
-  onAddTransaction: () => void;
+  onAddTransaction: (categoryId?: string) => void;
+  onRepeat: (tx: Transaction) => void;
 }) {
-  const totalIncome = data.transactions.filter((tx) => tx.kind === "income").reduce((sum, tx) => sum + tx.amount, 0);
-  const totalExpense = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
-  const netWorthTotal = netWorthWithPortfolioValues(data.accounts, summary?.portfolioSnapshots);
+  const fallbackSpent = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
+  const totalExpense = summary?.health.ordinarySpentCents ?? summary?.health.spentCents ?? fallbackSpent;
+  const budgetProgress = summary?.health.progressCents ?? totalExpense + (summary?.health.savingsAllocatedCents ?? 0);
+  const totalBudget = effectiveBudgetTotalWithThemes(data.categories.filter((category) => !category.hidden), summary);
+  const budgetLeft = totalBudget - budgetProgress;
   const recent = data.transactions.slice(0, 5);
 
   return (
-    <div className="screen-stack">
-      <section className="balance-block">
-        <p className="eyebrow">Net Worth</p>
-        <div className="balance-row">
-          <div className="account-total-list">
-            <h1>{balanceVisible ? money(netWorthTotal) : "••••••"}</h1>
-          </div>
-          <button className="ghost-button" type="button" onClick={onToggleBalance} aria-label="Toggle balance visibility">
-            {balanceVisible ? <Eye size={18} /> : <EyeOff size={18} />}
-          </button>
-        </div>
+    <div className="screen-stack capture-home">
+      <section className="spending-hero">
+        <p className="eyebrow">This month's spending</p>
+        <strong>{balanceVisible ? money(totalExpense) : "••••••"}</strong>
+        <span>{totalBudget ? `${money(Math.abs(budgetLeft))} ${budgetLeft < 0 ? "over your set budgets" : "left across your set budgets"}` : "Set a budget to track your spending"}</span>
+        <button className="hero-visibility" type="button" onClick={onToggleBalance} aria-label="Toggle spending visibility">
+          {balanceVisible ? <Eye size={16} /> : <EyeOff size={16} />}
+        </button>
       </section>
 
-      <section className="mini-card">
+      <section className="quick-capture">
         <div className="section-line">
-          <p className="eyebrow">Overview This Month</p>
-          <button className="link-button" type="button" onClick={onViewAllTransactions}>
-            View All <ChevronRight size={13} />
-          </button>
+          <h1>Add an expense</h1>
+          <button className="link-button" type="button" onClick={onViewAllTransactions}>Past entries</button>
         </div>
-        <div className="overview-grid">
-          <Metric icon={<TrendingUp size={13} />} label="Income" value={money(totalIncome)} positive masked={!balanceVisible} />
-          <Metric icon={<TrendingDown size={13} />} label="Expense" value={money(totalExpense)} masked={!balanceVisible} />
+        <button className="capture-amount" type="button" onClick={() => onAddTransaction()} aria-label="Add an expense">
+          <span>Amount</span>
+          <strong>0.00</strong>
+          <small>SGD</small>
+        </button>
+        <div className="quick-category-list" aria-label="Common expense categories">
+          {data.categories.filter((category) => !category.hidden).slice(0, 6).map((category, index) => {
+            const Icon = iconFor(category.icon);
+            return <button key={category.id} className={index === 0 ? "selected" : ""} type="button" onClick={() => onAddTransaction(category.id)}><Icon size={18} />{category.name}</button>;
+          })}
         </div>
+        <button className="primary-action" type="button" onClick={() => onAddTransaction()}><Plus size={16} /> Add expense</button>
       </section>
 
       <section>
         <div className="section-line">
-          <p className="eyebrow">Recent Transactions</p>
+          <h2>Repeat a recent entry</h2>
           <button className="link-button" type="button" onClick={onViewAllTransactions}>
-            View All <ChevronRight size={13} />
+            Past entries <ChevronRight size={13} />
           </button>
         </div>
         <div className="row-stack">
-          {recent.length ? recent.map((tx) => <TransactionCard key={tx.id} tx={tx} data={data} />) : <EmptyState label="No transactions yet" />}
+          {recent.length ? recent.map((tx) => <TransactionCard key={tx.id} tx={tx} data={data} onClick={() => onRepeat(tx)} />) : <EmptyState label="No transactions yet" />}
         </div>
       </section>
 
-      <button className="primary-action" type="button" onClick={onAddTransaction}>
+      <button className="primary-action" type="button" onClick={() => onAddTransaction()}>
         <Plus size={16} /> Add Transaction
       </button>
     </div>
@@ -1758,22 +1757,27 @@ function RecurringRuleModal({
 function TransactionModal({
   data,
   editTx,
+  defaultCategoryId,
+  repeatTx,
   onSave,
   onClose
 }: {
   data: AppData;
   editTx: Transaction | null;
+  defaultCategoryId?: string;
+  repeatTx?: Transaction;
   onSave: (tx: TransactionFormValues) => Promise<void>;
   onClose: () => void;
 }) {
-  const [type, setType] = useState<"income" | "expense" | "transfer">(editTx?.transferGroupId ? "transfer" : editTx?.kind === "transfer" ? "transfer" : editTx?.type ?? "expense");
-  const [amount, setAmount] = useState(editTx ? String(editTx.amount / 100) : "");
-  const [description, setDescription] = useState(editTx?.description ?? "");
-  const [categoryId, setCategoryId] = useState(editTx?.categoryId ?? data.categories[0]?.id ?? "");
-  const [subcategoryId, setSubcategoryId] = useState(editTx?.subcategoryId ?? "");
-  const initialAccount = data.accounts.find((item) => item.id === editTx?.accountId);
+  const initialTransaction = editTx || repeatTx;
+  const [type, setType] = useState<"income" | "expense" | "transfer">(initialTransaction?.transferGroupId ? "transfer" : initialTransaction?.kind === "transfer" ? "transfer" : initialTransaction?.type ?? "expense");
+  const [amount, setAmount] = useState(initialTransaction ? String(initialTransaction.amount / 100) : "");
+  const [description, setDescription] = useState(initialTransaction?.description ?? "");
+  const [categoryId, setCategoryId] = useState(initialTransaction?.categoryId ?? defaultCategoryId ?? data.categories[0]?.id ?? "");
+  const [subcategoryId, setSubcategoryId] = useState(initialTransaction?.subcategoryId ?? "");
+  const initialAccount = data.accounts.find((item) => item.id === initialTransaction?.accountId);
   const [accountChoice, setAccountChoice] = useState(initialAccount?.accountKey || "");
-  const initialToAccount = data.accounts.find((item) => item.id === editTx?.toAccountId);
+  const initialToAccount = data.accounts.find((item) => item.id === initialTransaction?.toAccountId);
   const [toAccountChoice, setToAccountChoice] = useState(initialToAccount?.accountKey || "");
   const [date, setDate] = useState(editTx?.date ?? new Date().toISOString().split("T")[0]);
   const [error, setError] = useState("");
@@ -2016,7 +2020,7 @@ function Metric({ icon, label, value, positive = false, masked = false }: { icon
   );
 }
 
-function TransactionCard({ tx, data, actions }: { tx: Transaction; data: AppData; actions?: ReactNode }) {
+function TransactionCard({ tx, data, actions, onClick }: { tx: Transaction; data: AppData; actions?: ReactNode; onClick?: () => void }) {
   const category = data.categories.find((item) => item.id === tx.categoryId);
   const sub = category?.subcategories.find((item) => item.id === tx.subcategoryId);
   const fromAccount = data.accounts.find((item) => item.id === tx.accountId);
@@ -2026,8 +2030,7 @@ function TransactionCard({ tx, data, actions }: { tx: Transaction; data: AppData
   const detail = tx.kind === "transfer"
     ? [fromAccount?.name, toAccount?.name].filter(Boolean).join(" → ")
     : [category?.name || tx.categoryId, sub?.name].filter(Boolean).join(" › ");
-  return (
-    <article className="transaction-card">
+  const content = <>
       <CategoryIcon category={category} />
       <div className="transaction-body">
         <strong>{tx.description}</strong>
@@ -2041,8 +2044,8 @@ function TransactionCard({ tx, data, actions }: { tx: Transaction; data: AppData
         </span>
       </div>
       {actions}
-    </article>
-  );
+  </>;
+  return onClick ? <button className="transaction-card transaction-repeat" type="button" onClick={onClick} aria-label={`Repeat ${tx.description}`}>{content}</button> : <article className="transaction-card">{content}</article>;
 }
 
 function RowActions({
@@ -2355,12 +2358,6 @@ function headerTitle(tab: Tab) {
   if (tab === "accounts") return "Accounts";
   if (tab === "budget") return "Monthly Budget";
   return "Halo, User";
-}
-
-function contextualPrimaryAction(tab: Tab, addTransaction: () => void, addAccount: () => void, addCategory: () => void) {
-  if (tab === "accounts") return { label: "Add account", onClick: addAccount };
-  if (tab === "budget") return { label: "Add category", onClick: addCategory };
-  return { label: "Add transaction", onClick: addTransaction };
 }
 
 function friendlyError(error: string) {
