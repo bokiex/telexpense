@@ -542,6 +542,8 @@ select:focus-visible {
 .capture-type { margin: -2px 0 0; }
 .quick-category-list { display: flex; gap: 8px; overflow-x: auto; padding: 5px 1px 10px; scrollbar-width: none; }
 .quick-category-list button { display: grid; place-items: center; gap: 5px; flex: 0 0 76px; min-height: 64px; border: 1px solid var(--border); border-radius: 12px; background: #fff; color: var(--foreground); font-size: 11px; }
+.quick-category-list button strong { font-size: 11px; font-weight: 560; }
+.quick-category-list button small { color: var(--muted); font-size: 9px; }
 .quick-category-list button.selected { border: 2px solid var(--primary); background: #dff4e7; }
 .quick-subcategory-list { display: flex; gap: 8px; overflow-x: auto; padding: 0 1px 2px; scrollbar-width: none; }
 .quick-subcategory-list button { display: grid; gap: 2px; flex: 0 0 120px; min-height: 52px; border: 1px solid var(--border); border-radius: 11px; background: #fff; color: var(--foreground); padding: 8px 10px; text-align: left; }
@@ -557,6 +559,12 @@ select:focus-visible {
 .capture-meta.transfer-meta label:nth-child(3) { grid-column: 1 / -1; }
 .quick-capture .primary-action { margin-top: 3px; border-radius: 13px; }
 .quick-capture .primary-action small { font-weight: 400; opacity: 0.82; }
+.capture-home { gap: 14px; }
+.capture-home .spending-hero { margin-bottom: 2px; }
+.quick-capture { box-shadow: 0 8px 20px rgba(23, 33, 30, 0.05); }
+.recent-strip { display: flex; gap: 8px; overflow-x: auto; padding: 2px 1px 4px; scrollbar-width: none; }
+.repeat-card { display: grid; flex: 0 0 124px; gap: 3px; min-height: 64px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--foreground); padding: 10px; text-align: left; }
+.repeat-card small { color: var(--muted); font-size: 11px; }
 
 
 .search-row {
@@ -614,6 +622,10 @@ select:focus-visible {
   background: var(--primary);
   color: var(--primary-foreground);
 }
+
+.history-filter { overflow-x: auto; padding: 0; background: transparent; scrollbar-width: none; }
+.history-filter .ui-toggle-group-item { flex: 0 0 auto; border: 1px solid var(--border); border-radius: 999px; background: var(--card); padding: 7px 11px; font-size: 12px; }
+.history-filter .ui-toggle-group-item[data-state="on"] { border-color: var(--foreground); background: var(--foreground); color: var(--primary-foreground); }
 
 .filter-button span {
   position: absolute;
@@ -748,6 +760,14 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.net-worth-card { border-radius: 16px; background: #dff4e7; padding: 16px; }
+.net-worth-card p { margin: 0; color: #387053; font-size: 12px; }
+.net-worth-card .account-total-list { margin-top: 2px; }
+.net-worth-card .account-total-list strong { font-size: 28px; letter-spacing: -0.05em; }
+.account-list { overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--card); }
+.account-list .account-card { border: 0; border-radius: 0; }
+.account-list .account-card + .account-card { border-top: 1px solid var(--border); }
+
 .account-card,
 .recurring-card {
   display: grid;
@@ -816,6 +836,27 @@ select:focus-visible {
   justify-content: space-between;
   gap: 10px;
 }
+
+.trend-card { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 16px; background: var(--card); padding: 14px; }
+.trend-card .section-line { align-items: end; }
+.trend-card .section-line strong { display: block; font-size: 22px; letter-spacing: -0.04em; }
+.trend-card .section-line small { color: var(--muted); font-size: 11px; }
+.trend-chart { width: 100%; height: 142px; margin-top: 2px; }
+.trend-chart line { stroke: var(--border); stroke-width: 1; }
+.trend-chart polyline { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.trend-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
+.trend-toggle { margin: 2px 0 0; }
+.allocation-card { display: grid; gap: 10px; border: 1px solid var(--border); border-radius: 16px; background: var(--card); padding: 14px; }
+.allocation-layout { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 13px; }
+.allocation-ring { display: grid; place-items: center; width: 100px; height: 100px; border-radius: 999px; }
+.allocation-ring::before { content: ""; position: absolute; width: 74px; height: 74px; border-radius: inherit; background: var(--card); }
+.allocation-ring { position: relative; }
+.allocation-ring span { position: relative; z-index: 1; color: var(--muted); font-size: 10px; line-height: 1.25; text-align: center; }
+.allocation-ring strong { color: var(--foreground); font-size: 11px; }
+.allocation-legend { display: grid; gap: 8px; }
+.allocation-legend > div { display: flex; justify-content: space-between; gap: 8px; }
+.allocation-legend span { color: var(--muted); font-size: 12px; }
+.allocation-legend strong { font-size: 12px; }
 
 .account-detail span,
 .loan-values span {

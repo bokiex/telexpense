@@ -102,6 +102,15 @@ type BudgetHealth = {
   projectedSpendCents: number;
 };
 
+type IncomeAllocation = {
+  incomeCents: number;
+  spentCents: number;
+  savedCents: number;
+  unallocatedCents: number;
+};
+
+type TrendPoint = { periodStart: string; spentCents: number };
+
 type Summary = {
   month: string;
   categories: CategorySpend[];
@@ -109,6 +118,8 @@ type Summary = {
   budgets: Budget[];
   health: BudgetHealth;
   daily: { date: string; spentCents: number }[];
+  incomeAllocation: IncomeAllocation;
+  spendingTrend: { daily: TrendPoint[]; weekly: TrendPoint[]; monthly: TrendPoint[] };
   storedCategories: StoredCategory[];
   accounts: Account[];
   portfolioSnapshots: PortfolioSnapshot[];
@@ -722,6 +733,7 @@ export default function Dashboard() {
             <BudgetView
               data={data}
               summary={summary}
+              onViewHistory={() => setActiveTab("transactions")}
               onSetBudget={(categoryId, subcategoryId) => setModal({ type: "set-budget", categoryId, subcategoryId })}
               onAddCategory={() => setModal({ type: "add-category" })}
               onEditCategory={(categoryId) => setModal({ type: "edit-category", categoryId })}
@@ -862,15 +874,15 @@ function HomeView({
 
       <QuickCapture data={data} summary={summary} onSave={onSaveTransaction} onViewHistory={onViewAllTransactions} />
 
-      <section>
+       <section>
         <div className="section-line">
           <h2>Repeat a recent entry</h2>
-          <button className="link-button" type="button" onClick={onViewAllTransactions}>
-            Past entries <ChevronRight size={13} />
-          </button>
-        </div>
-        <div className="row-stack">
-          {recent.length ? recent.map((tx) => <TransactionCard key={tx.id} tx={tx} data={data} onClick={() => onRepeat(tx)} />) : <EmptyState label="No transactions yet" />}
+           <Button className="link-button" variant="ghost" onClick={onViewAllTransactions}>
+             Past entries <ChevronRight size={13} />
+           </Button>
+         </div>
+         <div className="recent-strip">
+           {recent.length ? recent.map((tx) => <RepeatCard key={tx.id} tx={tx} data={data} onClick={() => onRepeat(tx)} />) : <EmptyState label="No transactions yet" />}
         </div>
       </section>
 
@@ -942,7 +954,7 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
       </ToggleGroup>
       {type !== "transfer" ? <>
         <div className="quick-category-list" aria-label="Choose category">
-          {categories.map((item) => { const Icon = iconFor(item.icon); return <Button key={item.id} className={categoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => { setCategoryId(item.id); setSubcategoryId(""); }} aria-pressed={categoryId === item.id}><Icon size={18} />{item.name}</Button>; })}
+          {categories.map((item) => { const Icon = iconFor(item.icon); const itemRemaining = item.budget === undefined ? null : item.budget - spentForCategory(data, item.id); return <Button key={item.id} className={categoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => { setCategoryId(item.id); setSubcategoryId(""); }} aria-pressed={categoryId === item.id}><Icon size={18} /><strong>{item.name}</strong>{itemRemaining !== null ? <small>{money(Math.max(0, itemRemaining))} left</small> : null}</Button>; })}
         </div>
         {category?.subcategories.length ? <div className="quick-subcategory-list" aria-label={`${category.name} subcategories`}>
           {category.subcategories.map((item) => <Button key={item.id} className={subcategoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => setSubcategoryId(item.id)} aria-pressed={subcategoryId === item.id}><strong>{item.name}</strong>{item.budget !== undefined ? <small>{money(Math.max(0, item.budget - spentForSubcategory(data, item.id)))} left</small> : null}</Button>)}
@@ -1013,6 +1025,9 @@ function TransactionListView({
 
   return (
     <div className="screen-stack full-height">
+      <ToggleGroup className="history-filter" type="single" value={typeFilter} onValueChange={(value) => { if (value) setTypeFilter(value as typeof typeFilter); }} aria-label="Transaction type">
+        {(["all", "expense", "income", "transfer"] as const).map((item) => <ToggleGroupItem key={item} value={item} className={item === "expense" ? "danger" : undefined}>{capitalize(item)}</ToggleGroupItem>)}
+      </ToggleGroup>
       <div className="search-row">
         <label className="search-box">
           <Search size={15} />
@@ -1031,13 +1046,6 @@ function TransactionListView({
 
       {showFilters ? (
         <div id="transaction-filters" className="filter-panel">
-          <FieldLabel label="Type">
-            <ToggleGroup type="single" value={typeFilter} onValueChange={(value) => { if (value) setTypeFilter(value as typeof typeFilter); }} aria-label="Transaction type">
-              {(["all", "expense", "income", "transfer"] as const).map((item) => (
-                <ToggleGroupItem key={item} value={item} className={item === "expense" ? "danger" : undefined}>{capitalize(item)}</ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          </FieldLabel>
           <FieldLabel label="Category">
             <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
               <option value="all">All Categories</option>
@@ -1121,14 +1129,14 @@ function AccountsView({
 
   return (
     <div className="screen-stack">
-      <section className="mini-card">
-        <p className="eyebrow">Net Worth Across Accounts</p>
+       <section className="net-worth-card">
+         <p>Net worth</p>
         <div className="account-total-list">
           <strong>{money(netWorthTotal)}</strong>
         </div>
       </section>
 
-      <section className="row-stack">
+       <section className="account-list">
         {accounts.length ? accounts.map((account) => (
           <article key={account.accountKey} className="account-card">
             <div className="account-icon" style={{ color: account.color, backgroundColor: `${account.color}22` }}>
@@ -1179,7 +1187,7 @@ function AccountsView({
               </div>
               <div className="account-copy">
                 <strong>{rule.name}</strong>
-                <span>{recurringTypeLabel(rule.ruleType)} · day {rule.dayOfMonth}</span>
+                <span>{recurringRuleDetail(rule, accounts)}</span>
               </div>
               <div className="account-balance">
                 <strong>{money(rule.amountCents)}</strong>
@@ -1221,6 +1229,7 @@ function InvestmentAccountDetail({ account, snapshot }: { account: Account; snap
         positive={snapshot.marketGainLossCents >= 0}
         danger={snapshot.marketGainLossCents < 0}
       />
+      {snapshot.contributionCents > 0 ? <ValueLine label="Return" value={`${((snapshot.marketGainLossCents / snapshot.contributionCents) * 100).toFixed(1)}%`} positive={snapshot.marketGainLossCents >= 0} danger={snapshot.marketGainLossCents < 0} /> : null}
     </div>
   );
 }
@@ -1228,6 +1237,7 @@ function InvestmentAccountDetail({ account, snapshot }: { account: Account; snap
 function BudgetView({
   data,
   summary,
+  onViewHistory,
   onSetBudget,
   onAddCategory,
   onEditCategory,
@@ -1236,6 +1246,7 @@ function BudgetView({
 }: {
   data: AppData;
   summary: Summary | null;
+  onViewHistory: () => void;
   onSetBudget: (categoryId: string, subcategoryId?: string) => void;
   onAddCategory: () => void;
   onEditCategory: (categoryId: string) => void;
@@ -1303,10 +1314,13 @@ function BudgetView({
         </div>
       </section>
 
+      <IncomeAllocationCard allocation={summary?.incomeAllocation || { incomeCents: 0, spentCents: 0, savedCents: 0, unallocatedCents: 0 }} />
+      {summary?.spendingTrend.daily.length ? <SpendingTrend trend={summary.spendingTrend} onViewHistory={onViewHistory} /> : null}
+
       {GROUPS.map((group) => {
         const categories = activeCategories.filter((category) => category.group === group);
         const groupThemeBudget = themeBudget(summary, group);
-        const groupBudget = groupThemeBudget;
+        const groupBudget = groupThemeBudget ?? effectiveBudgetTotal(categories);
         const groupActivity = progressByGroup[group];
         const groupPct = groupBudget ? Math.min(100, Math.round((groupActivity / groupBudget) * 100)) : 0;
         return (
@@ -1319,7 +1333,7 @@ function BudgetView({
                 <strong>{group}</strong>
                 <Progress label={`${group} budget ${groupPct}% used`} value={groupPct} color={groupPct > 90 ? "#f87171" : GROUP_COLORS[group]} />
               </div>
-              <span>{groupBudget !== undefined ? `${money(groupActivity)} / ${money(groupBudget)}` : money(groupActivity)}</span>
+              <span>{groupBudget ? `${money(groupActivity)} / ${money(groupBudget)}` : money(groupActivity)}</span>
                       <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(themeTarget(group))} aria-label={`Set ${group} budget`}>
                         <Pencil size={11} />
                       </Button>
@@ -2067,7 +2081,7 @@ function TransactionCard({ tx, data, actions, onClick }: { tx: Transaction; data
   const label = tx.kind === "investment" ? "Investment" : tx.kind === "transfer" ? "Transfer" : isPositive ? "Income" : "Expense";
   const detail = tx.kind === "transfer"
     ? [fromAccount?.name, toAccount?.name].filter(Boolean).join(" → ")
-    : [category?.name || tx.categoryId, sub?.name].filter(Boolean).join(" › ");
+    : [category?.name || tx.categoryId, sub?.name, fromAccount?.name].filter(Boolean).join(" › ");
   const content = <>
       <CategoryIcon category={category} />
       <div className="transaction-body">
@@ -2084,6 +2098,55 @@ function TransactionCard({ tx, data, actions, onClick }: { tx: Transaction; data
       {actions}
   </>;
   return onClick ? <button className="transaction-card transaction-repeat" type="button" onClick={onClick} aria-label={`Repeat ${tx.description}`}>{content}</button> : <article className="transaction-card">{content}</article>;
+}
+
+function RepeatCard({ tx, data, onClick }: { tx: Transaction; data: AppData; onClick: () => void }) {
+  const category = data.categories.find((item) => item.id === tx.categoryId);
+  return <Button className="repeat-card" variant="ghost" onClick={onClick} aria-label={`Repeat ${tx.description}`}><strong>{tx.description}</strong><small>{[category?.name, money(tx.amount)].filter(Boolean).join(" · ")}</small></Button>;
+}
+
+function IncomeAllocationCard({ allocation }: { allocation: IncomeAllocation }) {
+  const assignedCents = allocation.spentCents + allocation.savedCents;
+  const positiveIncome = Math.max(0, allocation.incomeCents);
+  const spentPct = positiveIncome ? Math.min(100, (allocation.spentCents / positiveIncome) * 100) : 0;
+  const savedPct = positiveIncome ? Math.min(100 - spentPct, (allocation.savedCents / positiveIncome) * 100) : 0;
+  const ring = positiveIncome ? `conic-gradient(var(--destructive) 0 ${spentPct}%, var(--primary) ${spentPct}% ${spentPct + savedPct}%, var(--secondary) ${spentPct + savedPct}% 100%)` : "var(--secondary)";
+  return <section className="allocation-card">
+    <p className="eyebrow">Income allocation</p>
+    <div className="allocation-layout">
+      <div className="allocation-ring" style={{ background: ring }}><span>Income<br /><strong>{money(allocation.incomeCents)}</strong></span></div>
+      <div className="allocation-legend">
+        <ValueLine label="Spent" value={money(allocation.spentCents)} danger />
+        <ValueLine label="Saved" value={money(allocation.savedCents)} positive />
+        <ValueLine label={allocation.unallocatedCents < 0 ? "Over-allocated" : "Unallocated"} value={money(Math.abs(allocation.unallocatedCents))} danger={allocation.unallocatedCents < 0} />
+      </div>
+    </div>
+    {positiveIncome === 0 && assignedCents > 0 ? <p className="helper-copy">Record income to compare this month&apos;s spending and savings allocation.</p> : null}
+  </section>;
+}
+
+function SpendingTrend({ trend, onViewHistory }: { trend: Summary["spendingTrend"]; onViewHistory: () => void }) {
+  const [period, setPeriod] = useState<keyof Summary["spendingTrend"]>("daily");
+  const pointsForPeriod = trend[period];
+  const total = pointsForPeriod.reduce((sum, item) => sum + item.spentCents, 0);
+  const average = pointsForPeriod.length ? total / pointsForPeriod.length : 0;
+  const maximum = Math.max(...pointsForPeriod.map((item) => item.spentCents), 1);
+  const points = pointsForPeriod.map((item, index) => {
+    const x = pointsForPeriod.length === 1 ? 160 : (index / (pointsForPeriod.length - 1)) * 320;
+    const y = 126 - (item.spentCents / maximum) * 110;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const firstDay = pointsForPeriod[0];
+  const lastDay = pointsForPeriod.at(-1);
+  const labels = firstDay && lastDay && firstDay.periodStart !== lastDay.periodStart ? [firstDay, lastDay] : firstDay ? [firstDay] : [];
+  return <section className="trend-card">
+    <div className="section-line"><div><p className="eyebrow">Spending trend</p><strong>{money(Math.round(average))}</strong><small>Average per {period.slice(0, -2)}</small></div><Button className="link-button" variant="ghost" onClick={onViewHistory}>View history</Button></div>
+    <ToggleGroup className="trend-toggle" type="single" value={period} onValueChange={(value) => { if (value) setPeriod(value as typeof period); }} aria-label="Spending trend period"><ToggleGroupItem value="daily">Daily</ToggleGroupItem><ToggleGroupItem value="weekly">Weekly</ToggleGroupItem><ToggleGroupItem value="monthly">Monthly</ToggleGroupItem></ToggleGroup>
+    <svg className="trend-chart" viewBox="0 0 320 142" preserveAspectRatio="none" role="img" aria-label={`${capitalize(period)} spending trend, average ${money(Math.round(average))}`}>
+      <line x1="0" y1="25" x2="320" y2="25" /><line x1="0" y1="70" x2="320" y2="70" /><line x1="0" y1="115" x2="320" y2="115" /><polyline points={points} />
+    </svg>
+    <div className="trend-labels">{labels.map((item) => <span key={item.periodStart}>{period === "monthly" ? item.periodStart : formatShortDate(item.periodStart)}</span>)}</div>
+  </section>;
 }
 
 function RowActions({
@@ -2330,7 +2393,27 @@ export function money(cents: number) {
 }
 
 function formatDate(dateStr: string) {
+  const localToday = localDate();
+  const yesterday = new Date(`${localToday}T00:00:00`);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = yesterday.toISOString().slice(0, 10);
+  if (dateStr === localToday) return `Today, ${formatShortDate(dateStr)}`;
+  if (dateStr === yesterdayKey) return `Yesterday, ${formatShortDate(dateStr)}`;
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function formatShortDate(dateStr: string) {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+function recurringRuleDetail(rule: RecurringRule, accounts: Account[]) {
+  const from = accounts.find((account) => account.id === rule.fromAccountId)?.name;
+  const to = rule.toAccountId ? accounts.find((account) => account.id === rule.toAccountId)?.name : null;
+  return [
+    `Day ${rule.dayOfMonth}`,
+    from && to ? `${from} to ${to}` : from,
+    !from ? recurringTypeLabel(rule.ruleType) : null
+  ].filter(Boolean).join(" · ");
 }
 
 function slug(value: string) {

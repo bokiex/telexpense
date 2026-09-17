@@ -28,6 +28,18 @@ export type DailyPoint = {
   spentCents: number;
 };
 
+export type IncomeAllocation = {
+  incomeCents: number;
+  spentCents: number;
+  savedCents: number;
+  unallocatedCents: number;
+};
+
+export type TrendPoint = {
+  periodStart: string;
+  spentCents: number;
+};
+
 export type RecentTransaction = {
   id: number;
   kind: string;
@@ -965,8 +977,10 @@ export async function getSummary(telegramUserId: number, month: string) {
   const start = `${month}-01`;
   const end = nextMonthStart(month);
 
-  const [transactions, budgetsRes, storedCategories, storedAccounts, accountBalances, recurringRules] = await Promise.all([
+  const trendStart = addMonths(month, -5);
+  const [transactions, trendTransactions, budgetsRes, storedCategories, storedAccounts, accountBalances, recurringRules] = await Promise.all([
     getSummaryTransactions(telegramUserId, start, end),
+    getTrendTransactions(telegramUserId, `${trendStart}-01`, end),
     selectBudgetsForMonth(supabase, telegramUserId, month),
     getStoredCategories(telegramUserId),
     getStoredAccounts(telegramUserId),
@@ -986,6 +1000,7 @@ export async function getSummary(telegramUserId: number, month: string) {
   const subcategories = new Map<number, SubcategorySpend>();
   const daily = new Map<string, number>();
   const activity = budgetActivityTotals(transactions, storedCategories);
+  const incomeAllocation = incomeAllocationTotals(transactions, storedCategories);
 
   for (const tx of transactions) {
     if (tx.transfer_group_id) continue;
@@ -1032,6 +1047,8 @@ export async function getSummary(telegramUserId: number, month: string) {
       dailySafeCents: daysLeft > 0 ? Math.floor(Math.max(0, budgetCents - activity.progressCents) / daysLeft) : 0,
       projectedSpendCents: daysElapsed > 0 ? Math.round((activity.ordinarySpentCents / daysElapsed) * daysInMonth(month)) : activity.ordinarySpentCents
     },
+    incomeAllocation,
+    spendingTrend: spendingTrend(trendTransactions, storedCategories, month),
     daily: Array.from(daily.entries())
       .map(([date, spentCents]) => ({ date, spentCents }))
       .sort((a, b) => a.date.localeCompare(b.date)),
@@ -1427,6 +1444,17 @@ async function getSummaryTransactions(telegramUserId: number, start: string, end
     .order("id", { ascending: false }));
 }
 
+async function getTrendTransactions(telegramUserId: number, start: string, end: string) {
+  const supabase = createSupabaseAdmin();
+  return selectTransactionsCompat(["transfer_group_id"], (columns) => supabase
+    .from("transactions")
+    .select(["kind", "category", ...columns, "amount_cents", "occurred_on"].join(", "))
+    .eq("telegram_user_id", telegramUserId)
+    .gte("occurred_on", start)
+    .lt("occurred_on", end)
+    .order("occurred_on"));
+}
+
 async function getAccountTransactions(telegramUserId: number) {
   const supabase = createSupabaseAdmin();
   const withAccountId = await supabase
@@ -1519,6 +1547,53 @@ export function budgetActivityTotals(
     progressCents: ordinarySpentCents + savingsAllocatedCents,
     progressByGroup
   };
+}
+
+export function incomeAllocationTotals(
+  transactions: BudgetActivityTransaction[],
+  storedCategories: Pick<StoredCategory, "sourceName" | "group">[]
+): IncomeAllocation {
+  const activity = budgetActivityTotals(transactions, storedCategories);
+  const incomeCents = transactions.reduce(
+    (sum, transaction) => transaction.transfer_group_id || transaction.kind !== "income" || transaction.amount_cents <= 0
+      ? sum
+      : sum + transaction.amount_cents,
+    0
+  );
+  return {
+    incomeCents,
+    spentCents: activity.ordinarySpentCents,
+    savedCents: activity.savingsAllocatedCents,
+    unallocatedCents: incomeCents - activity.ordinarySpentCents - activity.savingsAllocatedCents
+  };
+}
+
+type TrendTransaction = BudgetActivityTransaction & { occurred_on: string };
+
+export function spendingTrend(
+  transactions: TrendTransaction[],
+  storedCategories: Pick<StoredCategory, "sourceName" | "group">[],
+  month: string
+): { daily: TrendPoint[]; weekly: TrendPoint[]; monthly: TrendPoint[] } {
+  const groupByCategory = new Map(storedCategories.map((category) => [normalizeIdentity(category.sourceName), category.group]));
+  const spendByDate = new Map<string, number>();
+  for (const transaction of transactions) {
+    const isOrdinaryExpense = !transaction.transfer_group_id
+      && transaction.kind === "expense"
+      && transaction.amount_cents < 0
+      && (!transaction.category || groupByCategory.get(normalizeIdentity(transaction.category)) !== "Savings");
+    if (isOrdinaryExpense) spendByDate.set(transaction.occurred_on, (spendByDate.get(transaction.occurred_on) || 0) + Math.abs(transaction.amount_cents));
+  }
+  const daily = datesInMonth(month).map((date) => ({ periodStart: date, spentCents: spendByDate.get(date) || 0 }));
+  const weekly = weekStartsEndingIn(month, 6).map((periodStart) => ({
+    periodStart,
+    spentCents: sumDates(spendByDate, periodStart, addDays(periodStart, 7))
+  }));
+  const monthly = monthsEndingIn(month, 6).map((periodStart) => ({
+    periodStart,
+    spentCents: sumDates(spendByDate, `${periodStart}-01`, nextMonthStart(periodStart))
+  }));
+  return { daily, weekly, monthly };
 }
 
 export function budgetStatusSpentCents(
@@ -1660,6 +1735,44 @@ function titleCase(value: string) {
 function nextMonthStart(month: string) {
   const [year, monthIndex] = month.split("-").map(Number);
   return new Date(Date.UTC(year, monthIndex, 1)).toISOString().slice(0, 10);
+}
+
+function addMonths(month: string, offset: number) {
+  const [year, monthIndex] = month.split("-").map(Number);
+  const date = new Date(Date.UTC(year, monthIndex - 1 + offset, 1));
+  return date.toISOString().slice(0, 7);
+}
+
+function addDays(date: string, offset: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + offset)).toISOString().slice(0, 10);
+}
+
+function datesInMonth(month: string) {
+  return Array.from({ length: daysInMonth(month) }, (_, index) => `${month}-${String(index + 1).padStart(2, "0")}`);
+}
+
+function weekStartsEndingIn(month: string, count: number) {
+  const lastDay = `${month}-${String(daysInMonth(month)).padStart(2, "0")}`;
+  const lastWeekStart = startOfWeekMonday(lastDay);
+  return Array.from({ length: count }, (_, index) => addDays(lastWeekStart, (index - count + 1) * 7));
+}
+
+function monthsEndingIn(month: string, count: number) {
+  return Array.from({ length: count }, (_, index) => addMonths(month, index - count + 1));
+}
+
+function startOfWeekMonday(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  const weekday = value.getUTCDay();
+  return addDays(date, weekday === 0 ? -6 : 1 - weekday);
+}
+
+function sumDates(values: Map<string, number>, start: string, end: string) {
+  let sum = 0;
+  for (const [date, value] of values) if (date >= start && date < end) sum += value;
+  return sum;
 }
 
 function daysInMonth(month: string) {

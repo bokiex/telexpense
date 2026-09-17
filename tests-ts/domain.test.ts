@@ -6,7 +6,7 @@ import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
-import { budgetActivityTotals, budgetStatusSpentCents, effectiveBudgetCents, subcategoryDisplayName } from "../lib/repository";
+import { budgetActivityTotals, budgetStatusSpentCents, effectiveBudgetCents, incomeAllocationTotals, spendingTrend, subcategoryDisplayName } from "../lib/repository";
 import { themeBudgetCategory } from "../lib/budgetThemes";
 import {
   genericTransactionKindError,
@@ -92,6 +92,46 @@ test("savings category expenses count as allocated progress, not ordinary spendi
   assert.equal(totals.ordinarySpentCents, 25_00);
   assert.equal(totals.savingsAllocatedCents, 75_00);
   assert.deepEqual(totals.progressByGroup, { Needs: 0, Wants: 25_00, Savings: 75_00 });
+});
+
+test("income allocation separates income, ordinary spend, savings, and remaining funds", () => {
+  const allocation = incomeAllocationTotals([
+    { kind: "income", category: "salary", amount_cents: 500_00, transfer_group_id: null },
+    { kind: "income", category: "freelance", amount_cents: 125_00, transfer_group_id: null },
+    { kind: "expense", category: "food", amount_cents: -200_00, transfer_group_id: null },
+    { kind: "expense", category: "investments", amount_cents: -75_00, transfer_group_id: null },
+    { kind: "investment", category: "investments", amount_cents: -100_00, transfer_group_id: null }
+  ], [{ sourceName: "food", group: "Needs" }, { sourceName: "investments", group: "Savings" }]);
+
+  assert.deepEqual(allocation, { incomeCents: 625_00, spentCents: 200_00, savedCents: 175_00, unallocatedCents: 250_00 });
+});
+
+test("income allocation and trends exclude grouped transfers", () => {
+  const transactions = [
+    { kind: "income", category: "salary", amount_cents: 300_00, transfer_group_id: null, occurred_on: "2026-01-05" },
+    { kind: "expense", category: "food", amount_cents: -50_00, transfer_group_id: null, occurred_on: "2026-01-05" },
+    { kind: "expense", category: null, amount_cents: -100_00, transfer_group_id: "transfer", occurred_on: "2026-01-06" },
+    { kind: "investment", category: null, amount_cents: 100_00, transfer_group_id: "transfer", occurred_on: "2026-01-06" }
+  ];
+  const categories = [{ sourceName: "food", group: "Needs" as const }];
+
+  assert.deepEqual(incomeAllocationTotals(transactions, categories), { incomeCents: 300_00, spentCents: 50_00, savedCents: 0, unallocatedCents: 250_00 });
+  assert.equal(spendingTrend(transactions, categories, "2026-01").daily[5].spentCents, 0);
+});
+
+test("spending trend zero-fills daily, weekly, and monthly calendar buckets", () => {
+  const trend = spendingTrend([
+    { kind: "expense", category: "food", amount_cents: -10_00, transfer_group_id: null, occurred_on: "2024-02-01" },
+    { kind: "expense", category: "food", amount_cents: -20_00, transfer_group_id: null, occurred_on: "2024-02-29" },
+    { kind: "expense", category: "food", amount_cents: -30_00, transfer_group_id: null, occurred_on: "2023-10-10" }
+  ], [{ sourceName: "food", group: "Needs" }], "2024-02");
+
+  assert.equal(trend.daily.length, 29);
+  assert.deepEqual(trend.daily[0], { periodStart: "2024-02-01", spentCents: 10_00 });
+  assert.deepEqual(trend.daily[1], { periodStart: "2024-02-02", spentCents: 0 });
+  assert.deepEqual(trend.daily[28], { periodStart: "2024-02-29", spentCents: 20_00 });
+  assert.deepEqual(trend.monthly.map((point) => point.periodStart), ["2023-09", "2023-10", "2023-11", "2023-12", "2024-01", "2024-02"]);
+  assert.equal(trend.monthly[1].spentCents, 30_00);
 });
 
 test("frontend amount display is neutral", () => {
