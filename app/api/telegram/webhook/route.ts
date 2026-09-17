@@ -56,9 +56,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    await upsertTelegramUser(user);
-
     if (text.startsWith("/budget")) {
+      await upsertTelegramUser(user);
       const reply = await handleBudgetCommand(user.id, text);
       await sendTelegramMessage(chatId, reply, dashboardKeyboard());
       return NextResponse.json({ ok: true });
@@ -67,10 +66,12 @@ export async function POST(request: NextRequest) {
     const editId = editTransactionIdFromReply(message);
     if (!editId && isConciseTransactionMessage(text)) {
       const concise = parseConciseTransactionMessage(text);
+      await upsertTelegramUser(user);
       await beginConciseCapture(user.id, chatId, concise);
       return NextResponse.json({ ok: true });
     }
     const parsedInput = parseTransactionMessage(text);
+    await upsertTelegramUser(user);
     const identity = await resolveTransactionIdentity(user.id, parsedInput.category, parsedInput.account);
     const parsed = { ...parsedInput, category: identity.category, account: identity.account };
     const transactionId = editId || (await addTransaction(user.id, parsed, identity));
