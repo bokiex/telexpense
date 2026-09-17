@@ -1,6 +1,7 @@
+import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { budgetWarningText } from "@/lib/budget";
-import { optionalEnv } from "@/lib/env";
+import { optionalEnv, requireEnv } from "@/lib/env";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "@/lib/parser";
 import {
   addTransaction,
@@ -30,6 +31,12 @@ import {
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  const expectedSecret = Buffer.from(requireEnv("TELEGRAM_WEBHOOK_SECRET_TOKEN"));
+  const providedSecret = Buffer.from(request.headers.get("x-telegram-bot-api-secret-token") || "");
+  if (providedSecret.length !== expectedSecret.length || !timingSafeEqual(providedSecret, expectedSecret)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const update = await request.json();
   if (update.callback_query) {
     await handleCallbackQuery(update.callback_query);

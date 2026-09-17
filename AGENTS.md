@@ -56,6 +56,9 @@ Variables expected by the active application:
 
 - `TELEGRAM_BOT_TOKEN`: signs/validates Mini App requests and sends bot API
   calls. Server-only.
+- `TELEGRAM_WEBHOOK_SECRET_TOKEN`: authenticates Telegram webhook requests.
+  Configure the same value with Telegram's `setWebhook` `secret_token` field.
+  Server-only.
 - `APP_BASE_URL`: public HTTPS origin used in dashboard buttons and webhook
   setup. `dashboardKeyboard` falls back to `VERCEL_PROJECT_PRODUCTION_URL`.
 - `BUDGET_WARNING_RATIO`: optional webhook warning threshold; defaults to
@@ -133,11 +136,10 @@ check.
   authentication boundary; future timestamps and non-positive or non-integer
   Telegram user IDs are rejected. Do not add development bypasses or accept a
   user ID from request JSON/query parameters.
-- The active webhook currently does not verify Telegram's optional
-  `X-Telegram-Bot-Api-Secret-Token`; it is a public endpoint that trusts update
-  shape. Do not add privileged webhook actions based only on caller-supplied
-  identity. Adding secret-token verification requires coordinating Telegram
-  webhook registration and Vercel configuration.
+- The active webhook verifies Telegram's
+  `X-Telegram-Bot-Api-Secret-Token` before parsing its request body. Keep
+  `TELEGRAM_WEBHOOK_SECRET_TOKEN` server-only and register the same value with
+  Telegram's `setWebhook` `secret_token` field.
 - All API handlers run with the Supabase privileged key. A missing
   `.eq("telegram_user_id", userId)` can expose or mutate another user's
   financial data even though RLS is enabled.
