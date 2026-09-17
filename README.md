@@ -34,9 +34,8 @@ This works well because Telegram Mini Apps require HTTPS in production, and Verc
    [supabase/migrations](supabase/migrations) in timestamp order and keep the
    migration history recorded. The canonical-identity migration stops rather
    than guessing if duplicate categories or accounts have conflicting metadata,
-   duplicate portfolio snapshots disagree, or duplicate budgets for the same
-   parent category, subcategory, and month use different currencies; reconcile
-   those rows and rerun the migration.
+   duplicate portfolio snapshots disagree; reconcile those rows and rerun the
+   migration.
 4. Copy your Project URL, publishable key, and server-side secret key.
 
 Server-side routes use `SUPABASE_SECRET_KEY` or legacy `SUPABASE_SERVICE_ROLE_KEY`. Do not expose this key in frontend code.
@@ -127,9 +126,9 @@ If the bot receives messages but does not reply, check the Vercel function logs 
 
 ```text
 4.20 eat out
-food, debit card, lunch, $4.20
-transport, debit card, train, $2.00
-income, salary, debit card, paycheck, $5000
+food, debit card, lunch, 4.20
+transport, debit card, train, 2.00
+income, salary, debit card, paycheck, 5000
 /budget food 300
 /budget transport 120 2026-06
 ```
@@ -160,8 +159,8 @@ parent categories, or child subcategories.
   loading indicator, announce their busy state to assistive technology, and
   disable the initiating control until the request finishes to prevent
   duplicate submissions.
-- The Mini App displays amounts without currency symbols or currency controls,
-  while the API and database still persist currency codes for compatibility.
+- Telexpense uses SGD only. Integer cents in the API and database mean SGD
+  cents, and amounts are shown without a currency symbol.
 - Bottom navigation has four sections: Home, History, Accounts, and Budget.
   The centered plus action is contextual: Home and History add a transaction,
   Accounts adds an account, and Budget adds a category.
@@ -195,17 +194,17 @@ parent categories, or child subcategories.
   update both rows and deletes remove both rows atomically through the grouped
   transfer endpoint. Expense and income transactions continue to require a
   category.
-- API monetary values must be safe integer cents. Expenses and ordinary
+- API monetary values must be safe integer SGD cents. Expenses and ordinary
   investments are negative, income is positive, and transfer amounts are
-  positive. Currencies are uppercase three-letter codes, dates must be real
-  calendar dates in `YYYY-MM-DD`, and months must be valid `YYYY-MM` values.
+  positive. Dates must be real calendar dates in `YYYY-MM-DD`, and months must
+  be valid `YYYY-MM` values.
 - Portfolio snapshots and recurring rules accept only accounts owned by the
   authenticated Telegram user. Recurring transfers require distinct source
   and destination accounts.
 - Account balances are opening balance plus all account transactions. Assets
   are positive; loan and card liabilities are stored as negative values, while
   debt-only fields display their absolute amount.
-- Net worth is grouped by currency and uses the latest portfolio valuation for
+- Net worth is one SGD total and uses the latest portfolio valuation for
   investment accounts when one is available.
 
 ## Verification

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { formatAmount } from "../lib/amountFormat";
-import { debtAmount, loanMetrics, netWorth, netWorthByCurrency, normalizeOpeningBalance } from "../lib/finance";
+import { debtAmount, loanMetrics, netWorth, netWorthWithPortfolioValues, normalizeOpeningBalance } from "../lib/finance";
 import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
@@ -41,17 +41,17 @@ test("calendar validation rejects normalized impossible dates and months", () =>
 
 test("effective budget total does not double-count child subcategory targets", () => {
   assert.equal(effectiveBudgetCents([
-    { category: "food", subcategoryId: null, budgetCents: 100_00, currency: "USD" },
-    { category: "food", subcategoryId: 10, budgetCents: 40_00, currency: "USD" },
-    { category: "transport", subcategoryId: 20, budgetCents: 25_00, currency: "USD" }
+    { category: "food", subcategoryId: null, budgetCents: 100_00 },
+    { category: "food", subcategoryId: 10, budgetCents: 40_00 },
+    { category: "transport", subcategoryId: 20, budgetCents: 25_00 }
   ]), 125_00);
 });
 
 test("effective budget total ignores synthetic theme targets", () => {
   assert.equal(effectiveBudgetCents([
-    { category: themeBudgetCategory("Needs"), subcategoryId: null, budgetCents: 500_00, currency: "USD" },
-    { category: "food", subcategoryId: null, budgetCents: 100_00, currency: "USD" },
-    { category: "transport", subcategoryId: 20, budgetCents: 25_00, currency: "USD" }
+    { category: themeBudgetCategory("Needs"), subcategoryId: null, budgetCents: 500_00 },
+    { category: "food", subcategoryId: null, budgetCents: 100_00 },
+    { category: "transport", subcategoryId: 20, budgetCents: 25_00 }
   ]), 125_00);
 });
 
@@ -86,7 +86,7 @@ test("savings category expenses count as allocated progress, not ordinary spendi
   assert.deepEqual(totals.progressByGroup, { Needs: 0, Wants: 25_00, Savings: 75_00 });
 });
 
-test("frontend amount display omits currency markers", () => {
+test("frontend amount display is neutral", () => {
   const displayed = formatAmount(123_45);
 
   assert.equal(displayed, "123.45");
@@ -177,22 +177,24 @@ test("canonical category identity takes precedence over aliases", () => {
 });
 
 test("Telegram parser normalizes category/account and signs expense", () => {
-  const parsed = parseTransactionMessage("  FoOd , Main   Card, Lunch, $4.20");
+  const parsed = parseTransactionMessage("  FoOd , Main   Card, Lunch, 4.20");
   assert.equal(parsed.category, "food");
   assert.equal(parsed.account, "main card");
   assert.equal(parsed.amountCents, -420);
+  assert.throws(() => parseTransactionMessage("food, card, lunch, $4.20"), /Could not find an amount/);
+  assert.throws(() => parseTransactionMessage("food, card, lunch, 4.20 SGD"), /Could not find an amount/);
 });
 
 test("Telegram comma parser rejects transfers before identity resolution", () => {
   assert.throws(
-    () => parseTransactionMessage("transfer, savings, checking, $20"),
+    () => parseTransactionMessage("transfer, savings, checking, 20"),
     /Transfers must be created in the dashboard\./
   );
 });
 
 test("concise Telegram parser extracts amount and subcategory text", () => {
   assert.deepEqual(parseConciseTransactionMessage("4.20 eat out"), {
-    kind: "expense", description: "eat out", amountCents: -420, currency: "USD"
+    kind: "expense", description: "eat out", amountCents: -420
   });
   assert.throws(() => parseConciseTransactionMessage("food, card, lunch, 4.20"));
 });
@@ -210,7 +212,7 @@ const category = (id: number, name: string, subcategoryName: string): StoredCate
 });
 const account = {
   id: 7, accountKey: "card", name: "Card", institution: null, accountType: "card",
-  openingBalanceCents: 0, balanceCents: 0, currency: "USD", color: "#000", icon: "Wallet", active: true
+  openingBalanceCents: 0, balanceCents: 0, color: "#000", icon: "Wallet", active: true
 } satisfies StoredAccount;
 
 test("concise capture uniquely resolves subcategory, parent, and sole account", () => {
@@ -285,27 +287,21 @@ test("asset opening balances are always positive", () => {
   assert.equal(normalizeOpeningBalance("investment", -50_000), 50_000);
 });
 
-test("net worth keeps currencies separate", () => {
-  assert.deepEqual(netWorthByCurrency([
-    { balanceCents: 100_000, currency: "SGD" },
-    { balanceCents: -10_000, currency: "SGD" },
-    { balanceCents: 50_000, currency: "USD" }
-  ]), {
-    SGD: 90_000,
-    USD: 50_000
-  });
+test("net worth sums all account balances in SGD", () => {
+  assert.equal(netWorthWithPortfolioValues([
+    { balanceCents: 100_000 },
+    { balanceCents: -10_000 },
+    { balanceCents: 50_000 }
+  ]), 140_000);
 });
 
-test("net worth substitutes investment valuations without converting currencies", () => {
-  assert.deepEqual(netWorthByCurrency([
-    { id: 1, accountType: "bank", balanceCents: 100_000, currency: "SGD" },
-    { id: 2, accountType: "investment", balanceCents: 50_000, currency: "SGD" },
-    { id: 3, accountType: "investment", balanceCents: 20_000, currency: "USD" }
+test("net worth substitutes investment valuations", () => {
+  assert.equal(netWorthWithPortfolioValues([
+    { id: 1, accountType: "bank", balanceCents: 100_000 },
+    { id: 2, accountType: "investment", balanceCents: 50_000 },
+    { id: 3, accountType: "investment", balanceCents: 20_000 }
   ], [
-    { accountId: 2, portfolioValueCents: 65_000, currency: "SGD" },
-    { accountId: 3, portfolioValueCents: 25_000, currency: "USD" }
-  ]), {
-    SGD: 165_000,
-    USD: 25_000
-  });
+    { accountId: 2, portfolioValueCents: 65_000 },
+    { accountId: 3, portfolioValueCents: 25_000 }
+  ]), 190_000);
 });

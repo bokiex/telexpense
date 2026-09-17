@@ -74,9 +74,8 @@ Accounts, and Budget. Its centered plus button opens the action for the current
 section: add transaction on Home or History, add account on Accounts, and add
 category on Budget.
 
-Mutation routes validate safe integer cents and financial sign conventions,
-uppercase three-letter currencies, real calendar dates, and valid calendar
-months. Portfolio snapshots and recurring rules verify that referenced
+Mutation routes validate safe integer SGD cents, financial sign conventions,
+real calendar dates, and valid calendar months. Portfolio snapshots and recurring rules verify that referenced
 accounts belong to the authenticated Telegram user; recurring transfer
 endpoints also reject identical source and destination accounts. Budget
 mutations also verify that a supplied subcategory belongs to the selected
@@ -84,15 +83,13 @@ user-owned parent category.
 
 Account balances combine opening balances with all linked transactions. Asset
 balances are positive and loan/card liabilities are negative. Dashboard net
-worth is grouped by currency and substitutes the latest portfolio valuation for
+worth is one SGD total and substitutes the latest portfolio valuation for
 an investment account's transaction-derived balance when available. Transfer
 legs are excluded from category spending summaries by their shared transfer
 group identity.
 
-The Mini App intentionally formats displayed amounts without currency symbols
-or currency controls. Currency codes remain in API payloads, validation, and
-stored rows so existing persisted data and non-dashboard integrations stay
-compatible.
+The Mini App accepts plain-number amounts and formats them without a currency
+symbol. API payloads and stored rows use integer SGD cents.
 
 ## Telegram Mini App Notes
 

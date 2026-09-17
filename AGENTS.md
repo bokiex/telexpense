@@ -108,8 +108,8 @@ check.
 - The browser calls the Next.js API only. Server routes use the Supabase admin
   client; RLS is enabled with no anonymous policies because the privileged key
   bypasses RLS. Correct repository scoping is therefore a security boundary.
-- Normalize categories/account keys to lowercase and currencies to uppercase
-  three-letter codes. Preserve newly added subcategory display casing while
+- Normalize categories/account keys to lowercase. All monetary values are SGD
+  cents and no currency fields exist. Preserve newly added subcategory display casing while
   continuing to match subcategory identities case-insensitively after whitespace
   normalization. Dates must be real calendar dates in `YYYY-MM-DD`, and months
   must be valid calendar months in `YYYY-MM`.

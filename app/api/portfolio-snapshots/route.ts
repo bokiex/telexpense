@@ -13,20 +13,17 @@ export async function POST(request: NextRequest) {
     const accountId = Number(body.accountId);
     const month = String(body.month || "").trim();
     const portfolioValueCents = Number(body.portfolioValueCents);
-    const currency = String(body.currency || "SGD").trim().toUpperCase();
 
     if (!Number.isSafeInteger(accountId) || accountId <= 0) return NextResponse.json({ error: "Account id is required." }, { status: 400 });
     if (!isValidMonth(month)) return NextResponse.json({ error: "Month must be YYYY-MM." }, { status: 400 });
     if (!Number.isSafeInteger(portfolioValueCents) || portfolioValueCents < 0) {
       return NextResponse.json({ error: "Portfolio value is not valid." }, { status: 400 });
     }
-    if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
 
     await upsertPortfolioSnapshot(userId, {
       accountId,
       month,
-      portfolioValueCents,
-      currency
+      portfolioValueCents
     });
     return NextResponse.json({ ok: true });
   } catch (error) {

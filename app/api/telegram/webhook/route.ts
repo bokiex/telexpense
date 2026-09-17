@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   try {
     if (text.startsWith("/start")) {
       await upsertTelegramUser(user);
-      await sendTelegramMessage(chatId, "Send expenses like: food, debit card, lunch, $4.20", dashboardKeyboard());
+      await sendTelegramMessage(chatId, "Send expenses like: food, debit card, lunch, 4.20", dashboardKeyboard());
       return NextResponse.json({ ok: true });
     }
 
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "Could not save transaction.";
     console.error("Telegram webhook handler failed", error);
-    await safeSendTelegramMessage(chatId, `${messageText}\nExample: food, debit card, lunch, $4.20`);
+    await safeSendTelegramMessage(chatId, `${messageText}\nExample: food, debit card, lunch, 4.20`);
     return NextResponse.json({ ok: true });
   }
 }
@@ -131,10 +131,10 @@ async function handleCallbackQuery(callbackQuery: any) {
       await answerTelegramCallback(callbackId, "Reply with the corrected transaction.");
       await sendTelegramMessage(
         chatId,
-        `Editing transaction #${transactionId}. Reply with: category, account, description, $amount`,
+        `Editing transaction #${transactionId}. Reply with: category, account, description, amount`,
         {
           force_reply: true,
-          input_field_placeholder: "food, debit card, lunch, $4.20"
+          input_field_placeholder: "food, debit card, lunch, 4.20"
         }
       );
     }
@@ -317,7 +317,7 @@ async function handleBudgetCommand(telegramUserId: number, text: string) {
   const parts = text.split(/\s+/);
   if (parts.length < 3) return "Use: /budget category amount [YYYY-MM]";
   const category = parts[1].toLowerCase();
-  const amount = Number(parts[2].replaceAll("$", "").replaceAll(",", ""));
+  const amount = Number(parts[2].replaceAll(",", ""));
   if (!Number.isFinite(amount)) return "Budget amount is not valid.";
   const month = parts[3] || currentMonth();
   await setBudget(telegramUserId, category, month, Math.round(amount * 100));
@@ -325,5 +325,5 @@ async function handleBudgetCommand(telegramUserId: number, text: string) {
 }
 
 function money(cents: number) {
-  return `$${(cents / 100).toFixed(2)}`;
+  return (cents / 100).toFixed(2);
 }

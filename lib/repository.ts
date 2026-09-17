@@ -9,21 +9,18 @@ import { isThemeBudgetCategory } from "@/lib/budgetThemes";
 export type CategorySpend = {
   category: string;
   spentCents: number;
-  currency: string;
 };
 
 export type SubcategorySpend = {
   category: string;
   subcategoryId: number;
   spentCents: number;
-  currency: string;
 };
 
 export type Budget = {
   category: string;
   subcategoryId: number | null;
   budgetCents: number;
-  currency: string;
 };
 
 export type DailyPoint = {
@@ -43,7 +40,6 @@ export type RecentTransaction = {
   recurringRuleId: number | null;
   description: string;
   amountCents: number;
-  currency: string;
   occurredOn: string;
 };
 
@@ -78,7 +74,6 @@ export type StoredAccount = {
   accountType: AccountType;
   openingBalanceCents: number;
   balanceCents: number;
-  currency: string;
   color: string;
   icon: string;
   active: boolean;
@@ -91,7 +86,6 @@ export type PortfolioSnapshot = {
   contributionCents: number;
   monthlyContributionCents: number;
   marketGainLossCents: number;
-  currency: string;
 };
 
 export type RecurringRule = {
@@ -99,7 +93,6 @@ export type RecurringRule = {
   name: string;
   ruleType: RecurringRuleType;
   amountCents: number;
-  currency: string;
   category: string;
   fromAccountId: number;
   toAccountId: number | null;
@@ -115,7 +108,6 @@ export type LoanProgress = {
   repaidCents: number;
   repaymentThisMonthCents: number;
   payoffProgress: number;
-  currency: string;
 };
 
 export type StoredSubcategory = {
@@ -147,7 +139,6 @@ export type PendingTransactionCapture = {
   token: string;
   description: string;
   amountCents: number;
-  currency: string;
   categoryId: number | null;
   subcategoryId: number | null;
 };
@@ -163,7 +154,6 @@ export async function createPendingTransactionCapture(
     telegram_user_id: telegramUserId,
     description: values.description,
     amount_cents: values.amountCents,
-    currency: values.currency,
     expires_at: new Date(Date.now() + 15 * 60_000).toISOString()
   });
   if (error) throw error;
@@ -174,7 +164,7 @@ export async function getPendingTransactionCapture(telegramUserId: number, token
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
     .from("pending_transaction_captures")
-    .select("token, description, amount_cents, currency, category_id, subcategory_id")
+    .select("token, description, amount_cents, category_id, subcategory_id")
     .eq("telegram_user_id", telegramUserId)
     .eq("token", token)
     .gt("expires_at", new Date().toISOString())
@@ -185,7 +175,6 @@ export async function getPendingTransactionCapture(telegramUserId: number, token
     token: data.token,
     description: data.description,
     amountCents: data.amount_cents,
-    currency: data.currency,
     categoryId: data.category_id === null ? null : Number(data.category_id),
     subcategoryId: data.subcategory_id === null ? null : Number(data.subcategory_id)
   } satisfies PendingTransactionCapture;
@@ -253,7 +242,6 @@ export async function addTransaction(
     account_id: accountId,
     description: transaction.description,
     amount_cents: transaction.amountCents,
-    currency: transaction.currency,
     occurred_on: new Date().toISOString().slice(0, 10)
   };
   return insertTransactionCompat(supabase, insert, transaction.account);
@@ -268,7 +256,6 @@ export async function addTransactionFields(
     subcategoryId?: number | null;
     description: string;
     amountCents: number;
-    currency: string;
     occurredOn: string;
   }
 ) {
@@ -290,7 +277,6 @@ export async function addTransactionFields(
     account_id: values.accountId,
     description: values.description,
     amount_cents: values.amountCents,
-    currency: values.currency.toUpperCase(),
     occurred_on: values.occurredOn
   };
   const accountName = await getAccountName(telegramUserId, values.accountId);
@@ -304,7 +290,6 @@ export async function addTransferFields(
     toAccountId: number;
     description: string;
     amountCents: number;
-    currency: string;
     occurredOn: string;
   }
 ) {
@@ -325,7 +310,6 @@ export async function addTransferFields(
       transfer_group_id: transferGroupId,
       description: values.description,
       amount_cents: -amount,
-      currency: values.currency.toUpperCase(),
       occurred_on: values.occurredOn
     },
     {
@@ -337,7 +321,6 @@ export async function addTransferFields(
       transfer_group_id: transferGroupId,
       description: values.description,
       amount_cents: amount,
-      currency: values.currency.toUpperCase(),
       occurred_on: values.occurredOn
     }
   ];
@@ -353,7 +336,6 @@ export async function updateTransferFields(
     toAccountId: number;
     description: string;
     amountCents: number;
-    currency: string;
     occurredOn: string;
   }
 ) {
@@ -369,7 +351,6 @@ export async function updateTransferFields(
     to_account_id: values.toAccountId,
     transfer_description: values.description,
     transfer_amount_cents: Math.abs(values.amountCents),
-    transfer_currency: values.currency.toUpperCase(),
     transfer_occurred_on: values.occurredOn
   });
   if (error) throw error;
@@ -391,7 +372,6 @@ export async function updateTransaction(
     account_id: accountId,
     description: transaction.description,
     amount_cents: transaction.amountCents,
-    currency: transaction.currency
   }, transaction.account);
 }
 
@@ -405,7 +385,6 @@ export async function updateTransactionFields(
     subcategoryId?: number | null;
     description: string;
     amountCents: number;
-    currency: string;
     occurredOn: string;
   }
 ) {
@@ -428,7 +407,6 @@ export async function updateTransactionFields(
     account_id: values.accountId,
     description: values.description,
     amount_cents: values.amountCents,
-    currency: values.currency.toUpperCase(),
     occurred_on: values.occurredOn
   }, accountName.toLowerCase());
 }
@@ -510,7 +488,7 @@ export async function listTransactions(
   const optionalColumns = ["subcategory_id", "account_id", "transfer_group_id", "recurring_rule_id"];
   const rows = await selectTransactionsCompat(
     optionalColumns,
-    (columns) => fetchPage(["id", "kind", "category", ...columns, "description", "amount_cents", "currency", "occurred_on"].join(", "))
+      (columns) => fetchPage(["id", "kind", "category", ...columns, "description", "amount_cents", "occurred_on"].join(", "))
   );
 
   const hasMore = rows.length > cursor.limit;
@@ -527,20 +505,20 @@ export async function listTransactions(
       transferGroupId: tx.transfer_group_id, recurringRuleId: tx.recurring_rule_id,
       transferFromAccountId: transferAccounts.get(tx.transfer_group_id)?.fromAccountId ?? null,
       transferToAccountId: transferAccounts.get(tx.transfer_group_id)?.toAccountId ?? null,
-      description: tx.description, amountCents: tx.amount_cents, currency: tx.currency, occurredOn: tx.occurred_on
+      description: tx.description, amountCents: tx.amount_cents, occurredOn: tx.occurred_on
     })),
     nextCursor: hasMore && last ? { beforeDate: last.occurred_on, beforeId: last.id } : null
   };
 }
 
-export async function setBudget(telegramUserId: number, category: string, month: string, amountCents: number, currency = "USD", subcategoryId?: number | null) {
+export async function setBudget(telegramUserId: number, category: string, month: string, amountCents: number, subcategoryId?: number | null) {
   const supabase = createSupabaseAdmin();
   const normalizedCategory = normalizeIdentity(category);
   const normalizedSubcategoryId = await assertBudgetSubcategory(telegramUserId, normalizedCategory, subcategoryId ?? null);
   if (await budgetsMissingSubcategoryColumn(supabase)) {
     if (normalizedSubcategoryId !== null) throw new Error("Subcategory budgets require the latest database migration.");
     const { error } = await supabase.from("budgets").upsert(
-      { telegram_user_id: telegramUserId, category: normalizedCategory, month, amount_cents: amountCents, currency },
+      { telegram_user_id: telegramUserId, category: normalizedCategory, month, amount_cents: amountCents },
       { onConflict: "telegram_user_id,category,month" }
     );
     if (error) throw error;
@@ -560,7 +538,7 @@ export async function setBudget(telegramUserId: number, category: string, month:
   if (existing.data) {
     const { error } = await supabase
       .from("budgets")
-      .update({ amount_cents: amountCents, currency })
+      .update({ amount_cents: amountCents })
       .eq("telegram_user_id", telegramUserId)
       .eq("id", existing.data.id);
     if (error) throw error;
@@ -571,8 +549,7 @@ export async function setBudget(telegramUserId: number, category: string, month:
       telegram_user_id: telegramUserId,
       category: normalizedCategory,
       month,
-      amount_cents: amountCents,
-      currency
+      amount_cents: amountCents
     };
   if (normalizedSubcategoryId !== null) insert.subcategory_id = normalizedSubcategoryId;
   const { error } = await supabase.from("budgets").insert(insert);
@@ -637,7 +614,7 @@ async function budgetsMissingSubcategoryColumn(supabase: ReturnType<typeof creat
 async function selectBudgetsForMonth(supabase: ReturnType<typeof createSupabaseAdmin>, telegramUserId: number, month: string) {
   const withSubcategory = await supabase
     .from("budgets")
-    .select("category, subcategory_id, amount_cents, currency")
+    .select("category, subcategory_id, amount_cents")
     .eq("telegram_user_id", telegramUserId)
     .eq("month", month)
     .order("category");
@@ -646,7 +623,7 @@ async function selectBudgetsForMonth(supabase: ReturnType<typeof createSupabaseA
 
   const legacy = await supabase
     .from("budgets")
-    .select("category, amount_cents, currency")
+    .select("category, amount_cents")
     .eq("telegram_user_id", telegramUserId)
     .eq("month", month)
     .order("category");
@@ -664,7 +641,6 @@ export async function upsertAccount(
     institution?: string | null;
     accountType: AccountType;
     openingBalanceCents: number;
-    currency: string;
     color: string;
     icon: string;
     active?: boolean;
@@ -681,7 +657,6 @@ export async function upsertAccount(
         institution: values.institution || null,
         account_type: values.accountType,
         opening_balance_cents: normalizeOpeningBalance(values.accountType, values.openingBalanceCents),
-        currency: values.currency.toUpperCase(),
         color: values.color,
         icon: values.icon,
         active: values.active ?? true,
@@ -699,7 +674,7 @@ export async function getStoredAccounts(telegramUserId: number): Promise<Omit<St
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
     .from("accounts")
-    .select("id, account_key, name, institution, account_type, opening_balance_cents, currency, color, icon, active")
+    .select("id, account_key, name, institution, account_type, opening_balance_cents, color, icon, active")
     .eq("telegram_user_id", telegramUserId)
     .order("name");
   if (error && isMissingSchemaError(error)) return [];
@@ -711,7 +686,6 @@ export async function getStoredAccounts(telegramUserId: number): Promise<Omit<St
     institution: row.institution,
     accountType: row.account_type as AccountType,
     openingBalanceCents: row.opening_balance_cents,
-    currency: row.currency,
     color: row.color,
     icon: row.icon,
     active: row.active
@@ -724,7 +698,6 @@ export async function upsertPortfolioSnapshot(
     accountId: number;
     month: string;
     portfolioValueCents: number;
-    currency: string;
   }
 ) {
   await assertOwnedAccount(telegramUserId, values.accountId);
@@ -735,7 +708,6 @@ export async function upsertPortfolioSnapshot(
       account_id: values.accountId,
       month: values.month,
       portfolio_value_cents: values.portfolioValueCents,
-      currency: values.currency.toUpperCase(),
       updated_at: new Date().toISOString()
     },
     { onConflict: "telegram_user_id,account_id,month" }
@@ -750,7 +722,6 @@ export async function upsertRecurringRule(
     name: string;
     ruleType: RecurringRuleType;
     amountCents: number;
-    currency: string;
     category: string;
     fromAccountId: number;
     toAccountId?: number | null;
@@ -771,7 +742,6 @@ export async function upsertRecurringRule(
     name: values.name,
     rule_type: values.ruleType,
     amount_cents: values.amountCents,
-    currency: values.currency.toUpperCase(),
     category: values.category.toLowerCase(),
     from_account_id: values.fromAccountId,
     to_account_id: values.toAccountId || null,
@@ -1000,7 +970,6 @@ export async function getSummary(telegramUserId: number, month: string) {
     category: row.category,
     subcategoryId: row.subcategory_id === null || row.subcategory_id === undefined ? null : Number(row.subcategory_id),
     budgetCents: row.amount_cents,
-    currency: row.currency
   }));
 
   const categories = new Map<string, CategorySpend>();
@@ -1014,12 +983,12 @@ export async function getSummary(telegramUserId: number, month: string) {
     if (!savingsAllocation && !ordinaryExpense) continue;
     if (!tx.category) continue;
     const spent = Math.abs(tx.amount_cents);
-    const category = categories.get(tx.category) || { category: tx.category, spentCents: 0, currency: tx.currency };
+    const category = categories.get(tx.category) || { category: tx.category, spentCents: 0 };
     category.spentCents += spent;
     categories.set(tx.category, category);
     if (tx.subcategory_id !== null && tx.subcategory_id !== undefined) {
       const subcategoryId = Number(tx.subcategory_id);
-      const subcategory = subcategories.get(subcategoryId) || { category: tx.category, subcategoryId, spentCents: 0, currency: tx.currency };
+      const subcategory = subcategories.get(subcategoryId) || { category: tx.category, subcategoryId, spentCents: 0 };
       subcategory.spentCents += spent;
       subcategories.set(subcategoryId, subcategory);
     }
@@ -1076,7 +1045,6 @@ export async function getSummary(telegramUserId: number, month: string) {
       recurringRuleId: tx.recurring_rule_id,
       description: tx.description,
       amountCents: tx.amount_cents,
-      currency: tx.currency,
       occurredOn: tx.occurred_on
     }))
   };
@@ -1155,7 +1123,7 @@ async function getPortfolioSnapshots(
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
     .from("portfolio_snapshots")
-    .select("account_id, month, portfolio_value_cents, currency")
+    .select("account_id, month, portfolio_value_cents")
     .eq("telegram_user_id", telegramUserId)
     .lte("month", month)
     .order("month", { ascending: false });
@@ -1192,7 +1160,6 @@ async function getPortfolioSnapshots(
       contributionCents: totalContributionCents,
       monthlyContributionCents: contribution.monthCents,
       marketGainLossCents: Number(row.portfolio_value_cents) - previousValueCents - contribution.monthCents,
-      currency: row.currency
     };
   });
 }
@@ -1258,7 +1225,7 @@ async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
     .from("recurring_rules")
-    .select("id, name, rule_type, amount_cents, currency, category, from_account_id, to_account_id, day_of_month, active")
+    .select("id, name, rule_type, amount_cents, category, from_account_id, to_account_id, day_of_month, active")
     .eq("telegram_user_id", telegramUserId)
     .order("name");
 
@@ -1270,7 +1237,6 @@ async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[
     name: row.name,
     ruleType: row.rule_type as RecurringRuleType,
     amountCents: Number(row.amount_cents),
-    currency: row.currency,
     category: row.category,
     fromAccountId: Number(row.from_account_id),
     toAccountId: row.to_account_id === null ? null : Number(row.to_account_id),
@@ -1325,7 +1291,6 @@ function buildLoanProgress(accounts: StoredAccount[], transactions: Awaited<Retu
         repaidCents,
         repaymentThisMonthCents,
         payoffProgress,
-        currency: account.currency
       };
     });
 }
@@ -1443,7 +1408,7 @@ async function getSummaryTransactions(telegramUserId: number, start: string, end
   const optionalColumns = ["subcategory_id", "account_id", "transfer_group_id", "recurring_rule_id"];
   return selectTransactionsCompat(optionalColumns, (columns) => supabase
     .from("transactions")
-    .select(["id", "kind", "category", ...columns, "description", "amount_cents", "currency", "occurred_on"].join(", "))
+    .select(["id", "kind", "category", ...columns, "description", "amount_cents", "occurred_on"].join(", "))
     .eq("telegram_user_id", telegramUserId)
     .gte("occurred_on", start)
     .lt("occurred_on", end)
@@ -1455,7 +1420,7 @@ async function getAccountTransactions(telegramUserId: number) {
   const supabase = createSupabaseAdmin();
   const withAccountId = await supabase
     .from("transactions")
-    .select("account_id, amount_cents, currency")
+    .select("account_id, amount_cents")
     .eq("telegram_user_id", telegramUserId);
 
   if (!withAccountId.error) return withAccountId.data || [];
@@ -1463,7 +1428,7 @@ async function getAccountTransactions(telegramUserId: number) {
 
   const legacy = await supabase
     .from("transactions")
-    .select("account, amount_cents, currency")
+    .select("account, amount_cents")
     .eq("telegram_user_id", telegramUserId);
 
   if (legacy.error) throw legacy.error;
@@ -1546,7 +1511,7 @@ export function budgetActivityTotals(
 
 function buildAccounts(
   storedAccounts: Omit<StoredAccount, "balanceCents">[],
-  transactions: { account?: string; account_id: number | null; amount_cents: number; currency: string }[]
+  transactions: { account?: string; account_id: number | null; amount_cents: number }[]
 ): StoredAccount[] {
   const accounts = new Map<string, StoredAccount>();
   const accountIdToKey = new Map<number, string>();
@@ -1572,7 +1537,6 @@ function buildAccounts(
       accountType: "other",
       openingBalanceCents: 0,
       balanceCents: tx.amount_cents,
-      currency: tx.currency,
       color: "#60a5fa",
       icon: "Wallet",
       active: true
