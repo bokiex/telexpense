@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { netWorthWithPortfolioValues } from "@/lib/finance";
 import { formatAmount } from "@/lib/amountFormat";
@@ -659,7 +659,7 @@ export default function Dashboard() {
   const primaryAction = contextualPrimaryAction(activeTab, () => setModal({ type: "add-transaction" }), () => setModal({ type: "add-account" }), () => setModal({ type: "add-category" }));
 
   return (
-    <main className="mini-root">
+    <main className="mini-root" aria-hidden={modal.type !== "none" || undefined} inert={modal.type !== "none" || undefined}>
       <section className="phone-frame" aria-label="Telexpense mini app">
         <header className="mini-header">
           <div>
@@ -1066,8 +1066,8 @@ function AccountsView({
               <span>{account.institution || accountTypeLabel(account.accountType)} · {accountTypeLabel(account.accountType)}</span>
             </div>
             <div className="account-balance">
-              <strong>{account.accountType === "loan" ? money(Math.max(0, -account.balanceCents)) : money(account.balanceCents)}</strong>
-              <span>{account.accountType === "loan" ? "Original debt" : "Opening"} {money(account.accountType === "loan" ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents)}</span>
+              <strong>{isDebtAccount(account) ? money(Math.max(0, -account.balanceCents)) : money(account.balanceCents)}</strong>
+              <span>{isDebtAccount(account) ? "Original debt" : "Opening"} {money(isDebtAccount(account) ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents)}</span>
             </div>
             <div className="card-actions">
               {account.accountType === "investment" ? (
@@ -1953,14 +1953,50 @@ function BudgetModal({
   );
 }
 
-function BottomSheet({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+export function BottomSheet({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    return () => previouslyFocused?.focus();
+  }, []);
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    ) || []).filter((element) => !element.hasAttribute("hidden"));
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   return (
     <div className="sheet-backdrop">
-      <section className="bottom-sheet">
-        <div className="sheet-handle" />
+      <section ref={dialogRef} className="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={onKeyDown}>
+        <div className="sheet-handle" aria-hidden="true" />
         <header>
-          <h2>{title}</h2>
-          <button className="ghost-button" type="button" onClick={onClose} aria-label="Close">
+          <h2 id={titleId}>{title}</h2>
+          <button ref={closeButtonRef} className="ghost-button" type="button" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </header>
@@ -2302,6 +2338,10 @@ function accountTypeLabel(type: AccountType) {
   if (type === "investment") return "Investment";
   if (type === "loan") return "Loan";
   return "Other";
+}
+
+function isDebtAccount(account: Account) {
+  return account.accountType === "loan" || account.accountType === "card";
 }
 
 function recurringTypeLabel(type: RecurringRuleType) {
