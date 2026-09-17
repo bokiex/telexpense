@@ -39,7 +39,7 @@ import {
   Wallet,
   X
 } from "lucide-react";
-import { transferAccounts } from "@/lib/transfer";
+import { displayTransferGroups, transferAccounts } from "@/lib/transfer";
 import { THEME_BUDGET_CATEGORY_PREFIX, isThemeBudgetCategory, themeBudgetCategory } from "@/lib/budgetThemes";
 import { PendingButton, usePendingAction } from "@/components/PendingButton";
 
@@ -1983,14 +1983,19 @@ function Metric({ icon, label, value, positive = false, masked = false }: { icon
 function TransactionCard({ tx, data, actions }: { tx: Transaction; data: AppData; actions?: ReactNode }) {
   const category = data.categories.find((item) => item.id === tx.categoryId);
   const sub = category?.subcategories.find((item) => item.id === tx.subcategoryId);
+  const fromAccount = data.accounts.find((item) => item.id === tx.accountId);
+  const toAccount = data.accounts.find((item) => item.id === tx.toAccountId);
   const isPositive = tx.type === "income";
   const label = tx.kind === "investment" ? "Investment" : tx.kind === "transfer" ? "Transfer" : isPositive ? "Income" : "Expense";
+  const detail = tx.kind === "transfer"
+    ? [fromAccount?.name, toAccount?.name].filter(Boolean).join(" → ")
+    : [category?.name || tx.categoryId, sub?.name].filter(Boolean).join(" › ");
   return (
     <article className="transaction-card">
       <CategoryIcon category={category} />
       <div className="transaction-body">
         <strong>{tx.description}</strong>
-        <span>{[category?.name || tx.categoryId, sub?.name].filter(Boolean).join(" › ")} · {formatDate(tx.date)}</span>
+        <span>{detail} · {formatDate(tx.date)}</span>
       </div>
       <div className="transaction-amount">
         <strong className={isPositive ? "positive-text" : "danger-text"}>{isPositive ? "+" : "-"}{money(tx.amount)}</strong>
@@ -2104,7 +2109,7 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
   }
   for (const stored of summary.storedCategories) addCategory(stored.sourceName);
 
-  const sourceTransactions = history || summary.recent;
+  const sourceTransactions = displayTransferGroups(history || summary.recent);
   const transactions = sourceTransactions.map((tx) => {
     const category = tx.category ? addCategory(tx.category) : null;
     const transfer = transferAccounts(tx, sourceTransactions);

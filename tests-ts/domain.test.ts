@@ -14,7 +14,7 @@ import {
   transactionCategory,
   transactionCategoryError
 } from "../lib/transactionCategory";
-import { transferAccounts } from "../lib/transfer";
+import { displayTransferGroups, transferAccounts } from "../lib/transfer";
 import { isValidDate, isValidMonth, transactionAmountError } from "../lib/validation";
 import crypto from "node:crypto";
 import { validateTelegramInitData } from "../lib/telegram";
@@ -158,6 +158,29 @@ test("grouped transfer legs resolve edit source and destination accounts", () =>
     transferFromAccountId: 10, transferToAccountId: 20
   }, []), { fromAccountId: 10, toAccountId: 20 });
   assert.equal(transferAccounts({ transferGroupId: null, accountId: 10, amountCents: -500 }, legs), null);
+});
+
+test("history displays one source leg per transfer group across pages", () => {
+  const destination = {
+    id: 2,
+    transferGroupId: "group",
+    accountId: 20,
+    transferFromAccountId: 10,
+    transferToAccountId: 20,
+    amountCents: 500
+  };
+  const source = {
+    id: 1,
+    transferGroupId: "group",
+    accountId: 10,
+    transferFromAccountId: 10,
+    transferToAccountId: 20,
+    amountCents: -500
+  };
+  const expense = { id: 3, transferGroupId: null, accountId: 30, amountCents: -250 };
+
+  assert.deepEqual(displayTransferGroups([destination]), [{ ...destination, accountId: 10, amountCents: -500 }]);
+  assert.deepEqual(displayTransferGroups([destination, expense, source]), [source, expense]);
 });
 
 test("category identity collapses whitespace and case", () => {
