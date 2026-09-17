@@ -403,7 +403,7 @@ export default function Dashboard() {
     }
   }
 
-  async function saveTransaction(tx: TransactionFormValues) {
+  async function saveTransaction(tx: TransactionFormValues): Promise<boolean> {
     if (tx.type === "transfer") {
       const fromAccount = data.accounts.find((item) => item.id === tx.accountId);
       const toAccount = data.accounts.find((item) => item.id === tx.toAccountId);
@@ -418,11 +418,11 @@ export default function Dashboard() {
       if (!response.ok) {
         const result = await response.json().catch(() => null);
         setError(result?.error || "Could not save transfer.");
-        return;
+        return false;
       }
       setModal({ type: "none" });
       reload();
-      return;
+      return true;
     }
 
     const amountCents = signedCents(tx.type, tx.amount);
@@ -443,10 +443,11 @@ export default function Dashboard() {
     if (!response.ok) {
       const result = await response.json().catch(() => null);
       setError(result?.error || "Could not save transaction.");
-      return;
+      return false;
     }
     setModal({ type: "none" });
     reload();
+    return true;
   }
 
   async function deleteTransaction(tx: Transaction) {
@@ -678,7 +679,7 @@ export default function Dashboard() {
               balanceVisible={balanceVisible}
               onToggleBalance={() => setBalanceVisible((value) => !value)}
               onViewAllTransactions={() => setActiveTab("transactions")}
-              onAddTransaction={(categoryId) => setModal({ type: "add-transaction", categoryId })}
+              onSaveTransaction={saveTransaction}
               onRepeat={(tx) => setModal({ type: "add-transaction", repeat: tx })}
             />
           ) : null}
@@ -738,7 +739,7 @@ export default function Dashboard() {
           editTx={modal.type === "edit-transaction" ? modal.tx : null}
           defaultCategoryId={modal.type === "add-transaction" ? modal.categoryId : undefined}
           repeatTx={modal.type === "add-transaction" ? modal.repeat : undefined}
-          onSave={saveTransaction}
+          onSave={async (tx) => { await saveTransaction(tx); }}
           onClose={() => setModal({ type: "none" })}
         />
       ) : null}
@@ -822,7 +823,7 @@ function HomeView({
   balanceVisible,
   onToggleBalance,
   onViewAllTransactions,
-  onAddTransaction,
+  onSaveTransaction,
   onRepeat
 }: {
   data: AppData;
@@ -830,7 +831,7 @@ function HomeView({
   balanceVisible: boolean;
   onToggleBalance: () => void;
   onViewAllTransactions: () => void;
-  onAddTransaction: (categoryId?: string) => void;
+  onSaveTransaction: (tx: TransactionFormValues) => Promise<boolean>;
   onRepeat: (tx: Transaction) => void;
 }) {
   const fallbackSpent = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
@@ -851,24 +852,7 @@ function HomeView({
         </button>
       </section>
 
-      <section className="quick-capture">
-        <div className="section-line">
-          <h1>Add an expense</h1>
-          <button className="link-button" type="button" onClick={onViewAllTransactions}>Past entries</button>
-        </div>
-        <button className="capture-amount" type="button" onClick={() => onAddTransaction()} aria-label="Add an expense">
-          <span>Amount</span>
-          <strong>0.00</strong>
-          <small>SGD</small>
-        </button>
-        <div className="quick-category-list" aria-label="Common expense categories">
-          {data.categories.filter((category) => !category.hidden).slice(0, 6).map((category, index) => {
-            const Icon = iconFor(category.icon);
-            return <button key={category.id} className={index === 0 ? "selected" : ""} type="button" onClick={() => onAddTransaction(category.id)}><Icon size={18} />{category.name}</button>;
-          })}
-        </div>
-        <button className="primary-action" type="button" onClick={() => onAddTransaction()}><Plus size={16} /> Add expense</button>
-      </section>
+      <QuickCapture data={data} summary={summary} onSave={onSaveTransaction} onViewHistory={onViewAllTransactions} />
 
       <section>
         <div className="section-line">
@@ -882,11 +866,90 @@ function HomeView({
         </div>
       </section>
 
-      <button className="primary-action" type="button" onClick={() => onAddTransaction()}>
-        <Plus size={16} /> Add Transaction
-      </button>
     </div>
   );
+}
+
+function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData; summary: Summary | null; onSave: (tx: TransactionFormValues) => Promise<boolean>; onViewHistory: () => void }) {
+  const categories = data.categories.filter((category) => !category.hidden);
+  const [type, setType] = useState<"expense" | "income" | "transfer">("expense");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const [categoryId, setCategoryId] = useState(categories[0]?.id || "");
+  const [subcategoryId, setSubcategoryId] = useState("");
+  const [accountKey, setAccountKey] = useState(data.accounts[0]?.accountKey || "");
+  const [toAccountKey, setToAccountKey] = useState("");
+  const [date, setDate] = useState(localDate);
+  const [error, setError] = useState("");
+  const saveAction = usePendingAction();
+  const category = categories.find((item) => item.id === categoryId);
+  const account = data.accounts.find((item) => item.accountKey === accountKey);
+  const toAccount = data.accounts.find((item) => item.accountKey === toAccountKey);
+  const spent = category ? spentForCategory(data, category.id) : 0;
+  const remaining = category?.budget === undefined ? null : category.budget - spent;
+
+  function selectType(nextType: "expense" | "income" | "transfer") {
+    setType(nextType);
+    setError("");
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const cents = Math.round(Number(amount) * 100);
+    if (!Number.isFinite(cents) || cents <= 0 || !date || !account?.id) {
+      setError("Enter an amount and choose an account.");
+      return;
+    }
+    if (type === "transfer") {
+      if (!toAccount?.id || toAccount.id === account.id) {
+        setError("Choose a different destination account.");
+        return;
+      }
+      void saveAction.run(async () => {
+        if (await onSave({ type, amount: cents, accountId: account.id!, toAccountId: toAccount.id!, description: description.trim() || "Transfer", date })) {
+          setAmount("");
+          setDescription("");
+        }
+      });
+      return;
+    }
+    if (!category) {
+      setError("Choose a category.");
+      return;
+    }
+    void saveAction.run(async () => {
+      if (await onSave({ type, amount: cents, categoryId: category.id, subcategoryId: subcategoryId || undefined, accountId: account.id, description: description.trim() || category.name, date })) {
+        setAmount("");
+        setDescription("");
+      }
+    });
+  }
+
+  return <section className="quick-capture">
+    <div className="section-line"><h1>Add an expense</h1><button className="link-button" type="button" onClick={onViewHistory}>Past entries</button></div>
+    <form className="capture-form" onSubmit={submit}>
+      <label className="capture-label"><span>Amount</span><small>SGD</small><input value={amount} inputMode="decimal" placeholder="0.00" aria-label="Amount" onChange={(event) => setAmount(event.target.value)} /></label>
+      <div className="segmented capture-type" aria-label="Transaction type">
+        {(["expense", "income", "transfer"] as const).map((item) => <button key={item} className={type === item ? "active" : ""} type="button" onClick={() => selectType(item)}>{capitalize(item)}</button>)}
+      </div>
+      {type !== "transfer" ? <>
+        <div className="quick-category-list" aria-label="Choose category">
+          {categories.map((item) => { const Icon = iconFor(item.icon); return <button key={item.id} className={categoryId === item.id ? "selected" : ""} type="button" onClick={() => { setCategoryId(item.id); setSubcategoryId(""); }}><Icon size={18} />{item.name}</button>; })}
+        </div>
+        {category?.subcategories.length ? <div className="quick-subcategory-list" aria-label={`${category.name} subcategories`}>
+          {category.subcategories.map((item) => <button key={item.id} className={subcategoryId === item.id ? "selected" : ""} type="button" onClick={() => setSubcategoryId(item.id)}><strong>{item.name}</strong>{item.budget !== undefined ? <small>{money(Math.max(0, item.budget - spentForSubcategory(data, item.id)))} left</small> : null}</button>)}
+        </div> : null}
+      </> : null}
+      <label className="capture-description"><span>What was this for? <small>Optional</small></span><input value={description} placeholder="Toast Box, groceries..." onChange={(event) => setDescription(event.target.value)} /></label>
+      <div className={type === "transfer" ? "capture-meta transfer-meta" : "capture-meta"}>
+        <label><span>{type === "transfer" ? "From" : "Account"}</span><select value={accountKey} onChange={(event) => setAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select>{account ? <small>{money(Math.abs(account.balanceCents))} {isDebtAccount(account) ? "due" : "available"}</small> : null}</label>
+        {type === "transfer" ? <label><span>To</span><select value={toAccountKey} onChange={(event) => setToAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select></label> : null}
+        <label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+      </div>
+      {error ? <p className="form-error">{error}</p> : null}
+      <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">Save {type} {remaining !== null && type === "expense" ? <small>{category?.name} has {money(Math.max(0, remaining))} left</small> : null}</PendingButton>
+    </form>
+  </section>;
 }
 
 function TransactionListView({
@@ -913,7 +976,7 @@ function TransactionListView({
   onRetry: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<"all" | TransactionType>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | TransactionType | "transfer">("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -923,7 +986,7 @@ function TransactionListView({
     return data.transactions.filter((tx) => {
       const category = data.categories.find((item) => item.id === tx.categoryId);
       const account = data.accounts.find((item) => item.id === tx.accountId);
-      if (typeFilter !== "all" && tx.type !== typeFilter) return false;
+      if (typeFilter === "transfer" ? tx.kind !== "transfer" : typeFilter !== "all" && tx.type !== typeFilter) return false;
       if (categoryFilter !== "all" && tx.categoryId !== categoryFilter) return false;
       if (query && !`${tx.description} ${category?.name || ""} ${account?.name || ""}`.toLowerCase().includes(query)) return false;
       return true;
@@ -960,7 +1023,7 @@ function TransactionListView({
         <div className="filter-panel">
           <FieldLabel label="Type">
             <div className="segmented">
-              {(["all", "income", "expense"] as const).map((item) => (
+              {(["all", "expense", "income", "transfer"] as const).map((item) => (
                 <button key={item} className={typeFilter === item ? "active" : ""} type="button" onClick={() => setTypeFilter(item)}>
                   {capitalize(item)}
                 </button>
@@ -1779,7 +1842,7 @@ function TransactionModal({
   const [accountChoice, setAccountChoice] = useState(initialAccount?.accountKey || "");
   const initialToAccount = data.accounts.find((item) => item.id === initialTransaction?.toAccountId);
   const [toAccountChoice, setToAccountChoice] = useState(initialToAccount?.accountKey || "");
-  const [date, setDate] = useState(editTx?.date ?? new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(editTx?.date ?? localDate());
   const [error, setError] = useState("");
   const saveAction = usePendingAction();
   const selectedCategory = data.categories.find((category) => category.id === categoryId);
@@ -1804,7 +1867,8 @@ function TransactionModal({
       }
       const fromAccountId = selectedAccount.id;
       const toAccountId = toAccount.id;
-      void saveAction.run(() => onSave({
+      void saveAction.run(async () => {
+        await onSave({
         id: editTx?.id,
         sourceId: editTx?.sourceId,
         transferGroupId: editTx?.transferGroupId || undefined,
@@ -1813,15 +1877,17 @@ function TransactionModal({
         accountId: fromAccountId,
         toAccountId,
         description: description.trim(),
-        date
-      }));
+          date
+        });
+      });
       return;
     }
     if (!categoryId) {
       setError("Select a category.");
       return;
     }
-    void saveAction.run(() => onSave({
+    void saveAction.run(async () => {
+      await onSave({
       id: editTx?.id,
       sourceId: editTx?.sourceId,
       type,
@@ -1830,8 +1896,9 @@ function TransactionModal({
       subcategoryId: subcategoryId || undefined,
       accountId: selectedAccount.id,
       description: description.trim(),
-      date,
-    }));
+        date,
+      });
+    });
   }
 
   return (
@@ -2287,6 +2354,11 @@ async function apiRequest(path: string, method: string, body?: unknown) {
 
 function signedCents(type: TransactionType, cents: number) {
   return type === "income" ? Math.abs(cents) : -Math.abs(cents);
+}
+
+function localDate() {
+  const date = new Date();
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 }
 
 export function money(cents: number) {
