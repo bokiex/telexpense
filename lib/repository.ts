@@ -988,8 +988,9 @@ export async function getSummary(telegramUserId: number, month: string) {
   const activity = budgetActivityTotals(transactions, storedCategories);
 
   for (const tx of transactions) {
+    if (tx.transfer_group_id) continue;
     const savingsAllocation = tx.kind === "investment";
-    const ordinaryExpense = tx.kind === "expense" && tx.amount_cents < 0 && !tx.transfer_group_id;
+    const ordinaryExpense = tx.kind === "expense" && tx.amount_cents < 0;
     if (!savingsAllocation && !ordinaryExpense) continue;
     if (!tx.category) continue;
     const spent = Math.abs(tx.amount_cents);
@@ -1090,13 +1091,13 @@ export async function getBudgetStatus(telegramUserId: number, month: string, cat
   const end = nextMonthStart(month);
   const [budgetRes, transactionsRes] = await Promise.all([
     selectParentBudgetForStatus(supabase, telegramUserId, month, normalized),
-    supabase.from("transactions").select("amount_cents").eq("telegram_user_id", telegramUserId).eq("category", normalized)
+    supabase.from("transactions").select("amount_cents, transfer_group_id").eq("telegram_user_id", telegramUserId).eq("category", normalized)
       .eq("kind", "expense").lt("amount_cents", 0).gte("occurred_on", start).lt("occurred_on", end)
   ]);
   if (budgetRes.error) throw budgetRes.error;
   if (transactionsRes.error) throw transactionsRes.error;
   if (!budgetRes.data) return null;
-  const spent = (transactionsRes.data || []).reduce((sum, row) => sum + Math.abs(row.amount_cents), 0);
+  const spent = budgetStatusSpentCents(transactionsRes.data || []);
   const budgetCents = budgetRes.data.amount_cents;
   return {
     category: normalized,
@@ -1493,13 +1494,14 @@ export function budgetActivityTotals(
   let savingsAllocatedCents = 0;
 
   for (const tx of transactions) {
+    if (tx.transfer_group_id) continue;
     const amount = Math.abs(tx.amount_cents);
     if (tx.kind === "investment") {
       savingsAllocatedCents += amount;
       progressByGroup.Savings += amount;
       continue;
     }
-    if (tx.kind !== "expense" || tx.amount_cents >= 0 || tx.transfer_group_id) continue;
+    if (tx.kind !== "expense" || tx.amount_cents >= 0) continue;
 
     const group = tx.category ? groupByCategory.get(normalizeIdentity(tx.category)) : undefined;
     if (group === "Savings") {
@@ -1517,6 +1519,15 @@ export function budgetActivityTotals(
     progressCents: ordinarySpentCents + savingsAllocatedCents,
     progressByGroup
   };
+}
+
+export function budgetStatusSpentCents(
+  transactions: Pick<BudgetActivityTransaction, "amount_cents" | "transfer_group_id">[]
+) {
+  return transactions.reduce(
+    (sum, transaction) => transaction.transfer_group_id ? sum : sum + Math.abs(transaction.amount_cents),
+    0
+  );
 }
 
 function buildAccounts(

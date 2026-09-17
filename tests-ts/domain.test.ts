@@ -6,7 +6,7 @@ import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
 import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
-import { budgetActivityTotals, effectiveBudgetCents, subcategoryDisplayName } from "../lib/repository";
+import { budgetActivityTotals, budgetStatusSpentCents, effectiveBudgetCents, subcategoryDisplayName } from "../lib/repository";
 import { themeBudgetCategory } from "../lib/budgetThemes";
 import {
   genericTransactionKindError,
@@ -55,7 +55,7 @@ test("effective budget total ignores synthetic theme targets", () => {
   ]), 125_00);
 });
 
-test("budget activity separates ordinary spending from savings allocation", () => {
+test("budget activity excludes grouped legs and separates ordinary spending from savings allocation", () => {
   const totals = budgetActivityTotals([
     { kind: "expense", category: "food", amount_cents: -40_00, transfer_group_id: null },
     { kind: "investment", category: "investments", amount_cents: -25_00, transfer_group_id: null },
@@ -67,9 +67,17 @@ test("budget activity separates ordinary spending from savings allocation", () =
   ]);
 
   assert.equal(totals.ordinarySpentCents, 40_00);
-  assert.equal(totals.savingsAllocatedCents, 125_00);
-  assert.equal(totals.progressCents, 165_00);
-  assert.deepEqual(totals.progressByGroup, { Needs: 40_00, Wants: 0, Savings: 125_00 });
+  assert.equal(totals.savingsAllocatedCents, 25_00);
+  assert.equal(totals.progressCents, 65_00);
+  assert.deepEqual(totals.progressByGroup, { Needs: 40_00, Wants: 0, Savings: 25_00 });
+});
+
+test("budget warning spending excludes grouped transaction legs", () => {
+  assert.equal(budgetStatusSpentCents([
+    { amount_cents: -40_00, transfer_group_id: null },
+    { amount_cents: -100_00, transfer_group_id: "transfer" },
+    { amount_cents: -25_00, transfer_group_id: "transfer" }
+  ]), 40_00);
 });
 
 test("savings category expenses count as allocated progress, not ordinary spending", () => {
