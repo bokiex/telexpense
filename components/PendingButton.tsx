@@ -3,6 +3,7 @@
 import React, { useRef, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { Wallet } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 type PendingButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> & {
   children?: ReactNode;
@@ -33,11 +34,11 @@ export function PendingButton({
   }
 
   return (
-    <button
-      {...props}
-      disabled={disabled || isPending}
-      aria-busy={isPending}
-      onClick={onAction ? handleClick : undefined}
+      <Button
+        {...props}
+        disabled={disabled || isPending}
+        aria-busy={isPending}
+        onClick={onAction ? handleClick : undefined}
     >
       <span className={isPending ? "pending-button-content pending" : "pending-button-content"}>
         <span className="pending-button-idle">{children}</span>
@@ -45,7 +46,7 @@ export function PendingButton({
           {isPending ? <><Wallet className="brand-loader" size={16} aria-hidden="true" /> {pendingLabel}</> : null}
         </span>
       </span>
-    </button>
+      </Button>
   );
 }
 

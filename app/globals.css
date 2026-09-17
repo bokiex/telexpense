@@ -8,6 +8,8 @@
   --primary: #167a50;
   --primary-foreground: #ffffff;
   --destructive: #b6444c;
+  --ring: #176ec9;
+  --radius: 12px;
 }
 
 * {
@@ -43,8 +45,42 @@ button:disabled {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 3px solid #176ec9;
+  outline: 3px solid var(--ring);
   outline-offset: 2px;
+}
+
+.ui-button {
+  border: 0;
+  font: inherit;
+}
+
+.ui-button:disabled {
+  opacity: 0.65;
+}
+
+.ui-button-default {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.ui-button-secondary {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+.ui-button-ghost,
+.ui-button-link {
+  background: transparent;
+}
+
+.ui-button-link {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.ui-button-destructive {
+  background: var(--destructive);
+  color: var(--primary-foreground);
 }
 
 .pending-button-content {
@@ -1154,9 +1190,14 @@ select:focus-visible {
   justify-content: center;
   background: rgba(0, 0, 0, 0.62);
   backdrop-filter: blur(4px);
+  animation: sheet-fade-in 0.16s ease-out;
 }
 
 .bottom-sheet {
+  position: fixed;
+  right: 50%;
+  bottom: 0;
+  z-index: 1;
   width: min(100%, 390px);
   max-height: 88vh;
   overflow-y: auto;
@@ -1165,7 +1206,17 @@ select:focus-visible {
   border-radius: 24px 24px 0 0;
   background: var(--card);
   padding: 12px 16px calc(18px + env(safe-area-inset-bottom));
+  transform: translateX(50%);
+  animation: sheet-slide-in 0.2s ease-out;
 }
+
+.sheet-backdrop[data-state="closed"] { animation: sheet-fade-out 0.14s ease-in; }
+.bottom-sheet[data-state="closed"] { animation: sheet-slide-out 0.14s ease-in; }
+
+@keyframes sheet-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheet-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes sheet-slide-in { from { opacity: 0; transform: translate(50%, 16px); } to { opacity: 1; transform: translate(50%, 0); } }
+@keyframes sheet-slide-out { from { opacity: 1; transform: translate(50%, 0); } to { opacity: 0; transform: translate(50%, 16px); } }
 
 .sheet-handle {
   width: 40px;
@@ -1227,4 +1278,9 @@ select:focus-visible {
     border-radius: 28px;
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-backdrop,
+  .bottom-sheet { animation: none; }
 }

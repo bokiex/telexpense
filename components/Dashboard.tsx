@@ -41,6 +41,8 @@ import {
 import { displayTransferGroups, transferAccounts } from "@/lib/transfer";
 import { THEME_BUDGET_CATEGORY_PREFIX, isThemeBudgetCategory, themeBudgetCategory } from "@/lib/budgetThemes";
 import { PendingButton, usePendingAction } from "@/components/PendingButton";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 type BudgetGroup = "Needs" | "Wants" | "Savings";
 type TransactionType = "income" | "expense";
@@ -668,7 +670,7 @@ export default function Dashboard() {
           <input className="mini-month" type="month" value={month} aria-label="Month" onChange={(event) => setMonth(event.target.value || month)} />
         </header>
 
-        {error ? <div className="mini-error">{friendlyError(error)} <button type="button" onClick={reload}>Retry</button></div> : null}
+        {error ? <div className="mini-error">{friendlyError(error)} <Button variant="link" onClick={reload}>Retry</Button></div> : null}
 
         <div className="mini-content">
           {loading ? <DashboardSkeleton /> : null}
@@ -725,10 +727,10 @@ export default function Dashboard() {
 
         <nav className="bottom-tabs" aria-label="App sections">
           {tabs.map((tab) => (
-            <button key={tab.id} className={activeTab === tab.id ? "active" : ""} type="button" onClick={() => setActiveTab(tab.id)}>
+            <Button key={tab.id} className={activeTab === tab.id ? "active" : ""} variant="ghost" onClick={() => setActiveTab(tab.id)}>
               {tab.icon}
               <span>{tab.label}</span>
-            </button>
+            </Button>
           ))}
         </nav>
       </section>
@@ -1075,9 +1077,9 @@ function TransactionListView({
         </PendingButton>
       ) : null}
 
-      <button className="primary-action" type="button" onClick={onAdd}>
-        <Plus size={16} /> Add Transaction
-      </button>
+        <Button className="primary-action" onClick={onAdd}>
+          <Plus size={16} /> Add Transaction
+        </Button>
     </div>
   );
 }
@@ -1146,9 +1148,9 @@ function AccountsView({
         )) : <EmptyState label="No accounts yet" />}
       </section>
 
-      <button className="primary-action" type="button" onClick={onAddAccount}>
+      <Button className="primary-action" onClick={onAddAccount}>
         <Plus size={16} /> Add Account
-      </button>
+      </Button>
 
       <section>
         <div className="section-line">
@@ -2025,55 +2027,23 @@ function BudgetModal({
 }
 
 export function BottomSheet({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
-  const dialogRef = useRef<HTMLElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
 
-  useEffect(() => {
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeButtonRef.current?.focus();
-    return () => previouslyFocused?.focus();
-  }, []);
-
-  function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-
-    const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    ) || []).filter((element) => !element.hasAttribute("hidden"));
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (!first || !last) {
-      event.preventDefault();
-      return;
-    }
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
-
   return (
-    <div className="sheet-backdrop">
-      <section ref={dialogRef} className="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={onKeyDown}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent labelledBy={titleId}>
         <div className="sheet-handle" aria-hidden="true" />
         <header>
-          <h2 id={titleId}>{title}</h2>
-          <button ref={closeButtonRef} className="ghost-button" type="button" onClick={onClose} aria-label="Close">
+          <DialogTitle id={titleId}>{title}</DialogTitle>
+          <DialogClose asChild>
+            <Button className="ghost-button" variant="ghost" aria-label="Close">
             <X size={18} />
-          </button>
+            </Button>
+          </DialogClose>
         </header>
         {children}
-      </section>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
