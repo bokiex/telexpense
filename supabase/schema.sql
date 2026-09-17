@@ -775,7 +775,7 @@ as $$
            r.category,
            category_match.id,
            case when leg.destination then r.to_account_id else r.from_account_id end,
-           r.transfer_group_id,
+           case when r.rule_type = 'subscription' then null else r.transfer_group_id end,
            r.id,
            r.name,
            case when leg.destination then abs(r.amount_cents) else -abs(r.amount_cents) end,
