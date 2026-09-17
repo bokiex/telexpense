@@ -546,6 +546,17 @@ export async function setBudget(telegramUserId: number, category: string, month:
     if (error) throw error;
     return;
   }
+  const { error } = await supabase.rpc("set_budget", {
+    p_telegram_user_id: telegramUserId,
+    p_category: normalizedCategory,
+    p_month: month,
+    p_amount_cents: amountCents,
+    p_currency: currency,
+    p_subcategory_id: normalizedSubcategoryId
+  });
+  if (!error) return;
+  if (!isMissingSetBudgetFunction(error)) throw error;
+
   const existingQuery = supabase
     .from("budgets")
     .select("id")
@@ -558,25 +569,25 @@ export async function setBudget(telegramUserId: number, category: string, month:
   if (existing.error && !isMissingSchemaError(existing.error)) throw existing.error;
 
   if (existing.data) {
-    const { error } = await supabase
+    const { error: updateError } = await supabase
       .from("budgets")
       .update({ amount_cents: amountCents, currency })
       .eq("telegram_user_id", telegramUserId)
       .eq("id", existing.data.id);
-    if (error) throw error;
+    if (updateError) throw updateError;
     return;
   }
 
   const insert: Record<string, unknown> = {
-      telegram_user_id: telegramUserId,
-      category: normalizedCategory,
-      month,
-      amount_cents: amountCents,
-      currency
-    };
+    telegram_user_id: telegramUserId,
+    category: normalizedCategory,
+    month,
+    amount_cents: amountCents,
+    currency
+  };
   if (normalizedSubcategoryId !== null) insert.subcategory_id = normalizedSubcategoryId;
-  const { error } = await supabase.from("budgets").insert(insert);
-  if (error) throw error;
+  const { error: insertError } = await supabase.from("budgets").insert(insert);
+  if (insertError) throw insertError;
 }
 
 export async function deleteBudget(telegramUserId: number, category: string, month: string, subcategoryId?: number | null) {
@@ -1585,6 +1596,11 @@ function buildAccounts(
 function isMissingSchemaError(error: unknown) {
   const candidate = error as { code?: string; message?: string };
   return candidate.code === "42P01" || candidate.code === "42703" || /does not exist|Could not find/i.test(candidate.message || "");
+}
+
+function isMissingSetBudgetFunction(error: unknown) {
+  const candidate = error as { code?: string; message?: string };
+  return (candidate.code === "42883" || candidate.code === "PGRST202") && /set_budget/i.test(candidate.message || "");
 }
 
 function isLegacyAccountColumnRequired(error: unknown) {
