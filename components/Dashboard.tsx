@@ -42,7 +42,13 @@ import { displayTransferGroups, transferAccounts } from "@/lib/transfer";
 import { THEME_BUDGET_CATEGORY_PREFIX, isThemeBudgetCategory, themeBudgetCategory } from "@/lib/budgetThemes";
 import { PendingButton, usePendingAction } from "@/components/PendingButton";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/alert-dialog";
 import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Progress as UiProgress } from "@/components/ui/progress";
+import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 type BudgetGroup = "Needs" | "Wants" | "Savings";
 type TransactionType = "income" | "expense";
@@ -849,9 +855,9 @@ function HomeView({
         <p className="eyebrow">This month's spending</p>
         <strong>{balanceVisible ? money(totalExpense) : "••••••"}</strong>
         <span>{totalBudget ? `${money(Math.abs(budgetLeft))} ${budgetLeft < 0 ? "over your set budgets" : "left across your set budgets"}` : "Set a budget to track your spending"}</span>
-        <button className="hero-visibility" type="button" onClick={onToggleBalance} aria-label="Toggle spending visibility">
+        <Button className="hero-visibility" variant="ghost" onClick={onToggleBalance} aria-label="Toggle spending visibility">
           {balanceVisible ? <Eye size={16} /> : <EyeOff size={16} />}
-        </button>
+        </Button>
       </section>
 
       <QuickCapture data={data} summary={summary} onSave={onSaveTransaction} onViewHistory={onViewAllTransactions} />
@@ -927,22 +933,22 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
     });
   }
 
-  return <section className="quick-capture">
-    <div className="section-line"><h1>Add an expense</h1><button className="link-button" type="button" onClick={onViewHistory}>Past entries</button></div>
+  return <Card className="quick-capture">
+    <div className="section-line"><h1>Add an expense</h1><Button className="link-button" variant="ghost" onClick={onViewHistory}>Past entries</Button></div>
     <form className="capture-form" onSubmit={submit}>
-      <label className="capture-label"><span>Amount</span><small>SGD</small><input value={amount} inputMode="decimal" placeholder="0.00" aria-label="Amount" onChange={(event) => setAmount(event.target.value)} /></label>
-      <div className="segmented capture-type" aria-label="Transaction type">
-        {(["expense", "income", "transfer"] as const).map((item) => <button key={item} className={type === item ? "active" : ""} type="button" onClick={() => selectType(item)}>{capitalize(item)}</button>)}
-      </div>
+      <label className="capture-label"><span>Amount</span><small>SGD</small><Input value={amount} inputMode="decimal" placeholder="0.00" aria-label="Amount" onChange={(event) => setAmount(event.target.value)} /></label>
+      <ToggleGroup className="capture-type" type="single" value={type} onValueChange={(value) => { if (value) selectType(value as typeof type); }} aria-label="Transaction type">
+        {(["expense", "income", "transfer"] as const).map((item) => <ToggleGroupItem key={item} value={item} className={item === "expense" ? "danger" : undefined}>{capitalize(item)}</ToggleGroupItem>)}
+      </ToggleGroup>
       {type !== "transfer" ? <>
         <div className="quick-category-list" aria-label="Choose category">
-          {categories.map((item) => { const Icon = iconFor(item.icon); return <button key={item.id} className={categoryId === item.id ? "selected" : ""} type="button" onClick={() => { setCategoryId(item.id); setSubcategoryId(""); }}><Icon size={18} />{item.name}</button>; })}
+          {categories.map((item) => { const Icon = iconFor(item.icon); return <Button key={item.id} className={categoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => { setCategoryId(item.id); setSubcategoryId(""); }} aria-pressed={categoryId === item.id}><Icon size={18} />{item.name}</Button>; })}
         </div>
         {category?.subcategories.length ? <div className="quick-subcategory-list" aria-label={`${category.name} subcategories`}>
-          {category.subcategories.map((item) => <button key={item.id} className={subcategoryId === item.id ? "selected" : ""} type="button" onClick={() => setSubcategoryId(item.id)}><strong>{item.name}</strong>{item.budget !== undefined ? <small>{money(Math.max(0, item.budget - spentForSubcategory(data, item.id)))} left</small> : null}</button>)}
+          {category.subcategories.map((item) => <Button key={item.id} className={subcategoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => setSubcategoryId(item.id)} aria-pressed={subcategoryId === item.id}><strong>{item.name}</strong>{item.budget !== undefined ? <small>{money(Math.max(0, item.budget - spentForSubcategory(data, item.id)))} left</small> : null}</Button>)}
         </div> : null}
       </> : null}
-      <label className="capture-description"><span>What was this for? <small>Optional</small></span><input value={description} placeholder="Toast Box, groceries..." onChange={(event) => setDescription(event.target.value)} /></label>
+      <label className="capture-description"><span>What was this for? <small>Optional</small></span><Input value={description} placeholder="Toast Box, groceries..." onChange={(event) => setDescription(event.target.value)} /></label>
       <div className={type === "transfer" ? "capture-meta transfer-meta" : "capture-meta"}>
         <label><span>{type === "transfer" ? "From" : "Account"}</span><select value={accountKey} onChange={(event) => setAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select>{account ? <small>{money(Math.abs(account.balanceCents))} {isDebtAccount(account) ? "due" : "available"}</small> : null}</label>
         {type === "transfer" ? <label><span>To</span><select value={toAccountKey} onChange={(event) => setToAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select></label> : null}
@@ -951,7 +957,7 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
       {error ? <p className="form-error">{error}</p> : null}
       <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">Save {type} {remaining !== null && type === "expense" ? <small>{category?.name} has {money(Math.max(0, remaining))} left</small> : null}</PendingButton>
     </form>
-  </section>;
+  </Card>;
 }
 
 function TransactionListView({
@@ -982,6 +988,8 @@ function TransactionListView({
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const transactionToDelete = data.transactions.find((transaction) => transaction.id === deleteConfirm) || null;
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1008,29 +1016,27 @@ function TransactionListView({
       <div className="search-row">
         <label className="search-box">
           <Search size={15} />
-          <input value={search} placeholder="Search transactions..." onChange={(event) => setSearch(event.target.value)} />
+          <Input value={search} placeholder="Search transactions" aria-label="Search transactions" onChange={(event) => setSearch(event.target.value)} />
           {search ? (
-            <button type="button" onClick={() => setSearch("")} aria-label="Clear search">
+            <Button variant="ghost" onClick={() => setSearch("")} aria-label="Clear search">
               <X size={13} />
-            </button>
+            </Button>
           ) : null}
         </label>
-        <button className={showFilters ? "filter-button active" : "filter-button"} type="button" onClick={() => setShowFilters((value) => !value)} aria-label="Toggle filters">
+        <Button className={showFilters ? "filter-button active" : "filter-button"} variant="ghost" onClick={() => setShowFilters((value) => !value)} aria-label="Toggle filters" aria-expanded={showFilters} aria-controls="transaction-filters">
           <Filter size={16} />
           {activeFilters ? <span>{activeFilters}</span> : null}
-        </button>
+        </Button>
       </div>
 
       {showFilters ? (
-        <div className="filter-panel">
+        <div id="transaction-filters" className="filter-panel">
           <FieldLabel label="Type">
-            <div className="segmented">
+            <ToggleGroup type="single" value={typeFilter} onValueChange={(value) => { if (value) setTypeFilter(value as typeof typeFilter); }} aria-label="Transaction type">
               {(["all", "expense", "income", "transfer"] as const).map((item) => (
-                <button key={item} className={typeFilter === item ? "active" : ""} type="button" onClick={() => setTypeFilter(item)}>
-                  {capitalize(item)}
-                </button>
+                <ToggleGroupItem key={item} value={item} className={item === "expense" ? "danger" : undefined}>{capitalize(item)}</ToggleGroupItem>
               ))}
-            </div>
+            </ToggleGroup>
           </FieldLabel>
           <FieldLabel label="Category">
             <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
@@ -1053,16 +1059,7 @@ function TransactionListView({
               <p className="eyebrow">{formatDate(date)}</p>
               {txs.map((tx) => (
                 <div key={tx.id} className="transaction-shell">
-                  <TransactionCard tx={tx} data={data} actions={<RowActions tx={tx} confirming={deleteConfirm === tx.id} onEdit={onEdit} onDelete={onDelete} onToggleDelete={setDeleteConfirm} />} />
-                  {deleteConfirm === tx.id ? (
-                    <div className="confirm-row">
-                      <button type="button" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-                      <PendingButton type="button" pendingLabel="Deleting…" onAction={async () => {
-                        await onDelete(tx);
-                        setDeleteConfirm(null);
-                      }}>Delete</PendingButton>
-                    </div>
-                  ) : null}
+                  <TransactionCard tx={tx} data={data} actions={<RowActions tx={tx} onEdit={onEdit} onToggleDelete={setDeleteConfirm} />} />
                 </div>
               ))}
             </section>
@@ -1070,12 +1067,27 @@ function TransactionListView({
         ) : <EmptyState label={`No transactions found for ${month}`} />}
       </div>
 
-      {error ? <div className="mini-error">{error} <button type="button" onClick={onRetry}>Retry</button></div> : null}
+      {error ? <div className="mini-error">{error} <Button variant="link" onClick={onRetry}>Retry</Button></div> : null}
       {hasMore || loading ? (
         <PendingButton className="link-button" type="button" pending={loading} pendingLabel="Loading…" onAction={onLoadMore}>
           Load more
         </PendingButton>
       ) : null}
+
+      <ConfirmDialog
+        open={Boolean(transactionToDelete)}
+        title="Delete transaction?"
+        description={transactionToDelete ? `Delete ${transactionToDelete.description} for ${money(transactionToDelete.amount)}? This cannot be undone.` : ""}
+        confirmLabel="Delete"
+        pendingLabel="Deleting..."
+        pending={deleting}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteConfirm(null); }}
+        onConfirm={() => {
+          if (!transactionToDelete || deleting) return;
+          setDeleting(true);
+          void onDelete(transactionToDelete).finally(() => { setDeleting(false); setDeleteConfirm(null); });
+        }}
+      />
 
         <Button className="primary-action" onClick={onAdd}>
           <Plus size={16} /> Add Transaction
@@ -1135,13 +1147,13 @@ function AccountsView({
             </div>
             <div className="card-actions">
               {account.accountType === "investment" ? (
-                <button type="button" onClick={() => onSetSnapshot(account)} aria-label={`Set ${account.name} portfolio value`}>
+                <Button variant="icon" onClick={() => onSetSnapshot(account)} aria-label={`Set ${account.name} portfolio value`}>
                   <TrendingUp size={12} />
-                </button>
+                </Button>
               ) : null}
-              <button type="button" onClick={() => onEditAccount(account)} aria-label={`Edit ${account.name}`}>
+              <Button variant="icon" onClick={() => onEditAccount(account)} aria-label={`Edit ${account.name}`}>
                 <Pencil size={12} />
-              </button>
+              </Button>
             </div>
             {account.accountType === "investment" ? <InvestmentAccountDetail account={account} snapshot={snapshots.find((item) => item.accountId === account.id)} /> : null}
           </article>
@@ -1155,9 +1167,9 @@ function AccountsView({
       <section>
         <div className="section-line">
           <p className="eyebrow">Monthly Rules</p>
-          <button className="link-button" type="button" onClick={onAddRecurringRule}>
+          <Button className="link-button" variant="ghost" onClick={onAddRecurringRule}>
             <Plus size={13} /> Add
-          </button>
+          </Button>
         </div>
         <div className="row-stack">
           {recurringRules.length ? recurringRules.map((rule) => (
@@ -1174,9 +1186,9 @@ function AccountsView({
                 <span>{rule.active ? "Active" : "Inactive"}</span>
               </div>
               <div className="card-actions">
-                <button type="button" onClick={() => onEditRecurringRule(rule)} aria-label={`Edit ${rule.name}`}>
+                <Button variant="icon" onClick={() => onEditRecurringRule(rule)} aria-label={`Edit ${rule.name}`}>
                   <Pencil size={12} />
-                </button>
+                </Button>
                 <PendingButton type="button" pendingLabel="Removing…" onAction={() => onDeleteRecurringRule(rule)} aria-label={`Remove ${rule.name}`}>
                   <Trash2 size={12} />
                 </PendingButton>
@@ -1232,7 +1244,9 @@ function BudgetView({
 }) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const activeCategories = data.categories.filter((category) => !category.hidden);
+  const categoryToDelete = activeCategories.find((category) => category.id === deleteConfirm) || null;
   const totalBudget = effectiveBudgetTotalWithThemes(activeCategories, summary);
   const fallbackSpent = data.transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
   const ordinarySpent = summary?.health.ordinarySpentCents ?? summary?.health.spentCents ?? fallbackSpent;
@@ -1303,12 +1317,12 @@ function BudgetView({
               </div>
               <div>
                 <strong>{group}</strong>
-                <Progress value={groupPct} color={groupPct > 90 ? "#f87171" : GROUP_COLORS[group]} />
+                <Progress label={`${group} budget ${groupPct}% used`} value={groupPct} color={groupPct > 90 ? "#f87171" : GROUP_COLORS[group]} />
               </div>
               <span>{groupBudget !== undefined ? `${money(groupActivity)} / ${money(groupBudget)}` : money(groupActivity)}</span>
-              <button className="tiny-icon" type="button" onClick={() => onSetBudget(themeTarget(group))} aria-label={`Set ${group} budget`}>
-                <Pencil size={11} />
-              </button>
+                      <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(themeTarget(group))} aria-label={`Set ${group} budget`}>
+                        <Pencil size={11} />
+                      </Button>
             </div>
             <div className="nested-list">
               {categories.length ? categories.map((category) => {
@@ -1336,12 +1350,12 @@ function BudgetView({
                       <div>
                         <strong>{category.name}</strong>
                         <small>{category.subcategories.length ? `${category.subcategories.length} subcategories` : "Category budget"}</small>
-                        <Progress value={pct} color={pct > 90 ? "#f87171" : category.color} thin />
+                        <Progress label={`${category.name} budget ${pct}% used`} value={pct} color={pct > 90 ? "#f87171" : category.color} thin />
                       </div>
                       <span>{budgetRowAmount(spent, category.budget)}</span>
-                      <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
+                      <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
                         <Pencil size={11} />
-                      </button>
+                      </Button>
                     </div>
                     <div className="budget-management-row" aria-label={`${category.name} category management`}>
                       <button type="button" onClick={() => onEditCategory(category.id)} aria-label={`Edit ${category.name}`}>
@@ -1357,15 +1371,6 @@ function BudgetView({
                         Delete
                       </button>
                     </div>
-                    {deleteConfirm === category.id ? (
-                      <div className="confirm-row category-confirm">
-                        <button type="button" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-                        <PendingButton type="button" pendingLabel="Deleting..." onAction={async () => {
-                          await onDeleteCategory(category.id);
-                          setDeleteConfirm(null);
-                        }}>Delete</PendingButton>
-                      </div>
-                    ) : null}
                     {category.subcategories.length && isExpanded ? (
                       <div className="subcategory-budget-list" id={childListId}>
                         {category.subcategories.map((subcategory) => {
@@ -1376,12 +1381,12 @@ function BudgetView({
                               <span className="subcategory-marker" aria-hidden="true" />
                               <div>
                                 <strong>{subcategory.name}</strong>
-                                <Progress value={subPct} color={subPct > 90 ? "#f87171" : category.color} thin />
+                                <Progress label={`${subcategory.name} budget ${subPct}% used`} value={subPct} color={subPct > 90 ? "#f87171" : category.color} thin />
                               </div>
                               <span>{budgetRowAmount(subSpent, subcategory.budget)}</span>
-                              <button className="tiny-icon" type="button" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
+                              <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
                                 <Pencil size={11} />
-                              </button>
+                              </Button>
                             </div>
                           );
                         })}
@@ -1398,6 +1403,21 @@ function BudgetView({
 
       {!hasBudgetTargets ? <EmptyState label="No budgets set for this month yet." /> : null}
 
+      <ConfirmDialog
+        open={Boolean(categoryToDelete)}
+        title="Delete category?"
+        description={categoryToDelete ? `Delete ${categoryToDelete.name} and its subcategories? Transactions remain, but this category can no longer be used.` : ""}
+        confirmLabel="Delete category"
+        pendingLabel="Deleting..."
+        pending={deleting}
+        onOpenChange={(open) => { if (!open && !deleting) setDeleteConfirm(null); }}
+        onConfirm={() => {
+          if (!categoryToDelete || deleting) return;
+          setDeleting(true);
+          void onDeleteCategory(categoryToDelete.id).finally(() => { setDeleting(false); setDeleteConfirm(null); });
+        }}
+      />
+
       {summary?.loanProgress.length ? (
         <section className="mini-card grouped-card">
           <div className="section-line loan-head">
@@ -1409,7 +1429,7 @@ function BudgetView({
               <div key={loan.accountId} className="loan-row">
                 <div>
                   <strong>{loan.name}</strong>
-                  <Progress value={loan.payoffProgress} color={loan.payoffProgress >= 100 ? "#4ade80" : "#60a5fa"} thin />
+                  <Progress label={`${loan.name} ${loan.payoffProgress}% paid`} value={loan.payoffProgress} color={loan.payoffProgress >= 100 ? "#4ade80" : "#60a5fa"} thin />
                 </div>
                 <div className="loan-values">
                   <span>{loan.payoffProgress}% paid</span>
@@ -1460,19 +1480,15 @@ function CategoryModal({
     <BottomSheet title={category ? "Edit Category" : "Add Category"} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
         <FieldLabel label="Name">
-          <input value={name} placeholder="Category name" onChange={(event) => setName(event.target.value)} />
+          <Input value={name} placeholder="Category name" onChange={(event) => setName(event.target.value)} />
         </FieldLabel>
         <FieldLabel label="Budget Group">
-          <div className="segmented">
-            {GROUPS.map((item) => (
-              <button key={item} className={group === item ? "active" : ""} type="button" onClick={() => setGroup(item)}>
-                {item}
-              </button>
-            ))}
-          </div>
+          <ToggleGroup type="single" value={group} onValueChange={(value) => { if (value) setGroup(value as BudgetGroup); }} aria-label="Budget group">
+            {GROUPS.map((item) => <ToggleGroupItem key={item} value={item}>{item}</ToggleGroupItem>)}
+          </ToggleGroup>
         </FieldLabel>
         <FieldLabel label="Monthly Budget">
-          <input value={budget} inputMode="decimal" placeholder="0.00" onChange={(event) => setBudget(event.target.value)} />
+          <Input value={budget} inputMode="decimal" placeholder="0.00" onChange={(event) => setBudget(event.target.value)} />
         </FieldLabel>
         <FieldLabel label="Color">
           <div className="choice-grid color-grid">
@@ -1493,9 +1509,9 @@ function CategoryModal({
             {CATEGORY_ICONS.map((item) => {
               const Icon = iconFor(item);
               return (
-                <button key={item} className={icon === item ? "selected" : ""} type="button" title={iconLabel(item)} onClick={() => setIcon(item)}>
-                  <Icon size={18} />
-                </button>
+              <Button key={item} className={icon === item ? "selected" : ""} variant="icon" aria-label={`Use ${iconLabel(item)} icon`} aria-pressed={icon === item} onClick={() => setIcon(item)}>
+                <Icon size={18} />
+              </Button>
               );
             })}
           </div>
@@ -1539,9 +1555,7 @@ function SubcategoryModal({
           <small>Adding under</small>
           <strong>{category?.name}</strong>
         </div>
-        <FieldLabel label="Name">
-          <input value={name} placeholder="Sub-category name" autoFocus onChange={(event) => setName(event.target.value)} />
-        </FieldLabel>
+        <FieldLabel label="Name"><Input value={name} placeholder="Sub-category name" autoFocus onChange={(event) => setName(event.target.value)} /></FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
         <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Adding…">
           Add Sub-category
@@ -1603,23 +1617,19 @@ function AccountModal({
     <BottomSheet title={account ? "Edit Account" : "Add Account"} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
         <FieldLabel label="Name">
-          <input value={name} placeholder="Checking, Savings, Credit Card" onChange={(event) => setName(event.target.value)} />
+          <Input value={name} placeholder="Checking, Savings, Credit Card" onChange={(event) => setName(event.target.value)} />
         </FieldLabel>
         <FieldLabel label="Institution">
-          <input value={institution} placeholder="Bank name, optional" onChange={(event) => setInstitution(event.target.value)} />
+          <Input value={institution} placeholder="Bank name, optional" onChange={(event) => setInstitution(event.target.value)} />
         </FieldLabel>
         <FieldLabel label="Type">
-          <div className="segmented wrap">
-            {ACCOUNT_TYPES.map((item) => (
-              <button key={item} className={accountType === item ? "active" : ""} type="button" onClick={() => setAccountType(item)}>
-                {accountTypeLabel(item)}
-              </button>
-            ))}
-          </div>
+          <ToggleGroup className="wrap" type="single" value={accountType} onValueChange={(value) => { if (value) setAccountType(value as AccountType); }} aria-label="Account type">
+            {ACCOUNT_TYPES.map((item) => <ToggleGroupItem key={item} value={item}>{accountTypeLabel(item)}</ToggleGroupItem>)}
+          </ToggleGroup>
         </FieldLabel>
         <div className="form-grid-2">
           <FieldLabel label={accountType === "loan" || accountType === "card" ? "Opening Debt" : "Opening Balance"}>
-            <input value={openingBalance} inputMode="decimal" onChange={(event) => setOpeningBalance(event.target.value)} />
+            <Input value={openingBalance} inputMode="decimal" onChange={(event) => setOpeningBalance(event.target.value)} />
           </FieldLabel>
         </div>
         <FieldLabel label="Color">
@@ -1641,9 +1651,9 @@ function AccountModal({
             {CATEGORY_ICONS.map((item) => {
               const Icon = iconFor(item);
               return (
-                <button key={item} className={icon === item ? "selected" : ""} type="button" title={iconLabel(item)} onClick={() => setIcon(item)}>
-                  <Icon size={18} />
-                </button>
+              <Button key={item} className={icon === item ? "selected" : ""} variant="icon" aria-label={`Use ${iconLabel(item)} icon`} aria-pressed={icon === item} onClick={() => setIcon(item)}>
+                <Icon size={18} />
+              </Button>
               );
             })}
           </div>
@@ -1692,7 +1702,7 @@ function PortfolioSnapshotModal({
           <strong>{account.name}</strong>
         </div>
         <FieldLabel label="Portfolio Value">
-          <input value={value} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setValue(event.target.value)} />
+          <Input value={value} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setValue(event.target.value)} />
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
         <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
@@ -1766,24 +1776,20 @@ function RecurringRuleModal({
     <BottomSheet title={rule ? "Edit Monthly Rule" : "Add Monthly Rule"} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
         <FieldLabel label="Type">
-          <div className="segmented wrap">
-            {RECURRING_TYPES.map((item) => (
-              <button key={item} className={ruleType === item ? "active" : ""} type="button" onClick={() => { setRuleType(item); setToAccountId(""); }}>
-                {recurringTypeLabel(item)}
-              </button>
-            ))}
-          </div>
+          <ToggleGroup className="wrap" type="single" value={ruleType} onValueChange={(value) => { if (value) { setRuleType(value as RecurringRuleType); setToAccountId(""); } }} aria-label="Recurring rule type">
+            {RECURRING_TYPES.map((item) => <ToggleGroupItem key={item} value={item}>{recurringTypeLabel(item)}</ToggleGroupItem>)}
+          </ToggleGroup>
         </FieldLabel>
         <FieldLabel label="Name">
-          <input value={name} placeholder="Netflix, monthly ETF, loan payment" onChange={(event) => setName(event.target.value)} />
+          <Input value={name} placeholder="Netflix, monthly ETF, loan payment" onChange={(event) => setName(event.target.value)} />
         </FieldLabel>
         <div className="form-grid-2">
           <FieldLabel label="Amount">
-            <input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
+            <Input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
           </FieldLabel>
         </div>
         <FieldLabel label="Category">
-          <input value={category} placeholder="subscription, investment, loan" onChange={(event) => setCategory(event.target.value)} />
+          <Input value={category} placeholder="subscription, investment, loan" onChange={(event) => setCategory(event.target.value)} />
         </FieldLabel>
         <FieldLabel label="From Account">
           <select value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}>
@@ -1801,14 +1807,9 @@ function RecurringRuleModal({
         ) : null}
         <div className="form-grid-2">
           <FieldLabel label="Day">
-            <input value={dayOfMonth} inputMode="numeric" onChange={(event) => setDayOfMonth(event.target.value)} />
+            <Input value={dayOfMonth} inputMode="numeric" onChange={(event) => setDayOfMonth(event.target.value)} />
           </FieldLabel>
-          <FieldLabel label="Active">
-            <select value={active ? "yes" : "no"} onChange={(event) => setActive(event.target.value === "yes")}>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </FieldLabel>
+          <FieldLabel label="Active"><Switch checked={active} onCheckedChange={setActive} aria-label="Rule active" /></FieldLabel>
         </div>
         {error ? <p className="form-error">{error}</p> : null}
         <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
@@ -1906,16 +1907,16 @@ function TransactionModal({
   return (
     <BottomSheet title={editTx ? "Edit Transaction" : "Add Transaction"} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <div className="segmented">
-          <button className={type === "expense" ? "active danger" : ""} type="button" onClick={() => setType("expense")}>Expense</button>
-          <button className={type === "income" ? "active" : ""} type="button" onClick={() => setType("income")}>Income</button>
-          <button className={type === "transfer" ? "active" : ""} type="button" onClick={() => setType("transfer")}>Transfer</button>
-        </div>
+        <ToggleGroup type="single" value={type} onValueChange={(value) => { if (value) setType(value as typeof type); }} aria-label="Transaction type">
+          <ToggleGroupItem className="danger" value="expense">Expense</ToggleGroupItem>
+          <ToggleGroupItem value="income">Income</ToggleGroupItem>
+          <ToggleGroupItem value="transfer">Transfer</ToggleGroupItem>
+        </ToggleGroup>
         <FieldLabel label="Amount">
-          <input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
+          <Input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
         </FieldLabel>
         <FieldLabel label="Description">
-          <input value={description} placeholder="What was this for?" onChange={(event) => setDescription(event.target.value)} />
+          <Input value={description} placeholder="What was this for?" onChange={(event) => setDescription(event.target.value)} />
         </FieldLabel>
         {type !== "transfer" ? (
           <>
@@ -2010,7 +2011,7 @@ function BudgetModal({
           {targetBudget !== undefined ? <small>Current: {money(targetBudget)}</small> : <small>No budget set</small>}
         </div>
         <FieldLabel label="Budget Amount">
-          <input value={amount} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setAmount(event.target.value)} />
+          <Input value={amount} inputMode="decimal" placeholder="0.00" autoFocus onChange={(event) => setAmount(event.target.value)} />
         </FieldLabel>
         {error ? <p className="form-error">{error}</p> : null}
         <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">
@@ -2088,13 +2089,10 @@ function TransactionCard({ tx, data, actions, onClick }: { tx: Transaction; data
 function RowActions({
   tx,
   onEdit,
-  onDelete,
   onToggleDelete
 }: {
   tx: Transaction;
-  confirming: boolean;
   onEdit: (tx: Transaction) => void;
-  onDelete: (tx: Transaction) => Promise<void>;
   onToggleDelete: (id: string | null) => void;
 }) {
   return (
@@ -2132,12 +2130,8 @@ function ValueLine({ label, value, positive = false, danger = false }: { label: 
   );
 }
 
-function Progress({ value, color, thin = false }: { value: number; color: string; thin?: boolean }) {
-  return (
-    <div className={thin ? "progress-line thin" : "progress-line"}>
-      <span style={{ width: `${Math.min(100, Math.max(0, value))}%`, backgroundColor: color }} />
-    </div>
-  );
+function Progress({ value, color, thin = false, label }: { value: number; color: string; thin?: boolean; label: string }) {
+  return <UiProgress value={value} color={color} thin={thin} label={label} />;
 }
 
 function EmptyState({ label }: { label: string }) {

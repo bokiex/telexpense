@@ -83,6 +83,28 @@ select:focus-visible {
   color: var(--primary-foreground);
 }
 
+.ui-card { border: 1px solid var(--border); border-radius: 16px; background: var(--card); }
+.ui-input { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--secondary); color: var(--foreground); outline: none; }
+.ui-toggle-group { display: flex; gap: 4px; border-radius: var(--radius); background: var(--secondary); padding: 4px; }
+.ui-toggle-group-item { flex: 1; border: 0; border-radius: 9px; background: transparent; color: var(--muted); padding: 8px; font: inherit; font-size: 13px; }
+.ui-toggle-group-item[data-state="on"] { background: var(--primary); color: var(--primary-foreground); }
+.ui-toggle-group-item.danger[data-state="on"] { background: var(--destructive); color: var(--primary-foreground); }
+.ui-toggle-group.wrap { flex-wrap: wrap; }
+.ui-toggle-group.wrap .ui-toggle-group-item { flex: 1 1 30%; }
+.ui-progress { width: 100%; height: 6px; overflow: hidden; border-radius: 999px; background: var(--secondary); margin-top: 5px; }
+.ui-progress-thin { height: 4px; }
+.ui-progress span { display: block; height: 100%; border-radius: inherit; }
+.ui-switch { width: 40px; height: 24px; border: 0; border-radius: 999px; background: var(--border); padding: 2px; transition: background-color 0.16s ease; }
+.ui-switch[data-state="checked"] { background: var(--primary); }
+.ui-switch-thumb { display: block; width: 20px; height: 20px; border-radius: inherit; background: var(--card); transition: transform 0.16s ease; }
+.ui-switch[data-state="checked"] .ui-switch-thumb { transform: translateX(16px); }
+.confirm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.62); }
+.confirm-dialog { position: fixed; z-index: 51; left: 50%; top: 50%; width: min(calc(100% - 36px), 360px); transform: translate(-50%, -50%); border: 1px solid var(--border); border-radius: 16px; background: var(--card); padding: 18px; }
+.confirm-dialog h2 { margin: 0; font-size: 17px; }
+.confirm-dialog p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.confirm-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; }
+.confirm-dialog-actions .ui-button { min-height: 44px; border-radius: 12px; }
+
 .pending-button-content {
   display: grid;
   place-items: center;
@@ -677,13 +699,13 @@ select:focus-visible {
 }
 
 .card-actions button {
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
 }
 
 .tiny-icon {
-  width: 26px;
-  height: 26px;
+  width: 40px;
+  height: 40px;
 }
 
 .tiny-icon.danger {
@@ -1282,5 +1304,7 @@ select:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .sheet-backdrop,
-  .bottom-sheet { animation: none; }
+  .bottom-sheet,
+  .ui-switch,
+  .ui-switch-thumb { animation: none; transition: none; }
 }
