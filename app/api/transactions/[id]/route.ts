@@ -29,7 +29,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const subcategoryId = body.subcategoryId === null || body.subcategoryId === undefined || body.subcategoryId === "" ? null : Number(body.subcategoryId);
     const description = String(body.description || "").trim();
     const amountCents = Number(body.amountCents);
-    const currency = String(body.currency || "USD").trim().toUpperCase();
     const occurredOn = String(body.occurredOn || "").trim();
 
     if (!kinds.has(kind)) return NextResponse.json({ error: "Transaction kind is not valid." }, { status: 400 });
@@ -42,7 +41,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (!description) return NextResponse.json({ error: "Description is required." }, { status: 400 });
     const amountError = transactionAmountError(kind as ParsedTransaction["kind"], amountCents);
     if (amountError) return NextResponse.json({ error: amountError }, { status: 400 });
-    if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
     if (!isValidDate(occurredOn)) return NextResponse.json({ error: "Date must be a valid YYYY-MM-DD date." }, { status: 400 });
 
     await updateTransactionFields(userId, transactionId, {
@@ -52,7 +50,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       subcategoryId,
       description,
       amountCents,
-      currency: currency || "USD",
       occurredOn
     });
     return NextResponse.json({ ok: true });

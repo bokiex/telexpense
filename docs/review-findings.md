@@ -11,7 +11,7 @@ cover the deployed Next.js application, not the legacy Python prototype.
 | 2 | High | In progress | Reject ungrouped `transfer` messages received through the bot parser flow. |
 | 3 | High | In progress | Keep recurring subscriptions out of transfer groups, and repair existing affected rows. |
 | 4 | High | Open | Exclude grouped investment-transfer destination legs from Savings allocation. |
-| 5 | High | Open | Enforce account and transaction currency consistency, and reject cross-currency transfers. |
+| 5 | High | Replaced | Replaced by the SGD-only model. Currency columns and API fields are removed, so cross-currency transfers cannot exist. |
 | 6 | Medium | Open | Render a grouped transfer as one history entry and keep pagination coherent. |
 | 7 | Medium | Open | Display credit-card debt as a positive debt amount, like loan debt. |
 | 8 | Medium | Open | Make budget creation safe under concurrent first saves. |

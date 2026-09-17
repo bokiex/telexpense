@@ -13,7 +13,6 @@ create table if not exists public.accounts (
   institution text,
   account_type text not null default 'bank' check (account_type in ('cash', 'bank', 'card', 'investment', 'loan', 'other')),
   opening_balance_cents integer not null default 0,
-  currency text not null default 'SGD',
   color text not null default '#60a5fa',
   icon text not null default 'Wallet',
   active boolean not null default true,
@@ -33,8 +32,7 @@ create table if not exists public.transactions (
   transfer_group_id uuid,
   recurring_rule_id bigint,
   description text not null,
-  amount_cents integer not null,
-  currency text not null default 'SGD',
+  amount_cents integer not null
   occurred_on date not null default current_date,
   created_at timestamptz not null default now()
 );
@@ -45,7 +43,6 @@ create table if not exists public.portfolio_snapshots (
   account_id bigint not null references public.accounts(id) on delete cascade,
   month text not null,
   portfolio_value_cents integer not null,
-  currency text not null default 'SGD',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (telegram_user_id, account_id, month)
@@ -57,7 +54,6 @@ create table if not exists public.recurring_rules (
   name text not null,
   rule_type text not null check (rule_type in ('subscription', 'investment_transfer', 'loan_payment')),
   amount_cents integer not null,
-  currency text not null default 'SGD',
   category text not null,
   from_account_id bigint not null references public.accounts(id) on delete cascade,
   to_account_id bigint references public.accounts(id) on delete set null,
@@ -83,7 +79,6 @@ create table if not exists public.budgets (
   category text not null,
   month text not null,
   amount_cents integer not null,
-  currency text not null default 'SGD'
 );
 
 create table if not exists public.categories (
@@ -136,7 +131,6 @@ create or replace function public.update_transfer_group(
   to_account_id bigint,
   transfer_description text,
   transfer_amount_cents integer,
-  transfer_currency text,
   transfer_occurred_on date
 )
 returns void
@@ -158,19 +152,24 @@ begin
   update public.transactions
   set kind = 'expense', category = null, category_id = null, subcategory_id = null,
       account_id = from_account_id, description = transfer_description,
-      amount_cents = -transfer_amount_cents, currency = upper(transfer_currency),
+      amount_cents = -transfer_amount_cents,
       occurred_on = transfer_occurred_on
   where telegram_user_id = target_user_id and transfer_group_id = target_transfer_group_id and amount_cents < 0;
   if not found then raise exception 'Transfer source leg is not available.'; end if;
   update public.transactions
   set kind = destination_kind, category = null, category_id = null, subcategory_id = null,
       account_id = to_account_id, description = transfer_description,
-      amount_cents = transfer_amount_cents, currency = upper(transfer_currency),
+      amount_cents = transfer_amount_cents,
       occurred_on = transfer_occurred_on
   where telegram_user_id = target_user_id and transfer_group_id = target_transfer_group_id and amount_cents > 0;
   if not found then raise exception 'Transfer destination leg is not available.'; end if;
 end;
 $$;
+
+revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date) from public;
+revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date) from anon;
+revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date) from authenticated;
+grant execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date) to service_role;
 
 create or replace function public.delete_transfer_group(
   target_user_id bigint,
@@ -242,7 +241,6 @@ create table if not exists public.pending_transaction_captures (
   telegram_user_id bigint not null references public.users(telegram_user_id) on delete cascade,
   description text not null,
   amount_cents integer not null,
-  currency text not null default 'USD',
   category_id bigint references public.categories(id) on delete cascade,
   subcategory_id bigint references public.subcategories(id) on delete cascade,
   expires_at timestamptz not null,
@@ -368,11 +366,11 @@ begin
    where telegram_user_id = p_telegram_user_id and token = p_token;
   insert into public.transactions (
     telegram_user_id, kind, category, category_id, subcategory_id, account_id,
-    description, amount_cents, currency
+    description, amount_cents
   ) values (
     p_telegram_user_id, 'expense', category_source_name, capture.category_id,
     capture.subcategory_id, p_account_id, capture.description,
-    capture.amount_cents, capture.currency
+    capture.amount_cents
   ) returning id into transaction_id;
   return transaction_id;
 end;
@@ -402,7 +400,6 @@ begin
         or duplicate.institution is distinct from keeper.institution
         or duplicate.account_type is distinct from keeper.account_type
         or duplicate.opening_balance_cents is distinct from keeper.opening_balance_cents
-        or duplicate.currency is distinct from keeper.currency
         or duplicate.color is distinct from keeper.color
         or duplicate.icon is distinct from keeper.icon
         or duplicate.active is distinct from keeper.active
@@ -422,7 +419,6 @@ begin
     where m.id <> m.keeper
       and (
         duplicate.portfolio_value_cents is distinct from keeper.portfolio_value_cents
-        or duplicate.currency is distinct from keeper.currency
       )
   ) then
     raise exception 'Cannot canonicalize accounts with conflicting portfolio snapshots';
@@ -491,9 +487,9 @@ begin
     where table_schema = 'public' and table_name = 'transactions' and column_name = 'account'
   ) then
     execute $sql$
-      insert into public.accounts (telegram_user_id, account_key, name, account_type, currency, color, icon)
+      insert into public.accounts (telegram_user_id, account_key, name, account_type, color, icon)
       select distinct telegram_user_id, public.normalize_identity(account),
-        initcap(public.normalize_identity(account)), 'bank', upper(currency), '#60a5fa', 'Wallet'
+        initcap(public.normalize_identity(account)), 'bank', '#60a5fa', 'Wallet'
       from public.transactions where account_id is null and btrim(account) <> ''
       on conflict do nothing
     $sql$;
@@ -515,8 +511,8 @@ from public.users u cross join (values
 where not exists (select 1 from public.categories c where c.telegram_user_id = u.telegram_user_id)
 on conflict do nothing;
 
-insert into public.accounts (telegram_user_id, account_key, name, account_type, currency, color, icon)
-select u.telegram_user_id, 'debit card', 'Debit Card', 'bank', 'SGD', '#60a5fa', 'Wallet'
+insert into public.accounts (telegram_user_id, account_key, name, account_type, color, icon)
+select u.telegram_user_id, 'debit card', 'Debit Card', 'bank', '#60a5fa', 'Wallet'
 from public.users u
 where not exists (select 1 from public.accounts a where a.telegram_user_id = u.telegram_user_id)
 on conflict do nothing;
@@ -531,8 +527,8 @@ begin
     (new.telegram_user_id, 'transport', 'transport', 'Transport', 'Needs', '#a78bfa', 'Car'),
     (new.telegram_user_id, 'salary', 'salary', 'Salary', 'Savings', '#4ade80', 'Briefcase')
   on conflict do nothing;
-  insert into public.accounts (telegram_user_id, account_key, name, account_type, currency, color, icon)
-  values (new.telegram_user_id, 'debit card', 'Debit Card', 'bank', 'SGD', '#60a5fa', 'Wallet')
+  insert into public.accounts (telegram_user_id, account_key, name, account_type, color, icon)
+  values (new.telegram_user_id, 'debit card', 'Debit Card', 'bank', '#60a5fa', 'Wallet')
   on conflict do nothing;
   return new;
 end
@@ -644,28 +640,16 @@ where a.id > b.id
   and a.category_id = b.category_id
   and public.normalize_identity(a.name) = public.normalize_identity(b.name);
 
-do $$
-begin
-  if exists (
-    select 1
-    from public.budgets
-    group by telegram_user_id, public.normalize_identity(category), month, subcategory_id
-    having count(distinct upper(currency)) > 1
-  ) then
-    raise exception 'Cannot merge canonical duplicate budgets with conflicting currencies';
-  end if;
-end $$;
-
 with combined as (
   select telegram_user_id, public.normalize_identity(category) category, subcategory_id, month,
-         sum(amount_cents)::integer amount_cents, min(upper(currency)) currency
+         sum(amount_cents)::integer amount_cents
   from public.budgets
   group by telegram_user_id, public.normalize_identity(category), subcategory_id, month
 ), removed as (
   delete from public.budgets returning *
 )
-insert into public.budgets (telegram_user_id, category, subcategory_id, month, amount_cents, currency)
-select telegram_user_id, category, subcategory_id, month, amount_cents, currency from combined;
+insert into public.budgets (telegram_user_id, category, subcategory_id, month, amount_cents)
+select telegram_user_id, category, subcategory_id, month, amount_cents from combined;
 
 update public.transactions t
 set category_id = c.id
@@ -762,8 +746,7 @@ as $$
   inserted_transactions as (
     insert into public.transactions (
       telegram_user_id, kind, category, category_id, account_id,
-      transfer_group_id, recurring_rule_id, description, amount_cents,
-      currency, occurred_on
+       transfer_group_id, recurring_rule_id, description, amount_cents, occurred_on
     )
     select r.telegram_user_id,
            case
@@ -778,8 +761,7 @@ as $$
            case when r.rule_type = 'subscription' then null else r.transfer_group_id end,
            r.id,
            r.name,
-           case when leg.destination then abs(r.amount_cents) else -abs(r.amount_cents) end,
-           r.currency,
+            case when leg.destination then abs(r.amount_cents) else -abs(r.amount_cents) end,
            (
              target_month || '-' ||
              lpad(least(r.day_of_month, extract(day from (

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { netWorthByCurrency } from "@/lib/finance";
+import { netWorthWithPortfolioValues } from "@/lib/finance";
 import { formatAmount } from "@/lib/amountFormat";
 import {
   ArrowDownLeft,
@@ -52,21 +52,18 @@ type Tab = "home" | "transactions" | "accounts" | "budget";
 type CategorySpend = {
   category: string;
   spentCents: number;
-  currency: string;
 };
 
 type SubcategorySpend = {
   category: string;
   subcategoryId: number;
   spentCents: number;
-  currency: string;
 };
 
 type Budget = {
   category: string;
   subcategoryId: number | null;
   budgetCents: number;
-  currency: string;
 };
 
 type RecentTransaction = {
@@ -81,7 +78,6 @@ type RecentTransaction = {
   recurringRuleId: number | null;
   description: string;
   amountCents: number;
-  currency: string;
   occurredOn: string;
 };
 
@@ -137,7 +133,6 @@ type SubCategory = {
   categoryId: string;
   budget?: number;
   spentCents?: number;
-  currency: string;
 };
 
 type Category = {
@@ -149,7 +144,6 @@ type Category = {
   icon: string;
   budget?: number;
   spentCents?: number;
-  currency: string;
   subcategories: SubCategory[];
   hidden?: boolean;
 };
@@ -158,7 +152,6 @@ type Transaction = {
   id: string;
   sourceId: number;
   amount: number;
-  currency: string;
   type: TransactionType;
   kind: RecentTransaction["kind"];
   transferGroupId: string | null;
@@ -171,7 +164,7 @@ type Transaction = {
 };
 
 type TransactionFormValues =
-  | (Omit<Transaction, "id" | "sourceId" | "kind" | "currency" | "transferGroupId" | "toAccountId"> & { id?: string; sourceId?: number; currency?: string; type: "income" | "expense" })
+  | (Omit<Transaction, "id" | "sourceId" | "kind" | "transferGroupId" | "toAccountId"> & { id?: string; sourceId?: number; type: "income" | "expense" })
   | {
       id?: string;
       sourceId?: number;
@@ -198,7 +191,6 @@ type Account = {
   accountType: AccountType;
   openingBalanceCents: number;
   balanceCents: number;
-  currency: string;
   color: string;
   icon: string;
   active: boolean;
@@ -211,7 +203,6 @@ type PortfolioSnapshot = {
   contributionCents: number;
   monthlyContributionCents: number;
   marketGainLossCents: number;
-  currency: string;
 };
 
 type RecurringRule = {
@@ -219,7 +210,6 @@ type RecurringRule = {
   name: string;
   ruleType: RecurringRuleType;
   amountCents: number;
-  currency: string;
   category: string;
   fromAccountId: number;
   toAccountId: number | null;
@@ -235,7 +225,6 @@ type LoanProgress = {
   repaidCents: number;
   repaymentThisMonthCents: number;
   payoffProgress: number;
-  currency: string;
 };
 
 type ModalState =
@@ -294,7 +283,6 @@ const CATEGORY_COLORS = ["#4ade80", "#f87171", "#60a5fa", "#fb923c", "#a78bfa", 
 const CATEGORY_ICONS = ["Wallet", "Home", "ShoppingCart", "Car", "Tv", "ShoppingBag", "Shield", "TrendingUp", "Briefcase", "Utensils", "Coffee", "Heart", "BookOpen", "Music", "Plane"];
 const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "loan", "other"];
 const RECURRING_TYPES: RecurringRuleType[] = ["subscription", "investment_transfer", "loan_payment"];
-const DEFAULT_CURRENCY = "SGD";
 const THEME_TARGET_PREFIX = "theme:";
 
 export default function Dashboard() {
@@ -426,7 +414,6 @@ export default function Dashboard() {
         toAccountId: toAccount?.id,
         description: tx.description,
         amountCents: tx.amount,
-        currency: fromAccount?.currency || toAccount?.currency || DEFAULT_CURRENCY,
         occurredOn: tx.date
       });
       if (!response.ok) {
@@ -450,7 +437,6 @@ export default function Dashboard() {
       accountId: selectedAccount?.id,
       description: tx.description,
       amountCents,
-      currency: tx.currency || summary?.recent[0]?.currency || DEFAULT_CURRENCY,
       occurredOn: tx.date
     };
     const path = tx.sourceId ? `/api/transactions/${tx.sourceId}` : "/api/transactions";
@@ -483,7 +469,6 @@ export default function Dashboard() {
         category: themeBudgetCategory(theme),
         month,
         amountCents: amount,
-        currency: summary?.recent[0]?.currency || data.categories[0]?.currency || DEFAULT_CURRENCY,
         subcategoryId: null
       });
       if (!response.ok) {
@@ -502,7 +487,6 @@ export default function Dashboard() {
       category: category.sourceName,
       month,
       amountCents: amount,
-      currency: category.currency,
       subcategoryId: storedSubcategoryId
     });
     if (!response.ok) {
@@ -547,7 +531,6 @@ export default function Dashboard() {
     const category = categoryId ? data.categories.find((item) => item.id === categoryId) : null;
     const sourceKey = category?.id || slug(values.name);
     const sourceName = category?.sourceName || values.name.toLowerCase();
-    const currency = category?.currency || summary?.recent[0]?.currency || DEFAULT_CURRENCY;
     const categoryResponse = await apiRequest("/api/categories", "POST", {
       sourceKey,
       sourceName,
@@ -565,7 +548,6 @@ export default function Dashboard() {
       category: sourceName,
       month,
       amountCents: values.budgetCents,
-      currency
     });
     if (!budgetResponse.ok) {
       const result = await budgetResponse.json().catch(() => null);
@@ -619,7 +601,6 @@ export default function Dashboard() {
     institution: string;
     accountType: AccountType;
     openingBalanceCents: number;
-    currency: string;
     color: string;
     icon: string;
   }) {
@@ -638,7 +619,6 @@ export default function Dashboard() {
       accountId: account.id,
       month,
       portfolioValueCents,
-      currency: account.currency
     });
     if (!response.ok) {
       const result = await response.json().catch(() => null);
@@ -861,7 +841,7 @@ function HomeView({
 }) {
   const totalIncome = data.transactions.filter((tx) => tx.kind === "income").reduce((sum, tx) => sum + tx.amount, 0);
   const totalExpense = data.transactions.filter((tx) => tx.kind === "expense").reduce((sum, tx) => sum + tx.amount, 0);
-  const netWorthTotals = Object.entries(netWorthByCurrency(data.accounts, summary?.portfolioSnapshots));
+  const netWorthTotal = netWorthWithPortfolioValues(data.accounts, summary?.portfolioSnapshots);
   const recent = data.transactions.slice(0, 5);
 
   return (
@@ -870,9 +850,7 @@ function HomeView({
         <p className="eyebrow">Net Worth</p>
         <div className="balance-row">
           <div className="account-total-list">
-            {netWorthTotals.length ? netWorthTotals.map(([accountCurrency, total]) => (
-              <h1 key={accountCurrency}>{balanceVisible ? money(total) : "••••••"}</h1>
-            )) : <h1>{balanceVisible ? money(0) : "••••••"}</h1>}
+            <h1>{balanceVisible ? money(netWorthTotal) : "••••••"}</h1>
           </div>
           <button className="ghost-button" type="button" onClick={onToggleBalance} aria-label="Toggle balance visibility">
             {balanceVisible ? <Eye size={18} /> : <EyeOff size={18} />}
@@ -1063,16 +1041,14 @@ function AccountsView({
   onEditRecurringRule: (rule: RecurringRule) => void;
   onDeleteRecurringRule: (rule: RecurringRule) => Promise<void>;
 }) {
-  const totalByCurrency = netWorthByCurrency(accounts, snapshots);
+  const netWorthTotal = netWorthWithPortfolioValues(accounts, snapshots);
 
   return (
     <div className="screen-stack">
       <section className="mini-card">
         <p className="eyebrow">Net Worth Across Accounts</p>
         <div className="account-total-list">
-          {Object.entries(totalByCurrency).length ? Object.entries(totalByCurrency).map(([currency, total]) => (
-            <strong key={currency}>{money(total)}</strong>
-          )) : <strong>{money(0)}</strong>}
+          <strong>{money(netWorthTotal)}</strong>
         </div>
       </section>
 
@@ -1523,7 +1499,6 @@ function AccountModal({
     institution: string;
     accountType: AccountType;
     openingBalanceCents: number;
-    currency: string;
     color: string;
     icon: string;
   }) => Promise<void>;
@@ -1533,7 +1508,6 @@ function AccountModal({
   const [institution, setInstitution] = useState(account?.institution || "");
   const [accountType, setAccountType] = useState<AccountType>(account?.accountType || "bank");
   const [openingBalance, setOpeningBalance] = useState(account ? String((account.accountType === "loan" || account.accountType === "card" ? Math.abs(account.openingBalanceCents) : account.openingBalanceCents) / 100) : "0");
-  const currency = account?.currency || DEFAULT_CURRENCY;
   const [color, setColor] = useState(account?.color || "#60a5fa");
   const [icon, setIcon] = useState(account?.icon || "Wallet");
   const [error, setError] = useState("");
@@ -1556,7 +1530,6 @@ function AccountModal({
       institution: institution.trim(),
       accountType,
       openingBalanceCents,
-      currency: currency.trim().toUpperCase() || DEFAULT_CURRENCY,
       color,
       icon
     }));
@@ -1680,7 +1653,6 @@ function RecurringRuleModal({
   const [name, setName] = useState(rule?.name || "");
   const [ruleType, setRuleType] = useState<RecurringRuleType>(rule?.ruleType || "subscription");
   const [amount, setAmount] = useState(rule ? String(rule.amountCents / 100) : "");
-  const currency = rule?.currency || DEFAULT_CURRENCY;
   const [category, setCategory] = useState(rule?.category || data.categories[0]?.sourceName || "subscription");
   const [fromAccountId, setFromAccountId] = useState(rule?.fromAccountId ? String(rule.fromAccountId) : "");
   const [toAccountId, setToAccountId] = useState(rule?.toAccountId ? String(rule.toAccountId) : "");
@@ -1718,7 +1690,6 @@ function RecurringRuleModal({
       name: name.trim(),
       ruleType,
       amountCents,
-      currency: currency.trim().toUpperCase() || DEFAULT_CURRENCY,
       category: category.trim().toLowerCase(),
       fromAccountId: fromId,
       toAccountId: needsDestination ? toId : null,
@@ -1856,7 +1827,6 @@ function TransactionModal({
       accountId: selectedAccount.id,
       description: description.trim(),
       date,
-      currency: editTx?.currency
     }));
   }
 
@@ -2097,7 +2067,7 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
   if (!summary) return { categories: [], accounts: [], transactions: [] };
   const categoryMap = new Map<string, Category>();
   const storedCategories = new Map(summary.storedCategories.map((category) => [category.sourceKey, category]));
-  const addCategory = (name: string, currency = DEFAULT_CURRENCY) => {
+  const addCategory = (name: string) => {
     const id = slug(name);
     const existing = categoryMap.get(id);
     if (existing) return existing;
@@ -2118,7 +2088,6 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
       icon: stored?.icon || look.icon,
       budget: budget?.budgetCents,
       spentCents: spend?.spentCents,
-      currency: budget?.currency || currency,
       subcategories: [],
       hidden: stored?.active === false
     };
@@ -2126,24 +2095,23 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
     return category;
   };
 
-  for (const item of summary.categories) addCategory(item.category, item.currency);
+  for (const item of summary.categories) addCategory(item.category);
   for (const item of summary.budgets) {
-    if (!isThemeBudgetCategory(item.category)) addCategory(item.category, item.currency);
+    if (!isThemeBudgetCategory(item.category)) addCategory(item.category);
   }
   for (const item of history || summary.recent) {
-    if (item.category) addCategory(item.category, item.currency);
+    if (item.category) addCategory(item.category);
   }
   for (const stored of summary.storedCategories) addCategory(stored.sourceName);
 
   const sourceTransactions = history || summary.recent;
   const transactions = sourceTransactions.map((tx) => {
-    const category = tx.category ? addCategory(tx.category, tx.currency) : null;
+    const category = tx.category ? addCategory(tx.category) : null;
     const transfer = transferAccounts(tx, sourceTransactions);
     return {
       id: String(tx.id),
       sourceId: tx.id,
       amount: Math.abs(tx.amountCents),
-      currency: tx.currency,
       type: tx.kind === "income" || tx.amountCents > 0 ? "income" : "expense",
       kind: tx.transferGroupId ? "transfer" : tx.kind,
       transferGroupId: tx.transferGroupId,
@@ -2170,7 +2138,6 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
           categoryId: stored.sourceKey,
           budget: budget?.budgetCents,
           spentCents: spend?.spentCents,
-          currency: budget?.currency || category.currency
         });
       }
     }

@@ -20,7 +20,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const toAccountId = Number(body.toAccountId);
     const description = String(body.description || "").trim();
     const amountCents = Number(body.amountCents);
-    const currency = String(body.currency || "SGD").trim().toUpperCase();
     const occurredOn = String(body.occurredOn || "").trim();
 
     if (!isValidTransferGroupId(transferGroupId)) return NextResponse.json({ error: "Transfer group is not valid." }, { status: 400 });
@@ -29,12 +28,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (fromAccountId === toAccountId) return NextResponse.json({ error: "From and to accounts must be different." }, { status: 400 });
     if (!description) return NextResponse.json({ error: "Description is required." }, { status: 400 });
     if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return NextResponse.json({ error: "Amount must be a positive integer number of cents." }, { status: 400 });
-    if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
     if (!isValidDate(occurredOn)) return NextResponse.json({ error: "Date must be a valid YYYY-MM-DD date." }, { status: 400 });
 
     await updateTransferFields(user.id, transferGroupId, {
       fromAccountId, toAccountId, description,
-      amountCents, currency, occurredOn
+      amountCents, occurredOn
     });
     return NextResponse.json({ ok: true });
   } catch (error) {

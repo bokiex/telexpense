@@ -16,7 +16,6 @@ export async function POST(request: NextRequest) {
     const name = String(body.name || "").trim();
     const ruleType = String(body.ruleType || "").trim();
     const amountCents = Number(body.amountCents);
-    const currency = String(body.currency || "SGD").trim().toUpperCase();
     const category = String(body.category || "").trim().toLowerCase();
     const fromAccountId = Number(body.fromAccountId);
     const toAccountId = body.toAccountId === null || body.toAccountId === undefined || body.toAccountId === "" ? null : Number(body.toAccountId);
@@ -27,7 +26,6 @@ export async function POST(request: NextRequest) {
     if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
     if (!ruleTypes.has(ruleType)) return NextResponse.json({ error: "Rule type is not valid." }, { status: 400 });
     if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return NextResponse.json({ error: "Amount must be a positive integer number of cents." }, { status: 400 });
-    if (!/^[A-Z]{3}$/.test(currency)) return NextResponse.json({ error: "Currency must be a 3-letter code." }, { status: 400 });
     if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
     if (!Number.isSafeInteger(fromAccountId) || fromAccountId <= 0) return NextResponse.json({ error: "From account is required." }, { status: 400 });
     if ((ruleType === "investment_transfer" || ruleType === "loan_payment") && (!Number.isSafeInteger(toAccountId) || Number(toAccountId) <= 0)) {
@@ -45,7 +43,6 @@ export async function POST(request: NextRequest) {
       name,
       ruleType: ruleType as RecurringRuleType,
       amountCents,
-      currency,
       category,
       fromAccountId,
       toAccountId: Number.isSafeInteger(toAccountId) ? toAccountId : null,
