@@ -1262,7 +1262,7 @@ select:focus-visible {
   position: fixed;
   right: 50%;
   bottom: 0;
-  z-index: 1;
+  z-index: 51;
   width: min(100%, 390px);
   max-height: 88vh;
   overflow-y: auto;
