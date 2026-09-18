@@ -35,3 +35,9 @@ test("bottom sheet is above its input-blocking backdrop", () => {
   assert.match(css, /\.sheet-backdrop\s*\{[^}]*z-index:\s*50;/);
   assert.match(css, /\.bottom-sheet\s*\{[^}]*z-index:\s*51;/);
 });
+
+test("mobile form controls meet the browser zoom threshold", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(css, /@media \(max-width: 767px\)\s*\{\s*input,\s*select,\s*textarea\s*\{\s*font-size: 16px !important;/);
+});

@@ -42,6 +42,18 @@ button:disabled {
   cursor: wait;
 }
 
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  .capture-label input {
+    font-size: 40px !important;
+  }
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible {

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Telexpense icon directions</title>
+  <style>
+    :root { --ink: #17211e; --muted: #68736d; --line: #dce4de; --paper: #f7f8f5; --card: #fff; --green: #167a50; --blue: #176ec9; --amber: #b77318; --purple: #7651ad; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e8ece8; color: var(--ink); font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width: min(100% - 32px, 1100px); margin: 32px auto 64px; }
+    h1 { margin: 0; font-size: clamp(28px, 5vw, 42px); letter-spacing: -.05em; }
+    h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
+    p { color: var(--muted); }
+    .intro { max-width: 720px; margin: 12px 0 28px; font-size: 16px; }
+    .notice { border: 1px solid #b9dbc9; border-radius: 14px; background: #e8f6ed; padding: 14px 16px; color: #215a3e; }
+    .choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+    .choice { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--card); }
+    .choice-copy { padding: 20px 20px 8px; }
+    .choice-copy p { min-height: 44px; margin: 8px 0; }
+    .tag { display: inline-block; margin-top: 2px; border-radius: 999px; background: #edf1ed; padding: 4px 9px; color: #3d5148; font-size: 12px; font-weight: 700; }
+    .preview { margin-top: 14px; border-top: 1px solid var(--line); background: var(--paper); padding: 16px; }
+    .phone { width: min(100%, 330px); margin: auto; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 12px 26px #12221912; }
+    .phone-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 15px 10px; font-size: 12px; font-weight: 700; }
+    .row { display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 9px; padding: 10px 15px; border-top: 1px solid #edf1ed; }
+    .row strong, .row small { display: block; }
+    .row small { margin-top: 1px; color: var(--muted); font-size: 11px; }
+    .money { color: #a13c43; font-size: 13px; font-weight: 700; }
+    .round { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: var(--green); background: #dff4e7; }
+    .nav { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); padding: 8px 6px 7px; }
+    .nav div { display: grid; justify-items: center; gap: 3px; color: var(--muted); font-size: 9px; }
+    .nav .active { color: var(--green); font-weight: 700; }
+    svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+    .lucide svg { stroke-width: 1.8; }
+    .hero-outline svg { stroke-width: 1.6; }
+    .hero-solid .active svg { fill: currentColor; stroke-width: 1.3; }
+    .hero-solid .round svg { fill: none; stroke-width: 1.5; }
+    .huge svg { stroke-width: 1.7; }
+    .huge .round { border-radius: 14px; }
+    .radix svg { stroke-width: 2; }
+    .radix .round { width: 30px; height: 30px; border-radius: 8px; }
+    .radix .row { grid-template-columns: 32px 1fr auto; gap: 8px; padding-block: 9px; }
+    .key { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 12px 15px; border-top: 1px solid var(--line); }
+    .key span { display: grid; place-items: center; gap: 4px; color: var(--muted); font-size: 9px; }
+    .key i { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font-style: normal; }
+    .details { margin-top: 30px; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--card); }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #f1f4f1; font-size: 12px; }
+    tr:last-child td { border-bottom: 0; }
+    a { color: #115f9e; }
+    code { border-radius: 5px; background: #edf1ed; padding: 2px 4px; font-size: .9em; }
+    @media (max-width: 700px) { main { width: min(100% - 24px, 500px); margin-top: 20px; } .choices { grid-template-columns: 1fr; } .choice-copy p { min-height: auto; } table, thead, tbody, tr, th, td { display: block; } th { display: none; } td { padding-block: 8px; } td:first-child { padding-top: 14px; font-weight: 700; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Icon directions for Telexpense</h1>
+    <p class="intro">The app already uses Lucide. These previews show four coherent icon languages against the current Mini App UI, rather than mixing unrelated icon sets.</p>
+    <div class="notice"><strong>Recommended:</strong> refined Lucide. It keeps the current package and data model intact, but uses a lighter 1.8px stroke and a smaller, more purposeful finance set.</div>
+
+    <section class="choices" aria-label="Icon style choices">
+      <article class="choice lucide">
+        <div class="choice-copy"><h2>1. Refined Lucide</h2><p>Calm, clear outlines. Best fit for the app's existing soft-green, information-dense design.</p><span class="tag">Recommended. No package change</span></div>
+        <div class="preview"><div class="phone"><div class="phone-head"><span>September budget</span><span>SGD</span></div><div class="row"><div class="round"><svg viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2"/><path d="M3 7h18v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M16 13h2"/></svg></div><div><strong>Groceries</strong><small>Food &amp; dining</small></div><span class="money">-$82.40</span></div><div class="row"><div class="round"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg></div><div><strong>Rent</strong><small>Home</small></div><span class="money">-$1,850</span></div><div class="nav"><div class="active"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add</div><div><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>History</div><div><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9v9Z"/><path d="M21 12h-9V3a9 9 0 0 1 9 9Z"/></svg>Budget</div><div><svg viewBox="0 0 24 24"><rect width="18" height="12" x="3" y="6" rx="2"/><path d="M16 12h2"/></svg>Accounts</div></div></div></div>
+      </article>
+      <article class="choice hero-solid">
+        <div class="choice-copy"><h2>2. Heroicons with solid active states</h2><p>Slightly fuller shapes. A strong selected tab reads faster, while the rest stay outline-based.</p><span class="tag">Best for stronger navigation</span></div>
+        <div class="preview"><div class="phone"><div class="phone-head"><span>September budget</span><span>SGD</span></div><div class="row"><div class="round"><svg viewBox="0 0 24 24"><path d="M3 7h18v12H3z"/><path d="M3 7V5h18v2M8 12h4"/></svg></div><div><strong>Groceries</strong><small>Food &amp; dining</small></div><span class="money">-$82.40</span></div><div class="row"><div class="round"><svg viewBox="0 0 24 24"><path d="m3 11 9-7 9 7v9H3z"/><path d="M9 20v-6h6v6"/></svg></div><div><strong>Rent</strong><small>Home</small></div><span class="money">-$1,850</span></div><div class="nav hero-outline"><div class="active"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add</div><div><svg viewBox="0 0 24 24"><path d="M7 7h14M7 12h14M7 17h14M3 7h.01M3 12h.01M3 17h.01"/></svg>History</div><div><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9v9Z"/><path d="M21 12h-9V3a9 9 0 0 1 9 9Z"/></svg>Budget</div><div><svg viewBox="0 0 24 24"><path d="M3 7h18v11H3z"/><path d="M16 13h2"/></svg>Accounts</div></div></div></div>
+      </article>
+      <article class="choice huge">
+        <div class="choice-copy"><h2>3. Rounded Hugeicons</h2><p>Friendlier and more expressive. Good if Telexpense should feel less like a bank and more like a personal habit app.</p><span class="tag">Distinctive, adds two packages</span></div>
+        <div class="preview"><div class="phone"><div class="phone-head"><span>September budget</span><span>SGD</span></div><div class="row"><div class="round"><svg viewBox="0 0 24 24"><path d="M4 8h16v11H4z"/><path d="M7 8V6h10v2M15 14h2"/></svg></div><div><strong>Groceries</strong><small>Food &amp; dining</small></div><span class="money">-$82.40</span></div><div class="row"><div class="round"><svg viewBox="0 0 24 24"><path d="m4 11 8-6 8 6v8H4z"/><path d="M9 19v-5h6v5"/></svg></div><div><strong>Rent</strong><small>Home</small></div><span class="money">-$1,850</span></div><div class="nav"><div class="active"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add</div><div><svg viewBox="0 0 24 24"><path d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01"/></svg>History</div><div><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-8-8v8Z"/><path d="M20 12h-8V4a8 8 0 0 1 8 8Z"/></svg>Budget</div><div><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="11" rx="3"/><path d="M16 13h2"/></svg>Accounts</div></div></div></div>
+      </article>
+      <article class="choice radix">
+        <div class="choice-copy"><h2>4. Radix for UI chrome</h2><p>Small, precise controls with a desktop-product feel. Use it only for buttons and menus, paired with Lucide category icons.</p><span class="tag">Complement, not a full replacement</span></div>
+        <div class="preview"><div class="phone"><div class="phone-head"><span>September budget</span><span>SGD</span></div><div class="row"><div class="round"><svg viewBox="0 0 24 24"><path d="M4 8h16v10H4z"/><path d="M7 8V6h10v2"/></svg></div><div><strong>Groceries</strong><small>Food &amp; dining</small></div><span class="money">-$82.40</span></div><div class="row"><div class="round"><svg viewBox="0 0 24 24"><path d="m4 11 8-6 8 6v8H4z"/></svg></div><div><strong>Rent</strong><small>Home</small></div><span class="money">-$1,850</span></div><div class="key"><span><i>+</i>Add</span><span><i>≡</i>History</span><span><i>◔</i>Budget</span><span><i>□</i>Accounts</span></div></div></div>
+      </article>
+    </section>
+    <section class="details"><h2>Implementation trade-offs</h2><table><thead><tr><th>Direction</th><th>Package</th><th>Fit</th><th>Decision</th></tr></thead><tbody><tr><td>Refined Lucide</td><td>Already installed: <code>lucide-react</code></td><td>Consistent outlined finance set, named tree-shakeable imports, ISC license.</td><td>Recommended</td></tr><tr><td>Heroicons</td><td><code>@heroicons/react</code></td><td>MIT license. 24px outline and solid variants make selected states more emphatic.</td><td>Strong alternative</td></tr><tr><td>Hugeicons</td><td><code>@hugeicons/react</code> and <code>@hugeicons/core-free-icons</code></td><td>MIT free set. Rounded style and broad coverage, with more bundle and dependency cost.</td><td>Use only for a deliberate softer look</td></tr><tr><td>Radix Icons</td><td><code>@radix-ui/react-icons</code></td><td>MIT license. Excellent small interface glyphs, but not enough finance/category coverage alone.</td><td>Use alongside Lucide, if needed</td></tr></tbody></table><p>Research and first-party links: <a href="icon-library-research.md">docs/icon-library-research.md</a>.</p></section>
+  </main>
+</body>
+</html>
