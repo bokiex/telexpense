@@ -47,6 +47,7 @@ export type RecentTransaction = {
   subcategoryId: number | null;
   accountId: number | null;
   transferGroupId: string | null;
+  savingsAllocation: boolean;
   transferFromAccountId: number | null;
   transferToAccountId: number | null;
   recurringRuleId: number | null;
@@ -303,6 +304,7 @@ export async function addTransferFields(
     description: string;
     amountCents: number;
     occurredOn: string;
+    savingsAllocation: boolean;
   }
 ) {
   const supabase = createSupabaseAdmin();
@@ -320,6 +322,7 @@ export async function addTransferFields(
       category_id: null,
       account_id: values.fromAccountId,
       transfer_group_id: transferGroupId,
+      savings_allocation: values.savingsAllocation,
       description: values.description,
       amount_cents: -amount,
       occurred_on: values.occurredOn
@@ -331,6 +334,7 @@ export async function addTransferFields(
       category_id: null,
       account_id: values.toAccountId,
       transfer_group_id: transferGroupId,
+      savings_allocation: values.savingsAllocation,
       description: values.description,
       amount_cents: amount,
       occurred_on: values.occurredOn
@@ -349,6 +353,7 @@ export async function updateTransferFields(
     description: string;
     amountCents: number;
     occurredOn: string;
+    savingsAllocation: boolean;
   }
 ) {
   await Promise.all([
@@ -363,7 +368,8 @@ export async function updateTransferFields(
     to_account_id: values.toAccountId,
     transfer_description: values.description,
     transfer_amount_cents: Math.abs(values.amountCents),
-    transfer_occurred_on: values.occurredOn
+    transfer_occurred_on: values.occurredOn,
+    transfer_savings_allocation: values.savingsAllocation
   });
   if (error) throw error;
 }
@@ -497,7 +503,7 @@ export async function listTransactions(
     return query;
   }
 
-  const optionalColumns = ["subcategory_id", "account_id", "transfer_group_id", "recurring_rule_id"];
+  const optionalColumns = ["subcategory_id", "account_id", "transfer_group_id", "savings_allocation", "recurring_rule_id"];
   const rows = await selectTransactionsCompat(
     optionalColumns,
       (columns) => fetchPage(["id", "kind", "category", ...columns, "description", "amount_cents", "occurred_on"].join(", "))
@@ -514,7 +520,7 @@ export async function listTransactions(
   return {
     items: items.map((tx) => ({
       id: tx.id, kind: tx.kind, category: tx.category, subcategoryId: tx.subcategory_id, accountId: tx.account_id,
-      transferGroupId: tx.transfer_group_id, recurringRuleId: tx.recurring_rule_id,
+      transferGroupId: tx.transfer_group_id, savingsAllocation: tx.savings_allocation === true, recurringRuleId: tx.recurring_rule_id,
       transferFromAccountId: transferAccounts.get(tx.transfer_group_id)?.fromAccountId ?? null,
       transferToAccountId: transferAccounts.get(tx.transfer_group_id)?.toAccountId ?? null,
       description: tx.description, amountCents: tx.amount_cents, occurredOn: tx.occurred_on
@@ -1064,6 +1070,7 @@ export async function getSummary(telegramUserId: number, month: string) {
       subcategoryId: tx.subcategory_id,
       accountId: tx.account_id,
       transferGroupId: tx.transfer_group_id,
+      savingsAllocation: tx.savings_allocation === true,
       transferFromAccountId: tx.transfer_group_id
         ? transactions.find((leg) => leg.transfer_group_id === tx.transfer_group_id && leg.amount_cents < 0)?.account_id ?? null
         : null,
@@ -1433,7 +1440,7 @@ function formatChoices(choices: { canonical: string }[], label: string) {
 
 async function getSummaryTransactions(telegramUserId: number, start: string, end: string) {
   const supabase = createSupabaseAdmin();
-  const optionalColumns = ["subcategory_id", "account_id", "transfer_group_id", "recurring_rule_id"];
+  const optionalColumns = ["subcategory_id", "account_id", "transfer_group_id", "savings_allocation", "recurring_rule_id"];
   return selectTransactionsCompat(optionalColumns, (columns) => supabase
     .from("transactions")
     .select(["id", "kind", "category", ...columns, "description", "amount_cents", "occurred_on"].join(", "))
@@ -1446,7 +1453,7 @@ async function getSummaryTransactions(telegramUserId: number, start: string, end
 
 async function getTrendTransactions(telegramUserId: number, start: string, end: string) {
   const supabase = createSupabaseAdmin();
-  return selectTransactionsCompat(["transfer_group_id"], (columns) => supabase
+  return selectTransactionsCompat(["transfer_group_id", "savings_allocation"], (columns) => supabase
     .from("transactions")
     .select(["kind", "category", ...columns, "amount_cents", "occurred_on"].join(", "))
     .eq("telegram_user_id", telegramUserId)
@@ -1510,6 +1517,7 @@ type BudgetActivityTransaction = {
   category: string | null;
   amount_cents: number;
   transfer_group_id?: string | null;
+  savings_allocation?: boolean;
 };
 
 export function budgetActivityTotals(
@@ -1522,8 +1530,14 @@ export function budgetActivityTotals(
   let savingsAllocatedCents = 0;
 
   for (const tx of transactions) {
-    if (tx.transfer_group_id) continue;
     const amount = Math.abs(tx.amount_cents);
+    if (tx.transfer_group_id) {
+      if (tx.savings_allocation && tx.amount_cents < 0) {
+        savingsAllocatedCents += amount;
+        progressByGroup.Savings += amount;
+      }
+      continue;
+    }
     if (tx.kind === "investment") {
       savingsAllocatedCents += amount;
       progressByGroup.Savings += amount;

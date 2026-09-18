@@ -21,6 +21,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const description = String(body.description || "").trim();
     const amountCents = Number(body.amountCents);
     const occurredOn = String(body.occurredOn || "").trim();
+    const savingsAllocation = body.savingsAllocation === true;
 
     if (!isValidTransferGroupId(transferGroupId)) return NextResponse.json({ error: "Transfer group is not valid." }, { status: 400 });
     if (!Number.isFinite(fromAccountId)) return NextResponse.json({ error: "From account is required." }, { status: 400 });
@@ -32,7 +33,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     await updateTransferFields(user.id, transferGroupId, {
       fromAccountId, toAccountId, description,
-      amountCents, occurredOn
+      amountCents, occurredOn, savingsAllocation
     });
     return NextResponse.json({ ok: true });
   } catch (error) {

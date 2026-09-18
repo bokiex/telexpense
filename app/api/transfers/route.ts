@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
     const description = String(body.description || "").trim();
     const amountCents = Number(body.amountCents);
     const occurredOn = String(body.occurredOn || "").trim();
+    const savingsAllocation = body.savingsAllocation === true;
 
     if (!Number.isFinite(fromAccountId)) return NextResponse.json({ error: "From account is required." }, { status: 400 });
     if (!Number.isFinite(toAccountId)) return NextResponse.json({ error: "To account is required." }, { status: 400 });
@@ -29,7 +30,8 @@ export async function POST(request: NextRequest) {
       toAccountId,
       description,
       amountCents,
-      occurredOn
+      occurredOn,
+      savingsAllocation
     });
     return NextResponse.json({ ok: true });
   } catch (error) {

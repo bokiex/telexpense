@@ -30,6 +30,7 @@ create table if not exists public.transactions (
   subcategory_id bigint,
   account_id bigint references public.accounts(id) on delete set null,
   transfer_group_id uuid,
+  savings_allocation boolean not null default false,
   recurring_rule_id bigint,
   description text not null,
   amount_cents integer not null
@@ -115,6 +116,9 @@ alter table public.transactions
   add column if not exists transfer_group_id uuid;
 
 alter table public.transactions
+  add column if not exists savings_allocation boolean not null default false;
+
+alter table public.transactions
   alter column category drop not null;
 
 alter table public.transactions
@@ -124,14 +128,17 @@ alter table public.transactions
   add constraint transactions_category_required_unless_transfer
   check (category is not null or transfer_group_id is not null);
 
-create or replace function public.update_transfer_group(
+drop function if exists public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date);
+
+create function public.update_transfer_group(
   target_user_id bigint,
   target_transfer_group_id uuid,
   from_account_id bigint,
   to_account_id bigint,
   transfer_description text,
   transfer_amount_cents integer,
-  transfer_occurred_on date
+  transfer_occurred_on date,
+  transfer_savings_allocation boolean
 )
 returns void
 language plpgsql
@@ -151,25 +158,27 @@ begin
   if destination_kind is null then raise exception 'Destination account is not available.'; end if;
   update public.transactions
   set kind = 'expense', category = null, category_id = null, subcategory_id = null,
-      account_id = from_account_id, description = transfer_description,
-      amount_cents = -transfer_amount_cents,
-      occurred_on = transfer_occurred_on
+       account_id = from_account_id, description = transfer_description,
+       amount_cents = -transfer_amount_cents,
+       occurred_on = transfer_occurred_on,
+       savings_allocation = transfer_savings_allocation
   where telegram_user_id = target_user_id and transfer_group_id = target_transfer_group_id and amount_cents < 0;
   if not found then raise exception 'Transfer source leg is not available.'; end if;
   update public.transactions
   set kind = destination_kind, category = null, category_id = null, subcategory_id = null,
-      account_id = to_account_id, description = transfer_description,
-      amount_cents = transfer_amount_cents,
-      occurred_on = transfer_occurred_on
+       account_id = to_account_id, description = transfer_description,
+       amount_cents = transfer_amount_cents,
+       occurred_on = transfer_occurred_on,
+       savings_allocation = transfer_savings_allocation
   where telegram_user_id = target_user_id and transfer_group_id = target_transfer_group_id and amount_cents > 0;
   if not found then raise exception 'Transfer destination leg is not available.'; end if;
 end;
 $$;
 
-revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date) from public;
-revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date) from anon;
-revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date) from authenticated;
-grant execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date) to service_role;
+revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date, boolean) from public;
+revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date, boolean) from anon;
+revoke execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date, boolean) from authenticated;
+grant execute on function public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date, boolean) to service_role;
 
 create or replace function public.delete_transfer_group(
   target_user_id bigint,

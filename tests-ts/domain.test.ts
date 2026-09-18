@@ -106,16 +106,18 @@ test("income allocation separates income, ordinary spend, savings, and remaining
   assert.deepEqual(allocation, { incomeCents: 625_00, spentCents: 200_00, savedCents: 175_00, unallocatedCents: 250_00 });
 });
 
-test("income allocation and trends exclude grouped transfers", () => {
+test("income allocation counts only flagged grouped transfer source legs as savings", () => {
   const transactions = [
     { kind: "income", category: "salary", amount_cents: 300_00, transfer_group_id: null, occurred_on: "2026-01-05" },
     { kind: "expense", category: "food", amount_cents: -50_00, transfer_group_id: null, occurred_on: "2026-01-05" },
-    { kind: "expense", category: null, amount_cents: -100_00, transfer_group_id: "transfer", occurred_on: "2026-01-06" },
-    { kind: "investment", category: null, amount_cents: 100_00, transfer_group_id: "transfer", occurred_on: "2026-01-06" }
+    { kind: "expense", category: null, amount_cents: -100_00, transfer_group_id: "savings-transfer", savings_allocation: true, occurred_on: "2026-01-06" },
+    { kind: "transfer", category: null, amount_cents: 100_00, transfer_group_id: "savings-transfer", savings_allocation: true, occurred_on: "2026-01-06" },
+    { kind: "expense", category: null, amount_cents: -75_00, transfer_group_id: "transfer", savings_allocation: false, occurred_on: "2026-01-07" },
+    { kind: "transfer", category: null, amount_cents: 75_00, transfer_group_id: "transfer", savings_allocation: false, occurred_on: "2026-01-07" }
   ];
   const categories = [{ sourceName: "food", group: "Needs" as const }];
 
-  assert.deepEqual(incomeAllocationTotals(transactions, categories), { incomeCents: 300_00, spentCents: 50_00, savedCents: 0, unallocatedCents: 250_00 });
+  assert.deepEqual(incomeAllocationTotals(transactions, categories), { incomeCents: 300_00, spentCents: 50_00, savedCents: 100_00, unallocatedCents: 150_00 });
   assert.equal(spendingTrend(transactions, categories, "2026-01").daily[5].spentCents, 0);
 });
 

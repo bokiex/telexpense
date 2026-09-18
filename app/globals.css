@@ -1338,6 +1338,25 @@ select:focus-visible {
   gap: 6px;
 }
 
+.savings-allocation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--secondary);
+  padding: 12px;
+}
+
+.savings-allocation strong,
+.savings-allocation small {
+  display: block;
+}
+
+.savings-allocation strong { font-size: 14px; }
+.savings-allocation small { margin-top: 2px; color: var(--muted); font-size: 12px; }
+
 .field-label input,
 .field-label select {
   padding: 10px 12px;

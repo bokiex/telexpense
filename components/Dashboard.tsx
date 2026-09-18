@@ -80,6 +80,7 @@ type RecentTransaction = {
   subcategoryId: number | null;
   accountId: number | null;
   transferGroupId: string | null;
+  savingsAllocation?: boolean;
   transferFromAccountId: number | null;
   transferToAccountId: number | null;
   recurringRuleId: number | null;
@@ -173,6 +174,7 @@ type Transaction = {
   type: TransactionType;
   kind: RecentTransaction["kind"];
   transferGroupId: string | null;
+  savingsAllocation?: boolean;
   categoryId: string;
   subcategoryId?: string;
   accountId?: number | null;
@@ -190,9 +192,10 @@ type TransactionFormValues =
       type: "transfer";
       amount: number;
       accountId: number;
-      toAccountId: number;
-      description: string;
-      date: string;
+       toAccountId: number;
+       description: string;
+       date: string;
+       savingsAllocation: boolean;
     };
 
 type AppData = {
@@ -432,7 +435,8 @@ export default function Dashboard() {
         toAccountId: toAccount?.id,
         description: tx.description,
         amountCents: tx.amount,
-        occurredOn: tx.date
+        occurredOn: tx.date,
+        savingsAllocation: tx.savingsAllocation
       });
       if (!response.ok) {
         const result = await response.json().catch(() => null);
@@ -900,6 +904,7 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
   const [accountKey, setAccountKey] = useState(data.accounts[0]?.accountKey || "");
   const [toAccountKey, setToAccountKey] = useState("");
   const [date, setDate] = useState(localDate);
+  const [savingsAllocation, setSavingsAllocation] = useState(false);
   const [error, setError] = useState("");
   const saveAction = usePendingAction();
   const category = categories.find((item) => item.id === categoryId);
@@ -926,7 +931,7 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
         return;
       }
       void saveAction.run(async () => {
-        if (await onSave({ type, amount: cents, accountId: account.id!, toAccountId: toAccount.id!, description: description.trim() || "Transfer", date })) {
+        if (await onSave({ type, amount: cents, accountId: account.id!, toAccountId: toAccount.id!, description: description.trim() || "Transfer", date, savingsAllocation })) {
           setAmount("");
           setDescription("");
         }
@@ -966,6 +971,7 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
         {type === "transfer" ? <label><span>To</span><select value={toAccountKey} onChange={(event) => setToAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select></label> : null}
         <label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
       </div>
+      {type === "transfer" ? <div className="savings-allocation"><div><strong>Count as savings</strong><small>Add this transfer to this month&apos;s income allocation.</small></div><Switch checked={savingsAllocation} onCheckedChange={setSavingsAllocation} aria-label="Count transfer as savings" /></div> : null}
       {error ? <p className="form-error">{error}</p> : null}
       <PendingButton className="primary-action" type="submit" pending={saveAction.pending} pendingLabel="Saving…">Save {type} {remaining !== null && type === "expense" ? <small>{category?.name} has {money(Math.max(0, remaining))} left</small> : null}</PendingButton>
     </form>
@@ -1860,6 +1866,7 @@ function TransactionModal({
   const initialToAccount = data.accounts.find((item) => item.id === initialTransaction?.toAccountId);
   const [toAccountChoice, setToAccountChoice] = useState(initialToAccount?.accountKey || "");
   const [date, setDate] = useState(editTx?.date ?? localDate());
+  const [savingsAllocation, setSavingsAllocation] = useState(initialTransaction?.savingsAllocation ?? false);
   const [error, setError] = useState("");
   const saveAction = usePendingAction();
   const selectedCategory = data.categories.find((category) => category.id === categoryId);
@@ -1894,7 +1901,8 @@ function TransactionModal({
         accountId: fromAccountId,
         toAccountId,
         description: description.trim(),
-          date
+          date,
+          savingsAllocation
         });
       });
       return;
@@ -1968,6 +1976,12 @@ function TransactionModal({
               ))}
             </select>
           </FieldLabel>
+        ) : null}
+        {type === "transfer" ? (
+          <div className="savings-allocation">
+            <div><strong>Count as savings</strong><small>Add this transfer to this month&apos;s income allocation.</small></div>
+            <Switch checked={savingsAllocation} onCheckedChange={setSavingsAllocation} aria-label="Count transfer as savings" />
+          </div>
         ) : null}
         <FieldLabel label="Date">
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
