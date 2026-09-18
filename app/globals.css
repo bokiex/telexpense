@@ -58,6 +58,12 @@ select:focus-visible {
   opacity: 0.65;
 }
 
+.mini-root svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .ui-button-default {
   background: var(--primary);
   color: var(--primary-foreground);
@@ -331,10 +337,10 @@ select:focus-visible {
 }
 
 .metric-icon {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   margin-bottom: 4px;
-  border-radius: 999px;
+  border-radius: 10px;
   color: var(--destructive);
   background: rgba(248, 113, 113, 0.16);
 }
@@ -377,7 +383,7 @@ select:focus-visible {
 .category-icon {
   width: 40px;
   height: 40px;
-  border-radius: 12px;
+  border-radius: 14px;
 }
 
 .transaction-body,
@@ -496,8 +502,8 @@ select:focus-visible {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 9px 4px;
+  gap: 3px;
+  padding: 7px 4px;
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -505,6 +511,17 @@ select:focus-visible {
 
 .bottom-tabs button.active {
   color: var(--primary);
+}
+
+.bottom-tabs button svg {
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border-radius: 9px;
+}
+
+.bottom-tabs button.active svg {
+  background: #dff4e7;
 }
 
 .bottom-tabs span {
@@ -542,7 +559,7 @@ select:focus-visible {
 .capture-label input::placeholder { color: #bdc7bf; }
 .capture-type { margin: 0; }
 .quick-category-list { display: flex; gap: 8px; max-width: 100%; overflow-x: auto; padding: 5px 1px 10px; scrollbar-width: none; }
-.quick-category-list button { display: grid; place-items: center; gap: 5px; flex: 0 0 76px; min-height: 64px; border: 1px solid var(--border); border-radius: 12px; background: #fff; color: var(--foreground); font-size: 11px; }
+.quick-category-list button { display: grid; place-items: center; gap: 5px; flex: 0 0 76px; min-height: 64px; border: 1px solid var(--border); border-radius: 16px; background: #fff; color: var(--foreground); font-size: 11px; }
 .quick-category-list button strong { font-size: 11px; font-weight: 560; }
 .quick-category-list button small { color: var(--muted); font-size: 9px; }
 .quick-category-list button.selected { border: 2px solid var(--primary); background: #dff4e7; }
@@ -795,7 +812,7 @@ select:focus-visible {
   height: 40px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 14px;
 }
 
 .account-copy,
@@ -964,7 +981,7 @@ select:focus-visible {
 .group-icon {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .group-head strong {
@@ -1050,7 +1067,7 @@ select:focus-visible {
 .budget-row .category-icon {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .budget-row span {
@@ -1222,7 +1239,7 @@ select:focus-visible {
   display: grid;
   place-items: center;
   border: 2px solid transparent;
-  border-radius: 10px;
+  border-radius: 13px;
   background: var(--secondary);
   color: var(--foreground);
 }
