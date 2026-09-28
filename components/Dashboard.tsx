@@ -184,7 +184,7 @@ type Transaction = {
 };
 
 type TransactionFormValues =
-  | (Omit<Transaction, "id" | "sourceId" | "kind" | "transferGroupId" | "toAccountId"> & { id?: string; sourceId?: number; type: "income" | "expense" })
+  | (Omit<Transaction, "id" | "sourceId" | "kind" | "transferGroupId" | "toAccountId"> & { id?: string; sourceId?: number; type: TransactionType })
   | {
       id?: string;
       sourceId?: number;
@@ -306,6 +306,17 @@ const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "loa
 const RECURRING_TYPES: RecurringRuleType[] = ["subscription", "investment_transfer", "loan_payment"];
 const THEME_TARGET_PREFIX = "theme:";
 
+async function fetchHistoryPage(month: string, cursor: HistoryPage["nextCursor"], errorMessage: string): Promise<HistoryPage> {
+  const query = new URLSearchParams({ month, limit: "50" });
+  if (cursor) {
+    query.set("beforeDate", cursor.beforeDate);
+    query.set("beforeId", String(cursor.beforeId));
+  }
+  const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
+  if (!response.ok) throw new Error(errorMessage);
+  return (await response.json()) as HistoryPage;
+}
+
 export default function Dashboard() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -314,11 +325,14 @@ export default function Dashboard() {
   const [balanceVisible, setBalanceVisible] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [summaryRefreshing, setSummaryRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [history, setHistory] = useState<RecentTransaction[] | null>(null);
   const [historyCursor, setHistoryCursor] = useState<HistoryPage["nextCursor"]>(null);
+  const [historyPageCount, setHistoryPageCount] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [historyRetryKey, setHistoryRetryKey] = useState(0);
   const historyRequestVersion = useRef(0);
 
   useEffect(() => {
@@ -331,7 +345,9 @@ export default function Dashboard() {
     let ignore = false;
     async function load() {
       setError("");
-      setLoading(true);
+      const hasCurrentSummary = summary?.month === month;
+      setLoading(!hasCurrentSummary);
+      setSummaryRefreshing(hasCurrentSummary);
       try {
         const response = await apiRequest(`/api/summary?month=${encodeURIComponent(month)}`, "GET");
         if (!response.ok) {
@@ -344,7 +360,10 @@ export default function Dashboard() {
       } catch {
         if (!ignore) setError("Could not load dashboard.");
       } finally {
-        if (!ignore) setLoading(false);
+        if (!ignore) {
+          setLoading(false);
+          setSummaryRefreshing(false);
+        }
       }
     }
     load();
@@ -360,16 +379,15 @@ export default function Dashboard() {
     async function loadHistory() {
       setHistory(null);
       setHistoryCursor(null);
+      setHistoryPageCount(0);
       setHistoryLoading(true);
       setHistoryError("");
       try {
-        const query = new URLSearchParams({ month, limit: "50" });
-        const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
-        if (!response.ok) throw new Error("Could not load transaction history.");
-        const page = (await response.json()) as HistoryPage;
+        const page = await fetchHistoryPage(month, null, "Could not load transaction history.");
         if (!ignore && historyRequestVersion.current === requestVersion) {
           setHistory(page.items);
           setHistoryCursor(page.nextCursor);
+          setHistoryPageCount(1);
         }
       } catch (loadError) {
         if (!ignore && historyRequestVersion.current === requestVersion) {
@@ -384,7 +402,45 @@ export default function Dashboard() {
       ignore = true;
       if (historyRequestVersion.current === requestVersion) historyRequestVersion.current += 1;
     };
-  }, [activeTab, month, refreshKey]);
+  }, [activeTab, month, historyRetryKey]);
+
+  useEffect(() => {
+    if (activeTab !== "transactions" || !refreshKey || !history) return;
+    let ignore = false;
+    const requestVersion = ++historyRequestVersion.current;
+    async function refreshHistory() {
+      setHistoryLoading(true);
+      setHistoryError("");
+      try {
+        const pagesToRefresh = Math.max(1, historyPageCount);
+        const items: RecentTransaction[] = [];
+        let cursor: HistoryPage["nextCursor"] = null;
+        let pagesFetched = 0;
+        do {
+          const page = await fetchHistoryPage(month, cursor, "Could not refresh transaction history.");
+          items.push(...page.items);
+          cursor = page.nextCursor;
+          pagesFetched += 1;
+        } while (pagesFetched < pagesToRefresh && cursor);
+        if (!ignore && historyRequestVersion.current === requestVersion) {
+          setHistory(items);
+          setHistoryCursor(cursor);
+          setHistoryPageCount(pagesFetched);
+        }
+      } catch (refreshError) {
+        if (!ignore && historyRequestVersion.current === requestVersion) {
+          setHistoryError(refreshError instanceof Error ? refreshError.message : "Could not refresh transaction history.");
+        }
+      } finally {
+        if (!ignore && historyRequestVersion.current === requestVersion) setHistoryLoading(false);
+      }
+    }
+    refreshHistory();
+    return () => {
+      ignore = true;
+      if (historyRequestVersion.current === requestVersion) historyRequestVersion.current += 1;
+    };
+  }, [refreshKey]);
 
   const data = useMemo(() => buildAppData(summary), [summary]);
   const historyData = useMemo(
@@ -393,7 +449,13 @@ export default function Dashboard() {
   );
   const reload = () => {
     historyRequestVersion.current += 1;
+    if (activeTab === "transactions" && history === null) setHistoryRetryKey((value) => value + 1);
     setRefreshKey((value) => value + 1);
+  };
+
+  const retryHistory = () => {
+    historyRequestVersion.current += 1;
+    setHistoryRetryKey((value) => value + 1);
   };
 
   async function loadMoreHistory() {
@@ -404,18 +466,11 @@ export default function Dashboard() {
     setHistoryLoading(true);
     setHistoryError("");
     try {
-      const query = new URLSearchParams({
-        month: requestMonth,
-        limit: "50",
-        beforeDate: requestCursor.beforeDate,
-        beforeId: String(requestCursor.beforeId)
-      });
-      const response = await apiRequest(`/api/transactions/history?${query}`, "GET");
-      if (!response.ok) throw new Error("Could not load more transactions.");
-      const page = (await response.json()) as HistoryPage;
+      const page = await fetchHistoryPage(requestMonth, requestCursor, "Could not load more transactions.");
       if (historyRequestVersion.current !== requestVersion) return;
       setHistory((current) => [...(current || []), ...page.items]);
       setHistoryCursor(page.nextCursor);
+      setHistoryPageCount((current) => current + 1);
     } catch (loadError) {
       if (historyRequestVersion.current === requestVersion) {
         setHistoryError(loadError instanceof Error ? loadError.message : "Could not load more transactions.");
@@ -688,12 +743,13 @@ export default function Dashboard() {
             <p className="eyebrow">{headerTitle(activeTab)}</p>
             <p className="header-date">{new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p>
           </div>
-          <input className="mini-month" type="month" value={month} aria-label="Month" onChange={(event) => setMonth(event.target.value || month)} />
+          <input className="mini-month" id="dashboard-month" name="month" type="month" value={month} aria-label="Month" onChange={(event) => setMonth(event.target.value || month)} />
         </header>
 
-        {error ? <div className="mini-error">{friendlyError(error)} <Button variant="link" onClick={reload}>Retry</Button></div> : null}
+        {error ? <div className="mini-error" role="alert">{friendlyError(error)} <Button variant="link" onClick={reload}>Retry</Button></div> : null}
 
-        <div className="mini-content">
+        <div className="mini-content" aria-busy={summaryRefreshing || undefined}>
+          {summaryRefreshing ? <div className="refresh-status" role="status">Updating dashboard</div> : null}
           {loading ? <DashboardSkeleton /> : null}
           {!loading && activeTab === "home" ? (
             <HomeView
@@ -717,7 +773,7 @@ export default function Dashboard() {
               error={historyError}
               hasMore={Boolean(historyCursor)}
               onLoadMore={loadMoreHistory}
-              onRetry={historyCursor ? loadMoreHistory : reload}
+              onRetry={retryHistory}
             />
           ) : null}
           {!loading && activeTab === "accounts" ? (
@@ -736,6 +792,7 @@ export default function Dashboard() {
           {!loading && activeTab === "budget" ? (
             <BudgetView
               data={data}
+              month={month}
               summary={summary}
               onViewHistory={() => setActiveTab("transactions")}
               onSetBudget={(categoryId, subcategoryId) => setModal({ type: "set-budget", categoryId, subcategoryId })}
@@ -749,7 +806,7 @@ export default function Dashboard() {
 
         <nav className="bottom-tabs" aria-label="App sections">
           {tabs.map((tab) => (
-            <Button key={tab.id} className={activeTab === tab.id ? "active" : ""} variant="ghost" onClick={() => setActiveTab(tab.id)}>
+            <Button key={tab.id} className={activeTab === tab.id ? "active" : ""} variant="ghost" aria-current={activeTab === tab.id ? "page" : undefined} onClick={() => setActiveTab(tab.id)}>
               {tab.icon}
               <span>{tab.label}</span>
             </Button>
@@ -896,7 +953,7 @@ function HomeView({
 
 function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData; summary: Summary | null; onSave: (tx: TransactionFormValues) => Promise<boolean>; onViewHistory: () => void }) {
   const categories = data.categories.filter((category) => !category.hidden);
-  const [type, setType] = useState<"expense" | "income" | "transfer">("expense");
+  const [type, setType] = useState<TransactionType | "transfer">("expense");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState(categories[0]?.id || "");
@@ -913,7 +970,7 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
   const spent = category ? spentForCategory(data, category.id) : 0;
   const remaining = category?.budget === undefined ? null : category.budget - spent;
 
-  function selectType(nextType: "expense" | "income" | "transfer") {
+  function selectType(nextType: TransactionType | "transfer") {
     setType(nextType);
     setError("");
   }
@@ -951,25 +1008,25 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
   }
 
   return <Card className="quick-capture">
-    <div className="section-line"><h1>Add an expense</h1><Button className="link-button" variant="ghost" onClick={onViewHistory}>Past entries</Button></div>
+    <div className="section-line"><h1>Add {capitalize(type)}</h1><Button className="link-button" variant="ghost" onClick={onViewHistory}>Past entries</Button></div>
     <form className="capture-form" onSubmit={submit}>
-      <label className="capture-label"><span>Amount</span><small>SGD</small><Input value={amount} inputMode="decimal" placeholder="0.00" aria-label="Amount" onChange={(event) => setAmount(event.target.value)} /></label>
+      <label className="capture-label"><span>Amount</span><small>SGD</small><Input id="quick-amount" name="amount" value={amount} inputMode="decimal" placeholder="0.00" aria-label="Amount" onChange={(event) => setAmount(event.target.value)} /></label>
       <ToggleGroup className="capture-type" type="single" value={type} onValueChange={(value) => { if (value) selectType(value as typeof type); }} aria-label="Transaction type">
         {(["expense", "income", "transfer"] as const).map((item) => <ToggleGroupItem key={item} value={item} className={item === "expense" ? "danger" : undefined}>{capitalize(item)}</ToggleGroupItem>)}
       </ToggleGroup>
       {type !== "transfer" ? <>
-        <div className="quick-category-list" aria-label="Choose category">
+           <div className="quick-category-list" aria-label="Choose category">
           {categories.map((item) => { const Icon = iconFor(item.icon); const itemRemaining = item.budget === undefined ? null : item.budget - spentForCategory(data, item.id); return <Button key={item.id} className={categoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => { setCategoryId(item.id); setSubcategoryId(""); }} aria-pressed={categoryId === item.id}><Icon size={18} /><strong>{item.name}</strong>{itemRemaining !== null ? <small>{money(Math.max(0, itemRemaining))} left</small> : null}</Button>; })}
         </div>
         {category?.subcategories.length ? <div className="quick-subcategory-list" aria-label={`${category.name} subcategories`}>
           {category.subcategories.map((item) => <Button key={item.id} className={subcategoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => setSubcategoryId(item.id)} aria-pressed={subcategoryId === item.id}><strong>{item.name}</strong>{item.budget !== undefined ? <small>{money(Math.max(0, item.budget - spentForSubcategory(data, item.id)))} left</small> : null}</Button>)}
         </div> : null}
       </> : null}
-      <label className="capture-description"><span>What was this for? <small>Optional</small></span><Input value={description} placeholder="Toast Box, groceries..." onChange={(event) => setDescription(event.target.value)} /></label>
+      <label className="capture-description"><span>What was this for? <small>Optional</small></span><Input id="quick-description" name="description" value={description} placeholder="Toast Box, groceries..." onChange={(event) => setDescription(event.target.value)} /></label>
       <div className={type === "transfer" ? "capture-meta transfer-meta" : "capture-meta"}>
-        <label><span>{type === "transfer" ? "From" : "Account"}</span><select value={accountKey} onChange={(event) => setAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select>{account ? <small>{money(Math.abs(account.balanceCents))} {isDebtAccount(account) ? "due" : "available"}</small> : null}</label>
-        {type === "transfer" ? <label><span>To</span><select value={toAccountKey} onChange={(event) => setToAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select></label> : null}
-        <label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+         <label><span>{type === "transfer" ? "From" : "Account"}</span><select id="quick-account" name="account" value={accountKey} onChange={(event) => setAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select>{account ? <small>{money(Math.abs(account.balanceCents))} {isDebtAccount(account) ? "due" : "available"}</small> : null}</label>
+        {type === "transfer" ? <label><span>To</span><select id="quick-to-account" name="toAccount" value={toAccountKey} onChange={(event) => setToAccountKey(event.target.value)}><option value="">Select account</option>{data.accounts.map((item) => <option key={item.accountKey} value={item.accountKey}>{item.name}</option>)}</select></label> : null}
+         <label className="capture-date"><span>Date</span><input id="quick-date" name="date" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
       </div>
       {type === "transfer" ? <div className="savings-allocation"><div><strong>Count as savings</strong><small>Add this transfer to this month&apos;s income allocation.</small></div><Switch checked={savingsAllocation} onCheckedChange={setSavingsAllocation} aria-label="Count transfer as savings" /></div> : null}
       {error ? <p className="form-error">{error}</p> : null}
@@ -1037,7 +1094,7 @@ function TransactionListView({
       <div className="search-row">
         <label className="search-box">
           <Search size={15} />
-          <Input value={search} placeholder="Search transactions" aria-label="Search transactions" onChange={(event) => setSearch(event.target.value)} />
+          <Input id="transaction-search" name="search" value={search} placeholder="Search transactions" aria-label="Search transactions" onChange={(event) => setSearch(event.target.value)} />
           {search ? (
             <Button variant="ghost" onClick={() => setSearch("")} aria-label="Clear search">
               <X size={13} />
@@ -1053,7 +1110,7 @@ function TransactionListView({
       {showFilters ? (
         <div id="transaction-filters" className="filter-panel">
           <FieldLabel label="Category">
-            <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+             <select id="transaction-category" name="category" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
               <option value="all">All Categories</option>
               {data.categories.filter((category) => !category.hidden).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
@@ -1081,7 +1138,7 @@ function TransactionListView({
         ) : <EmptyState label={`No transactions found for ${month}`} />}
       </div>
 
-      {error ? <div className="mini-error">{error} <Button variant="link" onClick={onRetry}>Retry</Button></div> : null}
+      {error ? <div className="mini-error" role="alert">{error} <Button variant="link" onClick={onRetry}>Retry</Button></div> : null}
       {hasMore || loading ? (
         <PendingButton className="link-button" type="button" pending={loading} pendingLabel="Loading…" onAction={onLoadMore}>
           Load more
@@ -1242,6 +1299,7 @@ function InvestmentAccountDetail({ account, snapshot }: { account: Account; snap
 
 function BudgetView({
   data,
+  month,
   summary,
   onViewHistory,
   onSetBudget,
@@ -1251,6 +1309,7 @@ function BudgetView({
   onDeleteCategory
 }: {
   data: AppData;
+  month: string;
   summary: Summary | null;
   onViewHistory: () => void;
   onSetBudget: (categoryId: string, subcategoryId?: string) => void;
@@ -1270,12 +1329,12 @@ function BudgetView({
   const savingsAllocated = summary?.health.savingsAllocatedCents ?? 0;
   const budgetProgress = summary?.health.progressCents ?? ordinarySpent + savingsAllocated;
   const budgetLeft = totalBudget - budgetProgress;
-  const budgetUsedPct = totalBudget ? Math.min(100, Math.round((budgetProgress / totalBudget) * 100)) : 0;
+  const budgetUsedPctRaw = totalBudget ? Math.round((budgetProgress / totalBudget) * 100) : 0;
+  const budgetUsedPct = Math.min(100, Math.max(0, budgetUsedPctRaw));
   const progressByGroup = budgetProgressByGroup(activeCategories, data, summary);
-  const donutSegments = budgetDonutSegments(progressByGroup, totalBudget);
-  const donutBackground = donutSegments.length
-    ? `conic-gradient(${donutSegments.map((segment) => `${segment.color} ${segment.start}% ${segment.end}%`).join(", ")}, var(--secondary) ${donutSegments.at(-1)?.end || 0}% 100%)`
-    : "var(--secondary)";
+  const scoreRingBackground = totalBudget
+    ? `conic-gradient(${budgetLeft < 0 ? "#f87171" : "#8cdbac"} 0 ${budgetUsedPct}%, #43504a ${budgetUsedPct}% 100%)`
+    : "#43504a";
   const hasBudgetTargets = GROUPS.some((group) => themeBudget(summary, group) !== undefined)
     || activeCategories.some((category) => category.budget !== undefined || category.subcategories.some((subcategory) => subcategory.budget !== undefined));
   const toggleCategory = (categoryId: string) => {
@@ -1289,139 +1348,140 @@ function BudgetView({
 
   return (
     <div className="screen-stack">
-      <section className="mini-card budget-summary">
-        <div className="section-line">
-          <p className="eyebrow">Monthly Budget</p>
+      <section className="budget-command-center" aria-labelledby="budget-command-center-title">
+        <div className="budget-score-panel">
+          <div className="budget-score-ring" style={{ background: scoreRingBackground }}>
+            <span>{budgetUsedPct}%</span>
+          </div>
+          <div className="budget-score-copy">
+            <p className="budget-score-period">{monthLabel(month)} budget</p>
+            <h1 id="budget-command-center-title">{totalBudget ? budgetLeft < 0 ? `${money(Math.abs(budgetLeft))} over budget` : `${money(budgetLeft)} available` : "Set a budget"}</h1>
+            <small>{totalBudget ? `${money(budgetProgress)} of ${money(totalBudget)} used or allocated` : "Add a budget target to start tracking this month"}</small>
+            {summary ? <small>{summary.health.daysLeft} days remaining</small> : null}
+          </div>
+        </div>
+        <div className="budget-stat-grid">
+          <div className="budget-stat"><small>Set budget</small><strong>{money(totalBudget)}</strong></div>
+          <div className="budget-stat"><small>Ordinary spend</small><strong>{money(ordinarySpent)}</strong></div>
+          <div className="budget-stat"><small>Saved / invested</small><strong>{money(savingsAllocated)}</strong></div>
+        </div>
+      </section>
+
+      <section className="mini-card budget-breakdown-card" aria-labelledby="budget-breakdown-title">
+        <div className="section-line budget-breakdown-heading">
+          <div>
+            <p className="eyebrow">Budget breakdown</p>
+            <h2 id="budget-breakdown-title">Where money is going</h2>
+          </div>
           <button className="inline-add" type="button" onClick={onAddCategory}>
             <Plus size={14} /> Add Category
           </button>
         </div>
-        <div className="budget-overview">
-          <div className="budget-donut-wrap">
-            <div className="donut budget-donut" style={{ background: donutBackground }}>
-              <span>{money(Math.abs(budgetLeft))}</span>
-              <small>{budgetLeft < 0 ? "over" : "available"}</small>
+        {GROUPS.map((group) => {
+          const categories = activeCategories.filter((category) => category.group === group);
+          const groupThemeBudget = themeBudget(summary, group);
+          const groupBudget = groupThemeBudget ?? effectiveBudgetTotal(categories);
+          const groupActivity = progressByGroup[group];
+          const groupPctRaw = groupBudget ? Math.round((groupActivity / groupBudget) * 100) : 0;
+          const groupPct = Math.min(100, Math.max(0, groupPctRaw));
+          return (
+            <div key={group} className="budget-group-section">
+              <div className="group-head">
+                <div className="group-icon" style={{ color: GROUP_COLORS[group], backgroundColor: `${GROUP_COLORS[group]}22` }}>
+                  {group === "Needs" ? <Home size={16} /> : group === "Wants" ? <ShoppingBag size={16} /> : <Wallet size={16} />}
+                </div>
+                <div>
+                  <strong>{group}</strong>
+                  <Progress label={`${group} budget ${groupPctRaw}% used`} value={groupPct} color={groupPctRaw > 90 ? "#f87171" : GROUP_COLORS[group]} />
+                </div>
+                <span>{groupBudget ? `${money(groupActivity)} / ${money(groupBudget)} · ${groupPctRaw}%` : money(groupActivity)}</span>
+                <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(themeTarget(group))} aria-label={`Set ${group} budget`}>
+                  <Pencil size={11} />
+                </Button>
+              </div>
+              <div className="nested-list">
+                {categories.length ? categories.map((category) => {
+                  const spent = spentForCategory(data, category.id);
+                  const pct = category.budget ? Math.max(0, Math.round((spent / category.budget) * 100)) : 0;
+                  const childBudget = category.subcategories.reduce((sum, subcategory) => sum + (subcategory.budget || 0), 0);
+                  const isExpanded = expandedCategories.has(category.id);
+                  const childListId = `budget-subcategories-${category.id}`;
+                  return (
+                    <div key={category.id} className="budget-category-block">
+                      <div className="budget-row budget-row-parent">
+                        {category.subcategories.length ? (
+                          <button
+                            className="tiny-icon collapse-toggle"
+                            type="button"
+                            onClick={() => toggleCategory(category.id)}
+                            aria-expanded={isExpanded}
+                            aria-controls={childListId}
+                            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${category.name} subcategories`}
+                          >
+                            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          </button>
+                        ) : <span className="collapse-spacer" aria-hidden="true" />}
+                        <CategoryIcon category={category} />
+                        <div>
+                          <strong>{category.name}</strong>
+                          <small>{category.subcategories.length ? `${category.subcategories.length} subcategories` : "Category budget"}</small>
+                          <Progress label={`${category.name} budget ${pct}% used`} value={pct} color={pct > 90 ? "#f87171" : category.color} thin />
+                        </div>
+                        <span>{budgetRowAmount(spent, category.budget)} · {pct}%</span>
+                        <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
+                          <Pencil size={11} />
+                        </Button>
+                      </div>
+                      <div className="budget-management-row" aria-label={`${category.name} category management`}>
+                        <button type="button" onClick={() => onEditCategory(category.id)} aria-label={`Edit ${category.name}`}>
+                          <Pencil size={11} />
+                          Edit
+                        </button>
+                        <button type="button" onClick={() => onAddSubcategory(category.id)} aria-label={`Add subcategory to ${category.name}`}>
+                          <Plus size={11} />
+                          Subcategory
+                        </button>
+                        <button className="danger" type="button" onClick={() => setDeleteConfirm(deleteConfirm === category.id ? null : category.id)} aria-label={`Delete ${category.name}`}>
+                          <Trash2 size={11} />
+                          Delete
+                        </button>
+                      </div>
+                      {category.subcategories.length && isExpanded ? (
+                        <div className="subcategory-budget-list" id={childListId}>
+                          {category.subcategories.map((subcategory) => {
+                            const subSpent = spentForSubcategory(data, subcategory.id);
+                            const subPct = subcategory.budget ? Math.max(0, Math.round((subSpent / subcategory.budget) * 100)) : 0;
+                            return (
+                              <div key={subcategory.id} className="budget-row budget-row-child">
+                                <span className="subcategory-marker" aria-hidden="true" />
+                                <div>
+                                  <strong>{subcategory.name}</strong>
+                                  <Progress label={`${subcategory.name} budget ${subPct}% used`} value={subPct} color={subPct > 90 ? "#f87171" : category.color} thin />
+                                </div>
+                                <span>{budgetRowAmount(subSpent, subcategory.budget)} · {subPct}%</span>
+                                <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
+                                  <Pencil size={11} />
+                                </Button>
+                              </div>
+                            );
+                          })}
+                          {category.budget === undefined && childBudget > 0 ? <small className="child-budget-note">Child targets total {money(childBudget)}</small> : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                }) : <EmptyState label={`No ${group.toLowerCase()} categories yet`} />}
+              </div>
             </div>
-            <div className="budget-legend" aria-label="Budget progress by group">
-              {GROUPS.map((group) => (
-                <span key={group}>
-                  <i style={{ backgroundColor: GROUP_COLORS[group] }} aria-hidden="true" />
-                  {group}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="summary-list">
-            <ValueLine label="Budget" value={money(totalBudget)} />
-            <ValueLine label="Ordinary spend" value={money(ordinarySpent)} danger />
-            <ValueLine label="Saved/invested" value={money(savingsAllocated)} positive={savingsAllocated > 0} />
-            <ValueLine label={`${budgetUsedPct}% allocated`} value={`${money(Math.abs(budgetLeft))}${budgetLeft < 0 ? " over" : " left"}`} positive={budgetLeft >= 0} danger={budgetLeft < 0} />
-          </div>
-        </div>
+          );
+        })}
       </section>
 
-      <IncomeAllocationCard allocation={summary?.incomeAllocation || { incomeCents: 0, spentCents: 0, savedCents: 0, unallocatedCents: 0 }} />
-      {summary?.spendingTrend.daily.length ? <SpendingTrend trend={summary.spendingTrend} onViewHistory={onViewHistory} /> : null}
-
-      {GROUPS.map((group) => {
-        const categories = activeCategories.filter((category) => category.group === group);
-        const groupThemeBudget = themeBudget(summary, group);
-        const groupBudget = groupThemeBudget ?? effectiveBudgetTotal(categories);
-        const groupActivity = progressByGroup[group];
-        const groupPct = groupBudget ? Math.min(100, Math.round((groupActivity / groupBudget) * 100)) : 0;
-        return (
-          <section key={group} className="mini-card grouped-card">
-            <div className="group-head">
-              <div className="group-icon" style={{ color: GROUP_COLORS[group], backgroundColor: `${GROUP_COLORS[group]}22` }}>
-                {group === "Needs" ? <Home size={16} /> : group === "Wants" ? <ShoppingBag size={16} /> : <Wallet size={16} />}
-              </div>
-              <div>
-                <strong>{group}</strong>
-                <Progress label={`${group} budget ${groupPct}% used`} value={groupPct} color={groupPct > 90 ? "#f87171" : GROUP_COLORS[group]} />
-              </div>
-              <span>{groupBudget ? `${money(groupActivity)} / ${money(groupBudget)}` : money(groupActivity)}</span>
-                      <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(themeTarget(group))} aria-label={`Set ${group} budget`}>
-                        <Pencil size={11} />
-                      </Button>
-            </div>
-            <div className="nested-list">
-              {categories.length ? categories.map((category) => {
-                const spent = spentForCategory(data, category.id);
-                const pct = category.budget ? Math.min(100, Math.round((spent / category.budget) * 100)) : 0;
-                const childBudget = category.subcategories.reduce((sum, subcategory) => sum + (subcategory.budget || 0), 0);
-                const isExpanded = expandedCategories.has(category.id);
-                const childListId = `budget-subcategories-${category.id}`;
-                return (
-                  <div key={category.id} className="budget-category-block">
-                    <div className="budget-row budget-row-parent">
-                      {category.subcategories.length ? (
-                        <button
-                          className="tiny-icon collapse-toggle"
-                          type="button"
-                          onClick={() => toggleCategory(category.id)}
-                          aria-expanded={isExpanded}
-                          aria-controls={childListId}
-                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${category.name} subcategories`}
-                        >
-                          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                        </button>
-                      ) : <span className="collapse-spacer" aria-hidden="true" />}
-                      <CategoryIcon category={category} />
-                      <div>
-                        <strong>{category.name}</strong>
-                        <small>{category.subcategories.length ? `${category.subcategories.length} subcategories` : "Category budget"}</small>
-                        <Progress label={`${category.name} budget ${pct}% used`} value={pct} color={pct > 90 ? "#f87171" : category.color} thin />
-                      </div>
-                      <span>{budgetRowAmount(spent, category.budget)}</span>
-                      <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
-                        <Pencil size={11} />
-                      </Button>
-                    </div>
-                    <div className="budget-management-row" aria-label={`${category.name} category management`}>
-                      <button type="button" onClick={() => onEditCategory(category.id)} aria-label={`Edit ${category.name}`}>
-                        <Pencil size={11} />
-                        Edit
-                      </button>
-                      <button type="button" onClick={() => onAddSubcategory(category.id)} aria-label={`Add subcategory to ${category.name}`}>
-                        <Plus size={11} />
-                        Subcategory
-                      </button>
-                      <button className="danger" type="button" onClick={() => setDeleteConfirm(deleteConfirm === category.id ? null : category.id)} aria-label={`Delete ${category.name}`}>
-                        <Trash2 size={11} />
-                        Delete
-                      </button>
-                    </div>
-                    {category.subcategories.length && isExpanded ? (
-                      <div className="subcategory-budget-list" id={childListId}>
-                        {category.subcategories.map((subcategory) => {
-                          const subSpent = spentForSubcategory(data, subcategory.id);
-                          const subPct = subcategory.budget ? Math.min(100, Math.round((subSpent / subcategory.budget) * 100)) : 0;
-                          return (
-                            <div key={subcategory.id} className="budget-row budget-row-child">
-                              <span className="subcategory-marker" aria-hidden="true" />
-                              <div>
-                                <strong>{subcategory.name}</strong>
-                                <Progress label={`${subcategory.name} budget ${subPct}% used`} value={subPct} color={subPct > 90 ? "#f87171" : category.color} thin />
-                              </div>
-                              <span>{budgetRowAmount(subSpent, subcategory.budget)}</span>
-                              <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
-                                <Pencil size={11} />
-                              </Button>
-                            </div>
-                          );
-                        })}
-                        {category.budget === undefined && childBudget > 0 ? <small className="child-budget-note">Child targets total {money(childBudget)}</small> : null}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              }) : <EmptyState label={`No ${group.toLowerCase()} categories yet`} />}
-            </div>
-          </section>
-        );
-      })}
-
       {!hasBudgetTargets ? <EmptyState label="No budgets set for this month yet." /> : null}
+
+      <IncomeAllocationCard allocation={summary?.incomeAllocation || { incomeCents: 0, spentCents: 0, savedCents: 0, unallocatedCents: 0 }} />
+
+      {summary?.spendingTrend.daily.length ? <SpendingTrend trend={summary.spendingTrend} onViewHistory={onViewHistory} /> : null}
 
       <ConfirmDialog
         open={Boolean(categoryToDelete)}
@@ -1856,7 +1916,7 @@ function TransactionModal({
   onClose: () => void;
 }) {
   const initialTransaction = editTx || repeatTx;
-  const [type, setType] = useState<"income" | "expense" | "transfer">(initialTransaction?.transferGroupId ? "transfer" : initialTransaction?.kind === "transfer" ? "transfer" : initialTransaction?.type ?? "expense");
+  const [type, setType] = useState<TransactionType | "transfer">(initialTransaction?.transferGroupId ? "transfer" : initialTransaction?.kind === "transfer" ? "transfer" : initialTransaction?.type ?? "expense");
   const [amount, setAmount] = useState(initialTransaction ? String(initialTransaction.amount / 100) : "");
   const [description, setDescription] = useState(initialTransaction?.description ?? "");
   const [categoryId, setCategoryId] = useState(initialTransaction?.categoryId ?? defaultCategoryId ?? data.categories[0]?.id ?? "");
@@ -2016,7 +2076,7 @@ function BudgetModal({
   const theme = themeFromTarget(categoryId);
   const subcategory = category?.subcategories.find((item) => item.id === subcategoryId);
   const targetBudget = theme ? themeBudget(summary, theme) : subcategory ? subcategory.budget : category?.budget;
-  const [amount, setAmount] = useState(targetBudget ? String(targetBudget / 100) : "");
+  const [amount, setAmount] = useState(targetBudget !== undefined ? String(targetBudget / 100) : "");
   const [error, setError] = useState("");
   const saveAction = usePendingAction();
 
@@ -2122,20 +2182,13 @@ function RepeatCard({ tx, data, onClick }: { tx: Transaction; data: AppData; onC
 function IncomeAllocationCard({ allocation }: { allocation: IncomeAllocation }) {
   const assignedCents = allocation.spentCents + allocation.savedCents;
   const positiveIncome = Math.max(0, allocation.incomeCents);
-  const spentPct = positiveIncome ? Math.min(100, (allocation.spentCents / positiveIncome) * 100) : 0;
-  const savedPct = positiveIncome ? Math.min(100 - spentPct, (allocation.savedCents / positiveIncome) * 100) : 0;
-  const ring = positiveIncome ? `conic-gradient(var(--destructive) 0 ${spentPct}%, var(--primary) ${spentPct}% ${spentPct + savedPct}%, var(--secondary) ${spentPct + savedPct}% 100%)` : "var(--secondary)";
-  return <section className="allocation-card">
-    <p className="eyebrow">Income allocation</p>
-    <div className="allocation-layout">
-      <div className="allocation-ring" style={{ background: ring }}><span>Income<br /><strong>{money(allocation.incomeCents)}</strong></span></div>
-      <div className="allocation-legend">
-        <ValueLine label="Spent" value={money(allocation.spentCents)} danger />
-        <ValueLine label="Saved" value={money(allocation.savedCents)} positive />
-        <ValueLine label={allocation.unallocatedCents < 0 ? "Over-allocated" : "Unallocated"} value={money(Math.abs(allocation.unallocatedCents))} danger={allocation.unallocatedCents < 0} />
-      </div>
+  return <section className="income-summary budget-secondary-card">
+    <span className="success-dot" aria-hidden="true" />
+    <div>
+      <strong>Income allocation · secondary</strong>
+      <small>{money(allocation.incomeCents)} income · {money(Math.abs(allocation.unallocatedCents))} {allocation.unallocatedCents < 0 ? "over-allocated" : "unallocated"} · {money(allocation.savedCents)} saved</small>
     </div>
-    {positiveIncome === 0 && assignedCents > 0 ? <p className="helper-copy">Record income to compare this month&apos;s spending and savings allocation.</p> : null}
+    {positiveIncome === 0 && assignedCents > 0 ? <small className="income-summary-note">Record income to compare spending and savings.</small> : null}
   </section>;
 }
 
@@ -2150,17 +2203,32 @@ function SpendingTrend({ trend, onViewHistory }: { trend: Summary["spendingTrend
     const y = 126 - (item.spentCents / maximum) * 110;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
+  const areaPoints = points ? `0,126 ${points} 320,126` : "";
   const firstDay = pointsForPeriod[0];
   const lastDay = pointsForPeriod.at(-1);
   const labels = firstDay && lastDay && firstDay.periodStart !== lastDay.periodStart ? [firstDay, lastDay] : firstDay ? [firstDay] : [];
+  const periodLabel = trendPeriodLabel(period);
+  const chartTitle = `${capitalize(periodLabel)} spending trend, ${money(total)} total and ${money(Math.round(average))} average per ${periodLabel}`;
   return <section className="trend-card">
-    <div className="section-line"><div><p className="eyebrow">Spending trend</p><strong>{money(Math.round(average))}</strong><small>Average per {period.slice(0, -2)}</small></div><Button className="link-button" variant="ghost" onClick={onViewHistory}>View history</Button></div>
+    <div className="section-line"><div><p className="eyebrow">Ordinary spending trend</p><strong>{money(Math.round(average))}</strong><small>Average per {periodLabel}</small></div><Button className="link-button" variant="ghost" onClick={onViewHistory}>View history</Button></div>
     <ToggleGroup className="trend-toggle" type="single" value={period} onValueChange={(value) => { if (value) setPeriod(value as typeof period); }} aria-label="Spending trend period"><ToggleGroupItem value="daily">Daily</ToggleGroupItem><ToggleGroupItem value="weekly">Weekly</ToggleGroupItem><ToggleGroupItem value="monthly">Monthly</ToggleGroupItem></ToggleGroup>
-    <svg className="trend-chart" viewBox="0 0 320 142" preserveAspectRatio="none" role="img" aria-label={`${capitalize(period)} spending trend, average ${money(Math.round(average))}`}>
-      <line x1="0" y1="25" x2="320" y2="25" /><line x1="0" y1="70" x2="320" y2="70" /><line x1="0" y1="115" x2="320" y2="115" /><polyline points={points} />
+    <svg className="trend-chart" viewBox="0 0 320 142" preserveAspectRatio="none" role="img" aria-labelledby="trend-chart-title trend-chart-description">
+      <title id="trend-chart-title">{chartTitle}</title>
+      <desc id="trend-chart-description">Ordinary spending over the selected {periodLabel} periods. Open History for individual transactions.</desc>
+      <line className="trend-grid" x1="0" y1="25" x2="320" y2="25" /><line className="trend-grid" x1="0" y1="70" x2="320" y2="70" /><line className="trend-grid" x1="0" y1="115" x2="320" y2="115" />
+      {areaPoints ? <polygon className="trend-area" points={areaPoints} /> : null}
+      {points ? <polyline className="trend-line" points={points} /> : null}
+      {firstDay ? <circle className="trend-point" cx={pointsForPeriod.length === 1 ? 160 : 0} cy={126 - (firstDay.spentCents / maximum) * 110} r="3" /> : null}
+      {lastDay && lastDay !== firstDay ? <circle className="trend-point" cx="320" cy={126 - (lastDay.spentCents / maximum) * 110} r="3" /> : null}
     </svg>
-    <div className="trend-labels">{labels.map((item) => <span key={item.periodStart}>{period === "monthly" ? item.periodStart : formatShortDate(item.periodStart)}</span>)}</div>
+    {pointsForPeriod.length ? <div className="trend-labels">{labels.map((item) => <span key={item.periodStart}>{period === "monthly" ? item.periodStart : formatShortDate(item.periodStart)}</span>)}</div> : <p className="helper-copy">No ordinary spending recorded for this period.</p>}
   </section>;
+}
+
+function trendPeriodLabel(period: keyof Summary["spendingTrend"]) {
+  if (period === "weekly") return "week";
+  if (period === "monthly") return "month";
+  return "day";
 }
 
 function RowActions({
@@ -2267,6 +2335,7 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
       type: tx.kind === "income" || tx.amountCents > 0 ? "income" : "expense",
       kind: tx.transferGroupId ? "transfer" : tx.kind,
       transferGroupId: tx.transferGroupId,
+      savingsAllocation: tx.savingsAllocation,
       categoryId: category?.id || "",
       subcategoryId: tx.subcategoryId === null || !category ? undefined : `${category.id}:stored-${tx.subcategoryId}`,
       accountId: transfer?.fromAccountId ?? tx.accountId,
@@ -2339,18 +2408,6 @@ function budgetProgressByGroup(categories: Category[], data: AppData, summary: S
   }, { Needs: 0, Wants: 0, Savings: 0 } as Record<BudgetGroup, number>);
 }
 
-function budgetDonutSegments(progressByGroup: Record<BudgetGroup, number>, totalBudget: number) {
-  if (totalBudget <= 0) return [];
-  let cursor = 0;
-  return GROUPS.flatMap((group) => {
-    const value = Math.max(0, progressByGroup[group]);
-    if (!value) return [];
-    const start = cursor;
-    cursor = Math.min(100, cursor + (value / totalBudget) * 100);
-    return [{ group, color: GROUP_COLORS[group], start, end: cursor }];
-  });
-}
-
 function budgetRowAmount(spent: number, budget?: number) {
   return budget !== undefined ? `${money(spent)} / ${money(budget)}` : money(spent);
 }
@@ -2418,6 +2475,11 @@ function formatDate(dateStr: string) {
 
 function formatShortDate(dateStr: string) {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+function monthLabel(month?: string) {
+  if (!month) return "Monthly";
+  return new Date(`${month}-01T00:00:00`).toLocaleDateString("en-GB", { month: "long" });
 }
 
 function recurringRuleDetail(rule: RecurringRule, accounts: Account[]) {
