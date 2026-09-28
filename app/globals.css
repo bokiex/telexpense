@@ -601,8 +601,8 @@ select:focus-visible {
 .capture-description { min-width: 0; display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .capture-description input, .capture-meta select, .capture-meta input { width: 100%; min-height: 43px; border: 1px solid var(--border); border-radius: 11px; background: #fff; color: var(--foreground); padding: 0 10px; }
 .capture-meta select, .capture-meta input[type="date"] { height: 43px; min-height: 43px; box-sizing: border-box; }
-.capture-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.capture-meta label { min-width: 0; display: grid; gap: 4px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.capture-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: start; }
+.capture-meta label { min-width: 0; display: grid; align-self: start; align-content: start; gap: 4px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .capture-meta select, .capture-meta input { min-width: 0; }
 .capture-meta .capture-date { grid-column: auto; min-width: 0; }
 .capture-meta .capture-date input { min-width: 0; padding-inline: 8px; }
