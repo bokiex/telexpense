@@ -204,12 +204,19 @@ select:focus-visible {
 
 .mini-month {
   width: 132px;
+  height: 38px;
+  min-height: 38px;
+  appearance: none;
+  -webkit-appearance: none;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--card);
   color: var(--foreground);
-  padding: 9px;
-  font-size: 12px;
+  padding: 6px 8px;
+  font-size: 12px !important;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .mini-error {
@@ -579,14 +586,15 @@ select:focus-visible {
 .capture-label input::placeholder { color: #bdc7bf; }
 .capture-type { margin: 0; }
 .capture-type .ui-toggle-group-item { min-width: 0; }
-.quick-category-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; max-width: 100%; padding: 2px 1px 0; }
-.quick-category-list button { min-width: 0; display: grid; place-items: center; gap: 5px; min-height: 56px; border: 1px solid var(--border); border-radius: 12px; background: #fff; color: var(--foreground); padding: 7px 4px; font-size: 11px; }
+.quick-category-list { display: flex; gap: 6px; max-width: 100%; overflow-x: auto; padding: 2px 1px 2px; scrollbar-width: none; }
+.quick-category-list button { min-width: 0; flex: 0 0 88px; height: 64px; display: grid; grid-template-rows: 18px minmax(14px, 28px) 12px; place-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 12px; background: #fff; color: var(--foreground); padding: 7px 5px; font-size: 11px; }
 .quick-category-list button strong { font-size: 11px; font-weight: 560; }
-.quick-category-list button strong { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quick-picker-name { min-width: 0; max-width: 100%; display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; text-align: center; }
 .quick-category-list button small { color: var(--muted); font-size: 9px; }
 .quick-category-list button.selected { border: 2px solid var(--primary); background: #dff4e7; }
 .quick-subcategory-list { display: flex; gap: 8px; max-width: 100%; overflow-x: auto; padding: 0 1px 2px; scrollbar-width: none; }
-.quick-subcategory-list button { display: grid; gap: 2px; flex: 0 0 120px; min-height: 52px; border: 1px solid var(--border); border-radius: 11px; background: #fff; color: var(--foreground); padding: 8px 10px; text-align: left; }
+.quick-subcategory-list button { display: grid; grid-template-rows: minmax(24px, 32px) 12px; align-content: center; gap: 2px; flex: 0 0 120px; height: 60px; border: 1px solid var(--border); border-radius: 11px; background: #fff; color: var(--foreground); padding: 7px 10px; text-align: left; }
+.quick-subcategory-list button .quick-picker-name { width: 100%; text-align: left; }
 .quick-subcategory-list button.selected { border: 2px solid var(--primary); background: #dff4e7; }
 .quick-subcategory-list small, .capture-description small, .capture-meta small { color: var(--muted); font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .capture-description { min-width: 0; display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
@@ -895,8 +903,7 @@ select:focus-visible {
 .allocation-ring { display: grid; place-items: center; width: 100px; height: 100px; border-radius: 999px; }
 .allocation-ring::before { content: ""; position: absolute; width: 74px; height: 74px; border-radius: inherit; background: var(--card); }
 .allocation-ring { position: relative; }
-.allocation-ring span { position: relative; z-index: 1; color: var(--muted); font-size: 10px; line-height: 1.25; text-align: center; }
-.allocation-ring strong { color: var(--foreground); font-size: 11px; }
+.allocation-ring strong { position: relative; z-index: 1; color: var(--foreground); font-size: 11px; }
 .allocation-legend { display: grid; gap: 8px; }
 .allocation-legend > div { min-width: 0; display: flex; justify-content: space-between; gap: 8px; }
 .allocation-legend span { color: var(--muted); font-size: 12px; }

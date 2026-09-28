@@ -113,6 +113,10 @@ type IncomeAllocation = {
 type TrendPoint = { periodStart: string; spentCents: number };
 
 type Summary = {
+  user: {
+    firstName: string | null;
+    username: string | null;
+  };
   month: string;
   categories: CategorySpend[];
   subcategories: SubcategorySpend[];
@@ -740,8 +744,8 @@ export default function Dashboard() {
       <section className="phone-frame" aria-label="Telexpense mini app" aria-hidden={modal.type !== "none" || undefined} inert={modal.type !== "none" || undefined}>
         <header className="mini-header">
           <div>
-            <p className="eyebrow">{headerTitle(activeTab)}</p>
-            <p className="header-date">{new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p>
+            <p className="eyebrow">{headerTitle(activeTab, summary?.user)}</p>
+            {activeTab !== "home" ? <p className="header-date">{new Date(`${month}-01T00:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p> : null}
           </div>
           <input className="mini-month" id="dashboard-month" name="month" type="month" value={month} aria-label="Month" onChange={(event) => setMonth(event.target.value || month)} />
         </header>
@@ -1016,10 +1020,10 @@ function QuickCapture({ data, summary, onSave, onViewHistory }: { data: AppData;
       </ToggleGroup>
       {type !== "transfer" ? <>
            <div className="quick-category-list" aria-label="Choose category">
-          {categories.map((item) => { const Icon = iconFor(item.icon); const itemRemaining = item.budget === undefined ? null : item.budget - spentForCategory(data, item.id); return <Button key={item.id} className={categoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => { setCategoryId(item.id); setSubcategoryId(""); }} aria-pressed={categoryId === item.id}><Icon size={18} /><strong>{item.name}</strong>{itemRemaining !== null ? <small>{money(Math.max(0, itemRemaining))} left</small> : null}</Button>; })}
-        </div>
-        {category?.subcategories.length ? <div className="quick-subcategory-list" aria-label={`${category.name} subcategories`}>
-          {category.subcategories.map((item) => <Button key={item.id} className={subcategoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => setSubcategoryId(item.id)} aria-pressed={subcategoryId === item.id}><strong>{item.name}</strong>{item.budget !== undefined ? <small>{money(Math.max(0, item.budget - spentForSubcategory(data, item.id)))} left</small> : null}</Button>)}
+           {categories.map((item) => { const Icon = iconFor(item.icon); const itemRemaining = item.budget === undefined ? null : item.budget - spentForCategory(data, item.id); return <Button key={item.id} className={categoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => { setCategoryId(item.id); setSubcategoryId(""); }} aria-pressed={categoryId === item.id}><Icon size={18} /><strong className="quick-picker-name">{item.name}</strong>{itemRemaining !== null ? <small>{money(Math.max(0, itemRemaining))} left</small> : null}</Button>; })}
+         </div>
+         {category?.subcategories.length ? <div className="quick-subcategory-list" aria-label={`${category.name} subcategories`}>
+          {category.subcategories.map((item) => <Button key={item.id} className={subcategoryId === item.id ? "selected" : ""} variant="ghost" onClick={() => setSubcategoryId(item.id)} aria-pressed={subcategoryId === item.id}><strong className="quick-picker-name">{item.name}</strong>{item.budget !== undefined ? <small>{money(Math.max(0, item.budget - spentForSubcategory(data, item.id)))} left</small> : null}</Button>)}
         </div> : null}
       </> : null}
       <label className="capture-description"><span>What was this for? <small>Optional</small></span><Input id="quick-description" name="description" value={description} placeholder="Toast Box, groceries..." onChange={(event) => setDescription(event.target.value)} /></label>
@@ -1397,11 +1401,10 @@ function BudgetView({
 
       {summary?.spendingTrend.daily.length ? <SpendingTrend trend={summary.spendingTrend} onViewHistory={onViewHistory} /> : null}
 
-      <section className="mini-card budget-breakdown-card" aria-labelledby="budget-breakdown-title">
+      <section className="mini-card budget-breakdown-card" aria-label="Budget breakdown">
         <div className="section-line budget-breakdown-heading">
           <div>
             <p className="eyebrow">Budget breakdown</p>
-            <h2 id="budget-breakdown-title">Where money is going</h2>
           </div>
           <button className="inline-add" type="button" onClick={onAddCategory}>
             <Plus size={14} /> Add Category
@@ -2236,11 +2239,11 @@ function IncomeAllocationCard({ allocation }: { allocation: IncomeAllocation }) 
         <h2 id="income-allocation-title">Income allocation</h2>
       </div>
       <span className="allocation-total">{money(positiveIncome)} income</span>
-    </div>
-    <div className="allocation-layout">
-      <div className="allocation-ring" style={{ background: chartBackground }} role="img" aria-label={chartLabel}>
-        <span><strong>{money(positiveIncome)}</strong>income</span>
       </div>
+      <div className="allocation-layout">
+        <div className="allocation-ring" style={{ background: chartBackground }} role="img" aria-label={chartLabel}>
+        <strong>{money(positiveIncome)}</strong>
+        </div>
       <div className="allocation-legend" role="list" aria-label="Income allocation details">
         <div className="allocation-legend-row" role="listitem"><span><i className="allocation-dot" style={{ backgroundColor: "#60a5fa" }} />Spent</span><strong>{money(allocation.spentCents)}</strong></div>
         <div className="allocation-legend-row" role="listitem"><span><i className="allocation-dot" style={{ backgroundColor: "#4ade80" }} />Saved / invested</span><strong>{money(allocation.savedCents)}</strong></div>
@@ -2621,11 +2624,12 @@ function recurringTypeLabel(type: RecurringRuleType) {
   return "Loan";
 }
 
-function headerTitle(tab: Tab) {
+function headerTitle(tab: Tab, user?: Summary["user"]) {
   if (tab === "transactions") return "All Transactions";
   if (tab === "accounts") return "Accounts";
   if (tab === "budget") return "Monthly Budget";
-  return "Halo, User";
+  const name = user?.firstName || user?.username || "there";
+  return `Hello, ${name}`;
 }
 
 function friendlyError(error: string) {

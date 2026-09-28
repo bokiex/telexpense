@@ -984,17 +984,23 @@ export async function getSummary(telegramUserId: number, month: string) {
   const end = nextMonthStart(month);
 
   const trendStart = addMonths(month, -5);
-  const [transactions, trendTransactions, budgetsRes, storedCategories, storedAccounts, accountBalances, recurringRules] = await Promise.all([
+  const [transactions, trendTransactions, budgetsRes, storedCategories, storedAccounts, accountBalances, recurringRules, userRes] = await Promise.all([
     getSummaryTransactions(telegramUserId, start, end),
     getTrendTransactions(telegramUserId, `${trendStart}-01`, end),
     selectBudgetsForMonth(supabase, telegramUserId, month),
     getStoredCategories(telegramUserId),
     getStoredAccounts(telegramUserId),
     getAccountBalances(telegramUserId),
-    getRecurringRules(telegramUserId)
+    getRecurringRules(telegramUserId),
+    supabase
+      .from("users")
+      .select("first_name, username")
+      .eq("telegram_user_id", telegramUserId)
+      .maybeSingle()
   ]);
 
   if (budgetsRes.error) throw budgetsRes.error;
+  if (userRes.error) throw userRes.error;
 
   const budgets = (budgetsRes.data || []).map((row) => ({
     category: row.category,
@@ -1036,6 +1042,10 @@ export async function getSummary(telegramUserId: number, month: string) {
   const loanProgress = buildLoanProgress(accounts, transactions);
 
   return {
+    user: {
+      firstName: userRes.data?.first_name || null,
+      username: userRes.data?.username || null
+    },
     month,
     categories: categoryList,
     subcategories: Array.from(subcategories.values()).sort((a, b) => b.spentCents - a.spentCents),
