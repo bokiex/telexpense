@@ -15,7 +15,8 @@ export function resolveConciseCapture(
   categories: StoredCategory[],
   accounts: CaptureAccount[],
   selectedCategoryId?: number,
-  selectedSubcategoryId?: number
+  selectedSubcategoryId?: number,
+  selectedAccountId?: number
 ): CaptureChoice {
   const activeCategories = categories.filter((category) => category.active);
   const activeAccounts = accounts.filter((account) => account.active && account.id !== null);
@@ -23,20 +24,29 @@ export function resolveConciseCapture(
     ? activeCategories.find((item) => item.id === selectedCategoryId)
     : undefined;
   let subcategoryId = selectedSubcategoryId ?? null;
+  let categoryOnly = false;
 
   if (!category) {
     const descriptionIdentity = normalizeIdentity(description);
+    const categoryMatches = activeCategories.filter((item) =>
+      [item.sourceName, item.sourceKey, item.name].some((value) => normalizeIdentity(value) === descriptionIdentity)
+    );
+    if (categoryMatches.length === 1) {
+      category = categoryMatches[0];
+      categoryOnly = true;
+    }
+
     const matches = activeCategories.flatMap((item) =>
       item.subcategories
         .filter((subcategory) => normalizeIdentity(subcategory.name) === descriptionIdentity)
         .map((subcategory) => ({ category: item, subcategoryId: subcategory.id }))
     );
-    if (matches.length === 1) {
+    if (!category && matches.length === 1) {
       category = matches[0].category;
       subcategoryId = matches[0].subcategoryId;
-    } else if (matches.length > 1 && matches.every((match) => match.category.id === matches[0].category.id)) {
+    } else if (!category && matches.length > 1 && matches.every((match) => match.category.id === matches[0].category.id)) {
       category = matches[0].category;
-    } else {
+    } else if (!category) {
       const matchingCategories = activeCategories.filter((item) =>
         matches.some((match) => match.category.id === item.id)
       );
@@ -49,20 +59,35 @@ export function resolveConciseCapture(
   }
 
   if (subcategoryId === null) {
-    if (category.subcategories.length === 0) {
+    if (!categoryOnly && category.subcategories.length === 0) {
       return { status: "no-subcategories", category };
+    } else if (!categoryOnly) {
+      const matches = category.subcategories.filter(
+        (subcategory) => normalizeIdentity(subcategory.name) === normalizeIdentity(description)
+      );
+      if (matches.length === 1) subcategoryId = matches[0].id;
+      else return { status: "choose-subcategory", category, subcategories: category.subcategories };
     }
-    const matches = category.subcategories.filter(
-      (subcategory) => normalizeIdentity(subcategory.name) === normalizeIdentity(description)
-    );
-    if (matches.length === 1) subcategoryId = matches[0].id;
-    else return { status: "choose-subcategory", category, subcategories: category.subcategories };
   }
 
+  const selectedAccount = selectedAccountId
+    ? activeAccounts.find((item) => item.id === selectedAccountId)
+    : undefined;
+  if (selectedAccount) return { status: "ready", category, subcategoryId, account: selectedAccount };
   if (activeAccounts.length !== 1) {
     return { status: "choose-account", category, subcategoryId, accounts: activeAccounts };
   }
   return { status: "ready", category, subcategoryId, account: activeAccounts[0] };
+}
+
+export function resolveConciseAccount(accountHint: string | null, accounts: CaptureAccount[]) {
+  if (!accountHint) return undefined;
+  const normalized = normalizeIdentity(accountHint);
+  const matches = accounts.filter(
+    (account) => account.active && account.id !== null &&
+      [account.name, account.accountKey].some((value) => normalizeIdentity(value) === normalized)
+  );
+  return matches.length === 1 ? Number(matches[0].id) : undefined;
 }
 
 export function callbackData(token: string, kind: "c" | "s" | "a", id: number) {

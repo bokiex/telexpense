@@ -150,8 +150,10 @@ export type ResolvedTransactionIdentity = {
 
 export type PendingTransactionCapture = {
   token: string;
+  kind: Extract<ParsedTransaction["kind"], "expense" | "income" | "investment">;
   description: string;
   amountCents: number;
+  accountId: number | null;
   categoryId: number | null;
   subcategoryId: number | null;
 };
@@ -165,8 +167,10 @@ export async function createPendingTransactionCapture(
   const { error } = await supabase.from("pending_transaction_captures").insert({
     token,
     telegram_user_id: telegramUserId,
+    kind: values.kind,
     description: values.description,
     amount_cents: values.amountCents,
+    account_id: values.accountId,
     expires_at: new Date(Date.now() + 15 * 60_000).toISOString()
   });
   if (error) throw error;
@@ -177,7 +181,7 @@ export async function getPendingTransactionCapture(telegramUserId: number, token
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
     .from("pending_transaction_captures")
-    .select("token, description, amount_cents, category_id, subcategory_id")
+    .select("token, kind, description, amount_cents, account_id, category_id, subcategory_id")
     .eq("telegram_user_id", telegramUserId)
     .eq("token", token)
     .gt("expires_at", new Date().toISOString())
@@ -186,8 +190,10 @@ export async function getPendingTransactionCapture(telegramUserId: number, token
   if (!data) return null;
   return {
     token: data.token,
+    kind: data.kind as PendingTransactionCapture["kind"],
     description: data.description,
     amountCents: data.amount_cents,
+    accountId: data.account_id === null ? null : Number(data.account_id),
     categoryId: data.category_id === null ? null : Number(data.category_id),
     subcategoryId: data.subcategory_id === null ? null : Number(data.subcategory_id)
   } satisfies PendingTransactionCapture;
@@ -196,10 +202,11 @@ export async function getPendingTransactionCapture(telegramUserId: number, token
 export async function updatePendingTransactionCapture(
   telegramUserId: number,
   token: string,
-  values: { categoryId?: number; subcategoryId?: number | null }
+  values: { accountId?: number | null; categoryId?: number; subcategoryId?: number | null }
 ) {
   const supabase = createSupabaseAdmin();
   const update: Record<string, number | null> = {};
+  if (values.accountId !== undefined) update.account_id = values.accountId;
   if (values.categoryId !== undefined) update.category_id = values.categoryId;
   if (values.subcategoryId !== undefined) update.subcategory_id = values.subcategoryId;
   const { error } = await supabase
@@ -718,6 +725,21 @@ export async function getStoredAccounts(telegramUserId: number): Promise<Omit<St
     icon: row.icon,
     active: row.active
   }));
+}
+
+export async function getLastUsedAccountId(telegramUserId: number) {
+  const supabase = createSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("account_id")
+    .eq("telegram_user_id", telegramUserId)
+    .not("account_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && isMissingSchemaError(error)) return null;
+  if (error) throw error;
+  return data?.account_id === null || data?.account_id === undefined ? null : Number(data.account_id);
 }
 
 export async function upsertPortfolioSnapshot(

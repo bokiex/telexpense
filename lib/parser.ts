@@ -7,8 +7,9 @@ export type ParsedTransaction = {
 };
 
 export type ConciseTransaction = {
-  kind: "expense";
+  kind: "expense" | "income" | "investment";
   description: string;
+  accountHint: string | null;
   amountCents: number;
 };
 
@@ -48,17 +49,38 @@ export function parseTransactionMessage(text: string): ParsedTransaction {
   };
 }
 
-export function parseConciseTransactionMessage(text: string): ConciseTransaction {
+export function parseConciseTransactionMessage(
+  text: string,
+  kind: ConciseTransaction["kind"] = "expense"
+): ConciseTransaction {
   const match = /^\s*(?<money>\d+(?:,\d{3})*(?:\.\d{1,2})?)\s+(?<description>.+?)\s*$/.exec(text);
   if (!match?.groups?.money || !match.groups.description) {
     throw new Error("Use a concise amount and subcategory, such as: 4.20 eat out");
   }
   const { amountCents } = parseMoney(match.groups.money);
+  const descriptionWithAccount = match.groups.description.trim();
+  const accountMatch = /\s+@(?<account>[^@].*?)\s*$/.exec(descriptionWithAccount);
+  const description = accountMatch
+    ? descriptionWithAccount.slice(0, accountMatch.index).trim()
+    : descriptionWithAccount;
+  if (!description) {
+    throw new Error("Add a subcategory before the optional @account.");
+  }
+
   return {
-    kind: "expense",
-    description: match.groups.description.trim(),
-    amountCents: -Math.abs(amountCents)
+    kind,
+    description,
+    accountHint: accountMatch?.groups?.account.trim() || null,
+    amountCents: kind === "income" ? Math.abs(amountCents) : -Math.abs(amountCents)
   };
+}
+
+export function parseConciseCommandMessage(text: string): ConciseTransaction | null {
+  const match = /^\/(?<command>income|invest)(?:@\w+)?(?:\s+(?<body>.+))?\s*$/i.exec(text);
+  if (!match?.groups?.command) return null;
+
+  const kind = match.groups.command.toLowerCase() === "income" ? "income" : "investment";
+  return parseConciseTransactionMessage(match.groups.body || "", kind);
 }
 
 export function isConciseTransactionMessage(text: string) {

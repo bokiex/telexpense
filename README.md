@@ -125,7 +125,10 @@ If the bot receives messages but does not reply, check the Vercel function logs 
 ## Message Formats
 
 ```text
-4.20 eat out
+4.20 lunch
+4.20 lunch @debit card
+/income 5000 salary
+/invest 200 voo @brokerage
 food, debit card, lunch, 4.20
 transport, debit card, train, 2.00
 income, salary, debit card, paycheck, 5000
@@ -133,17 +136,21 @@ income, salary, debit card, paycheck, 5000
 /budget transport 120 2026-06
 ```
 
-Default transaction kind is `expense`; otherwise put the kind first, before the
-category. Add categories from the Mini App Budget tab and accounts from the
-Accounts tab before using them in bot messages.
+Default transaction kind is `expense`. The short form is `amount subcategory`,
+with an optional `@account` suffix when the usual account is not correct. Use
+`/income amount category` for income and `/invest amount subcategory` for
+investments. The bot remembers the last-used account and asks with buttons when
+it cannot choose one safely. Add categories from the Mini App Budget tab and
+accounts from the Accounts tab before using them in bot messages.
 
 Transaction categories and accounts must already exist and be active. Names,
 keys, and subcategory names are matched case-insensitively after whitespace
 normalization; newly added subcategory display names keep the casing typed in
 the Mini App. The concise `amount subcategory` form infers the parent category
-and uses the sole active account without prompting. Unknown or ambiguous
-subcategories and multiple accounts are resolved with inline keyboard choices;
-duplicate subcategory names require an explicit parent-category choice.
+and reuses the last-used active account. An explicit `@account` overrides it.
+Unknown or ambiguous subcategories and multiple accounts are resolved with
+inline keyboard choices; duplicate subcategory names require an explicit
+parent-category choice.
 Selections expire after 15 minutes. If the selected category has no
 subcategories, the bot asks you to add one from the Budget tab and retry.
 Confirmations show the category/subcategory breadcrumb with Edit and Undo

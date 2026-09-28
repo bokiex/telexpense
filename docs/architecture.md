@@ -12,8 +12,8 @@
 
 1. User sends a transaction message to the bot.
 2. `/api/telegram/webhook` receives Telegram updates.
-3. `lib/parser` converts comma-separated text or concise `amount subcategory`
-   text into a normalized transaction.
+3. `lib/parser` converts comma-separated text, concise `amount subcategory`
+   text, and `/income` or `/invest` commands into a normalized transaction.
 4. Comma-separated input uses `lib/identity` to resolve normalized category and
    account names and aliases to active, user-owned records. Concise input uses
    `lib/transactionCapture` to resolve the subcategory, its parent category,

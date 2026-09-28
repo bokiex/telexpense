@@ -3,8 +3,8 @@ import test from "node:test";
 import { formatAmount } from "../lib/amountFormat";
 import { debtAmount, loanMetrics, netWorth, netWorthWithPortfolioValues, normalizeOpeningBalance } from "../lib/finance";
 import { normalizeIdentity, resolveIdentity } from "../lib/identity";
-import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
-import { callbackData, resolveConciseCapture } from "../lib/transactionCapture";
+import { isConciseTransactionMessage, parseConciseCommandMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
+import { callbackData, resolveConciseAccount, resolveConciseCapture } from "../lib/transactionCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
 import { budgetActivityTotals, budgetStatusSpentCents, effectiveBudgetCents, incomeAllocationTotals, spendingTrend, subcategoryDisplayName } from "../lib/repository";
 import { themeBudgetCategory } from "../lib/budgetThemes";
@@ -267,7 +267,16 @@ test("Telegram comma parser rejects transfers before identity resolution", () =>
 
 test("concise Telegram parser extracts amount and subcategory text", () => {
   assert.deepEqual(parseConciseTransactionMessage("4.20 eat out"), {
-    kind: "expense", description: "eat out", amountCents: -420
+    kind: "expense", description: "eat out", accountHint: null, amountCents: -420
+  });
+  assert.deepEqual(parseConciseTransactionMessage("4.20 eat out @Main Card"), {
+    kind: "expense", description: "eat out", accountHint: "Main Card", amountCents: -420
+  });
+  assert.deepEqual(parseConciseCommandMessage("/income 5,000 salary"), {
+    kind: "income", description: "salary", accountHint: null, amountCents: 500_000
+  });
+  assert.deepEqual(parseConciseCommandMessage("/invest 200 voo @brokerage"), {
+    kind: "investment", description: "voo", accountHint: "brokerage", amountCents: -20_000
   });
   assert.throws(() => parseConciseTransactionMessage("food, card, lunch, 4.20"));
 });
@@ -306,6 +315,17 @@ test("duplicate subcategory names require a parent choice and multiple accounts 
 
   const accountChoice = resolveConciseCapture("daily", categories, [{ ...account }, { ...account, id: 8, accountKey: "cash", name: "Cash" }], 1);
   assert.equal(accountChoice.status, "choose-account");
+});
+
+test("concise account hints match names and keys", () => {
+  assert.equal(resolveConciseAccount("MAIN CARD", [account]), undefined);
+  assert.equal(resolveConciseAccount("card", [account]), 7);
+});
+
+test("concise capture accepts an exact parent category", () => {
+  const result = resolveConciseCapture("Salary", [category(1, "Salary", "Pay")], [account]);
+  assert.equal(result.status, "ready");
+  if (result.status === "ready") assert.equal(result.subcategoryId, null);
 });
 
 test("duplicate subcategory names under one parent require a subcategory choice", () => {

@@ -2,7 +2,7 @@ import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { budgetWarningText } from "@/lib/budget";
 import { optionalEnv, requireEnv } from "@/lib/env";
-import { isConciseTransactionMessage, parseConciseTransactionMessage, parseTransactionMessage } from "@/lib/parser";
+import { isConciseTransactionMessage, parseConciseCommandMessage, parseConciseTransactionMessage, parseTransactionMessage } from "@/lib/parser";
 import {
   addTransaction,
   createPendingTransactionCapture,
@@ -11,6 +11,7 @@ import {
   deleteTransaction,
   getPendingTransactionCapture,
   getBudgetStatus,
+  getLastUsedAccountId,
   getStoredAccounts,
   getStoredCategories,
   resolveTransactionIdentity,
@@ -19,7 +20,7 @@ import {
   updateTransaction,
   upsertTelegramUser
 } from "@/lib/repository";
-import { callbackData, resolveConciseCapture } from "@/lib/transactionCapture";
+import { callbackData, resolveConciseAccount, resolveConciseCapture } from "@/lib/transactionCapture";
 import {
   answerTelegramCallback,
   dashboardKeyboard,
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
   try {
     if (text.startsWith("/start")) {
       await upsertTelegramUser(user);
-      await sendTelegramMessage(chatId, "Send expenses like: food, debit card, lunch, 4.20", dashboardKeyboard());
+      await sendTelegramMessage(chatId, "Send expenses like: 4.20 lunch. Add @account when needed. Use /income 5000 salary or /invest 200 voo for other entries.", dashboardKeyboard());
       return NextResponse.json({ ok: true });
     }
 
@@ -71,11 +72,13 @@ export async function POST(request: NextRequest) {
     }
 
     const editId = editTransactionIdFromReply(message);
-    if (!editId && isConciseTransactionMessage(text)) {
-      const concise = parseConciseTransactionMessage(text);
-      await upsertTelegramUser(user);
-      await beginConciseCapture(user.id, chatId, concise);
-      return NextResponse.json({ ok: true });
+    if (!editId) {
+      const concise = parseConciseCommandMessage(text) || (isConciseTransactionMessage(text) ? parseConciseTransactionMessage(text) : null);
+      if (concise) {
+        await upsertTelegramUser(user);
+        await beginConciseCapture(user.id, chatId, concise);
+        return NextResponse.json({ ok: true });
+      }
     }
     const parsedInput = parseTransactionMessage(text);
     await upsertTelegramUser(user);
@@ -98,7 +101,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "Could not save transaction.";
     console.error("Telegram webhook handler failed", error);
-    await safeSendTelegramMessage(chatId, `${messageText}\nExample: food, debit card, lunch, 4.20`);
+    await safeSendTelegramMessage(chatId, `${messageText}\nExamples: 4.20 lunch, 4.20 lunch @dbs, /income 5000 salary, /invest 200 voo`);
     return NextResponse.json({ ok: true });
   }
 }
@@ -149,16 +152,31 @@ async function beginConciseCapture(
   chatId: number,
   concise: ReturnType<typeof parseConciseTransactionMessage>
 ) {
-  const [categories, accounts] = await Promise.all([
+  const [categories, accounts, lastUsedAccountId] = await Promise.all([
     getStoredCategories(telegramUserId),
-    getStoredAccounts(telegramUserId)
+    getStoredAccounts(telegramUserId),
+    getLastUsedAccountId(telegramUserId)
   ]);
-  const resolution = resolveConciseCapture(concise.description, categories, accounts);
+  const accountId = resolveConciseAccount(concise.accountHint, accounts);
+  if (concise.accountHint && accountId === undefined) {
+    throw new Error(`Account "${concise.accountHint}" was not found. Use the account name or key after @.`);
+  }
+  const resolution = resolveConciseCapture(
+    concise.description,
+    categories,
+    accounts,
+    undefined,
+    undefined,
+    accountId ?? lastUsedAccountId ?? undefined
+  );
   if (resolution.status === "ready") {
     await saveConciseTransaction(telegramUserId, chatId, concise, resolution);
     return;
   }
-  const token = await createPendingTransactionCapture(telegramUserId, concise);
+  const token = await createPendingTransactionCapture(telegramUserId, {
+    ...concise,
+    accountId: accountId ?? lastUsedAccountId
+  });
   await sendCapturePrompt(chatId, token, resolution);
 }
 
@@ -200,22 +218,9 @@ async function handlePendingChoice(callbackQuery: any) {
       pending.subcategoryId = choiceId;
     } else {
       const account = accounts.find((item) => item.active && item.id === choiceId);
-      const category = categories.find((item) => item.id === pending.categoryId);
-      if (!account || !category || pending.subcategoryId === null) throw new Error("Selection is incomplete.");
-      const transactionId = await consumePendingTransactionCapture(
-        telegramUserId,
-        token,
-        Number(account.id),
-        category.id,
-        pending.subcategoryId
-      );
-      if (transactionId === null) {
-        await answerCallback("This selection was already used or expired.");
-        return;
-      }
-      await answerCallback("Saving…");
-      await sendConfirmation(telegramUserId, chatId, transactionId, category.id, pending.subcategoryId, account.name, pending.amountCents);
-      return;
+      if (!account) throw new Error("Account is not available.");
+      await updatePendingTransactionCapture(telegramUserId, token, { accountId: Number(account.id) });
+      pending.accountId = Number(account.id);
     }
 
     const resolution = resolveConciseCapture(
@@ -223,9 +228,11 @@ async function handlePendingChoice(callbackQuery: any) {
       categories,
       accounts,
       pending.categoryId ?? undefined,
-      pending.subcategoryId ?? undefined
+      pending.subcategoryId ?? undefined,
+      pending.accountId ?? undefined
     );
     if (resolution.status === "ready") {
+      await updatePendingTransactionCapture(telegramUserId, token, { accountId: Number(resolution.account.id) });
       const transactionId = await consumePendingTransactionCapture(
         telegramUserId,
         token,
@@ -256,9 +263,11 @@ async function saveConciseTransaction(
   resolution: Extract<ReturnType<typeof resolveConciseCapture>, { status: "ready" }>
 ) {
   const transactionId = await addTransaction(telegramUserId, {
-    ...concise,
+    kind: concise.kind,
     category: resolution.category.sourceName,
-    account: resolution.account.name
+    account: resolution.account.name,
+    description: concise.description,
+    amountCents: concise.amountCents
   }, {
     categoryId: resolution.category.id,
     category: resolution.category.sourceName,
