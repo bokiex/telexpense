@@ -1329,12 +1329,17 @@ function BudgetView({
   const savingsAllocated = summary?.health.savingsAllocatedCents ?? 0;
   const budgetProgress = summary?.health.progressCents ?? ordinarySpent + savingsAllocated;
   const budgetLeft = totalBudget - budgetProgress;
-  const budgetUsedPctRaw = totalBudget ? Math.round((budgetProgress / totalBudget) * 100) : 0;
-  const budgetUsedPct = Math.min(100, Math.max(0, budgetUsedPctRaw));
   const progressByGroup = budgetProgressByGroup(activeCategories, data, summary);
-  const scoreRingBackground = totalBudget
-    ? `conic-gradient(${budgetLeft < 0 ? "#f87171" : "#8cdbac"} 0 ${budgetUsedPct}%, #43504a ${budgetUsedPct}% 100%)`
-    : "#43504a";
+  const budgetByGroup = GROUPS.reduce((totals, group) => {
+    const categories = activeCategories.filter((category) => category.group === group);
+    totals[group] = themeBudget(summary, group) ?? effectiveBudgetTotal(categories);
+    return totals;
+  }, { Needs: 0, Wants: 0, Savings: 0 } as Record<BudgetGroup, number>);
+  const budgetChartBackground = pieGradient(
+    GROUPS.map((group) => ({ value: budgetByGroup[group], color: GROUP_COLORS[group] })),
+    totalBudget,
+    "#43504a"
+  );
   const hasBudgetTargets = GROUPS.some((group) => themeBudget(summary, group) !== undefined)
     || activeCategories.some((category) => category.budget !== undefined || category.subcategories.some((subcategory) => subcategory.budget !== undefined));
   const toggleCategory = (categoryId: string) => {
@@ -1348,10 +1353,18 @@ function BudgetView({
 
   return (
     <div className="screen-stack">
-      <section className="budget-command-center" aria-labelledby="budget-command-center-title">
+      <section className="budget-command-center budget-chart-card" aria-labelledby="budget-command-center-title">
         <div className="budget-score-panel">
-          <div className="budget-score-ring" style={{ background: scoreRingBackground }}>
-            <span>{budgetUsedPct}%</span>
+          <div
+            className="budget-score-ring"
+            style={{ background: budgetChartBackground }}
+            role="img"
+            aria-label={`Budget split: ${GROUPS.map((group) => `${group} ${money(budgetByGroup[group])}`).join(", ")}`}
+          >
+            <div className="budget-score-ring-center">
+              <strong>{totalBudget ? money(totalBudget) : "—"}</strong>
+              <span>total budget</span>
+            </div>
           </div>
           <div className="budget-score-copy">
             <p className="budget-score-period">{monthLabel(month)} budget</p>
@@ -1360,12 +1373,29 @@ function BudgetView({
             {summary ? <small>{summary.health.daysLeft} days remaining</small> : null}
           </div>
         </div>
+        <div className="budget-chart-legend" role="list" aria-label="Budget split by group">
+          {GROUPS.map((group) => {
+            const groupBudget = budgetByGroup[group];
+            const groupPct = totalBudget ? Math.round((groupBudget / totalBudget) * 100) : 0;
+            return (
+              <div key={group} className="budget-chart-legend-row" role="listitem">
+                <span><i style={{ backgroundColor: GROUP_COLORS[group] }} />{group}</span>
+                <strong>{money(groupBudget)}</strong>
+                <small>{groupPct}%</small>
+              </div>
+            );
+          })}
+        </div>
         <div className="budget-stat-grid">
           <div className="budget-stat"><small>Set budget</small><strong>{money(totalBudget)}</strong></div>
           <div className="budget-stat"><small>Ordinary spend</small><strong>{money(ordinarySpent)}</strong></div>
           <div className="budget-stat"><small>Saved / invested</small><strong>{money(savingsAllocated)}</strong></div>
         </div>
       </section>
+
+      <IncomeAllocationCard allocation={summary?.incomeAllocation || { incomeCents: 0, spentCents: 0, savedCents: 0, unallocatedCents: 0 }} />
+
+      {summary?.spendingTrend.daily.length ? <SpendingTrend trend={summary.spendingTrend} onViewHistory={onViewHistory} /> : null}
 
       <section className="mini-card budget-breakdown-card" aria-labelledby="budget-breakdown-title">
         <div className="section-line budget-breakdown-heading">
@@ -1379,8 +1409,7 @@ function BudgetView({
         </div>
         {GROUPS.map((group) => {
           const categories = activeCategories.filter((category) => category.group === group);
-          const groupThemeBudget = themeBudget(summary, group);
-          const groupBudget = groupThemeBudget ?? effectiveBudgetTotal(categories);
+          const groupBudget = budgetByGroup[group];
           const groupActivity = progressByGroup[group];
           const groupPctRaw = groupBudget ? Math.round((groupActivity / groupBudget) * 100) : 0;
           const groupPct = Math.min(100, Math.max(0, groupPctRaw));
@@ -1409,28 +1438,34 @@ function BudgetView({
                   return (
                     <div key={category.id} className="budget-category-block">
                       <div className="budget-row budget-row-parent">
-                        {category.subcategories.length ? (
-                          <button
-                            className="tiny-icon collapse-toggle"
-                            type="button"
-                            onClick={() => toggleCategory(category.id)}
-                            aria-expanded={isExpanded}
-                            aria-controls={childListId}
-                            aria-label={`${isExpanded ? "Collapse" : "Expand"} ${category.name} subcategories`}
-                          >
-                            {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          </button>
-                        ) : <span className="collapse-spacer" aria-hidden="true" />}
-                        <CategoryIcon category={category} />
-                        <div>
-                          <strong>{category.name}</strong>
-                          <small>{category.subcategories.length ? `${category.subcategories.length} subcategories` : "Category budget"}</small>
+                        <div className="budget-row-leading">
+                          {category.subcategories.length ? (
+                            <button
+                              className="tiny-icon collapse-toggle"
+                              type="button"
+                              onClick={() => toggleCategory(category.id)}
+                              aria-expanded={isExpanded}
+                              aria-controls={childListId}
+                              aria-label={`${isExpanded ? "Collapse" : "Expand"} ${category.name} subcategories`}
+                            >
+                              {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            </button>
+                          ) : <span className="collapse-spacer" aria-hidden="true" />}
+                          <CategoryIcon category={category} />
+                        </div>
+                        <div className="budget-row-content">
+                          <div className="budget-row-top">
+                            <div className="budget-row-label">
+                              <strong>{category.name}</strong>
+                              <small>{category.subcategories.length ? `${category.subcategories.length} subcategories` : "Category budget"}</small>
+                            </div>
+                            <span className="budget-row-amount">{budgetRowAmount(spent, category.budget)} · {pct}%</span>
+                            <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
+                              <Pencil size={11} />
+                            </Button>
+                          </div>
                           <Progress label={`${category.name} budget ${pct}% used`} value={pct} color={pct > 90 ? "#f87171" : category.color} thin />
                         </div>
-                        <span>{budgetRowAmount(spent, category.budget)} · {pct}%</span>
-                        <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id)} aria-label={`Set ${category.name} budget`}>
-                          <Pencil size={11} />
-                        </Button>
                       </div>
                       <div className="budget-management-row" aria-label={`${category.name} category management`}>
                         <button type="button" onClick={() => onEditCategory(category.id)} aria-label={`Edit ${category.name}`}>
@@ -1453,15 +1488,22 @@ function BudgetView({
                             const subPct = subcategory.budget ? Math.max(0, Math.round((subSpent / subcategory.budget) * 100)) : 0;
                             return (
                               <div key={subcategory.id} className="budget-row budget-row-child">
-                                <span className="subcategory-marker" aria-hidden="true" />
-                                <div>
-                                  <strong>{subcategory.name}</strong>
+                                <div className="budget-row-leading">
+                                  <span className="subcategory-marker" aria-hidden="true" />
+                                </div>
+                                <div className="budget-row-content">
+                                  <div className="budget-row-top">
+                                    <div className="budget-row-label">
+                                      <strong>{subcategory.name}</strong>
+                                      <small>Subcategory budget</small>
+                                    </div>
+                                    <span className="budget-row-amount">{budgetRowAmount(subSpent, subcategory.budget)} · {subPct}%</span>
+                                    <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
+                                      <Pencil size={11} />
+                                    </Button>
+                                  </div>
                                   <Progress label={`${subcategory.name} budget ${subPct}% used`} value={subPct} color={subPct > 90 ? "#f87171" : category.color} thin />
                                 </div>
-                                <span>{budgetRowAmount(subSpent, subcategory.budget)} · {subPct}%</span>
-                                <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
-                                  <Pencil size={11} />
-                                </Button>
                               </div>
                             );
                           })}
@@ -1478,10 +1520,6 @@ function BudgetView({
       </section>
 
       {!hasBudgetTargets ? <EmptyState label="No budgets set for this month yet." /> : null}
-
-      <IncomeAllocationCard allocation={summary?.incomeAllocation || { incomeCents: 0, spentCents: 0, savedCents: 0, unallocatedCents: 0 }} />
-
-      {summary?.spendingTrend.daily.length ? <SpendingTrend trend={summary.spendingTrend} onViewHistory={onViewHistory} /> : null}
 
       <ConfirmDialog
         open={Boolean(categoryToDelete)}
@@ -2180,15 +2218,36 @@ function RepeatCard({ tx, data, onClick }: { tx: Transaction; data: AppData; onC
 }
 
 function IncomeAllocationCard({ allocation }: { allocation: IncomeAllocation }) {
-  const assignedCents = allocation.spentCents + allocation.savedCents;
   const positiveIncome = Math.max(0, allocation.incomeCents);
-  return <section className="income-summary budget-secondary-card">
-    <span className="success-dot" aria-hidden="true" />
-    <div>
-      <strong>Income allocation · secondary</strong>
-      <small>{money(allocation.incomeCents)} income · {money(Math.abs(allocation.unallocatedCents))} {allocation.unallocatedCents < 0 ? "over-allocated" : "unallocated"} · {money(allocation.savedCents)} saved</small>
+  const unallocatedCents = Math.max(0, allocation.unallocatedCents);
+  const overallocatedCents = Math.max(0, -allocation.unallocatedCents);
+  const chartBackground = pieGradient([
+    { value: allocation.spentCents, color: "#60a5fa" },
+    { value: allocation.savedCents, color: "#4ade80" },
+    { value: unallocatedCents, color: "#d9e4dc" }
+  ], positiveIncome, "#d9e4dc");
+  const chartLabel = positiveIncome
+    ? `Income allocation: ${money(allocation.spentCents)} spent, ${money(allocation.savedCents)} saved, ${money(unallocatedCents)} unallocated`
+    : "No income recorded for this month";
+  return <section className="allocation-card" aria-labelledby="income-allocation-title">
+    <div className="section-line">
+      <div>
+        <p className="eyebrow">Money in / money out</p>
+        <h2 id="income-allocation-title">Income allocation</h2>
+      </div>
+      <span className="allocation-total">{money(positiveIncome)} income</span>
     </div>
-    {positiveIncome === 0 && assignedCents > 0 ? <small className="income-summary-note">Record income to compare spending and savings.</small> : null}
+    <div className="allocation-layout">
+      <div className="allocation-ring" style={{ background: chartBackground }} role="img" aria-label={chartLabel}>
+        <span><strong>{money(positiveIncome)}</strong>income</span>
+      </div>
+      <div className="allocation-legend" role="list" aria-label="Income allocation details">
+        <div className="allocation-legend-row" role="listitem"><span><i className="allocation-dot" style={{ backgroundColor: "#60a5fa" }} />Spent</span><strong>{money(allocation.spentCents)}</strong></div>
+        <div className="allocation-legend-row" role="listitem"><span><i className="allocation-dot" style={{ backgroundColor: "#4ade80" }} />Saved / invested</span><strong>{money(allocation.savedCents)}</strong></div>
+        <div className="allocation-legend-row" role="listitem"><span><i className="allocation-dot" style={{ backgroundColor: overallocatedCents ? "#f87171" : "#d9e4dc" }} />{overallocatedCents ? "Over-allocated" : "Unallocated"}</span><strong>{money(overallocatedCents || unallocatedCents)}</strong></div>
+      </div>
+    </div>
+    {positiveIncome === 0 && allocation.spentCents + allocation.savedCents > 0 ? <p className="income-summary-note">Record income to compare spending and savings.</p> : null}
   </section>;
 }
 
@@ -2396,6 +2455,20 @@ function effectiveBudgetTotalWithThemes(categories: Category[], summary: Summary
     if (groupBudget !== undefined) return sum + groupBudget;
     return sum + effectiveBudgetTotal(categories.filter((category) => category.group === group));
   }, 0);
+}
+
+function pieGradient(entries: { value: number; color: string }[], total: number, emptyColor: string) {
+  if (total <= 0) return emptyColor;
+  let offset = 0;
+  const stops = entries.flatMap(({ value, color }) => {
+    const visibleValue = Math.min(Math.max(0, value), Math.max(0, total - offset));
+    if (visibleValue <= 0) return [];
+    const start = offset / total * 100;
+    offset += visibleValue;
+    return [`${color} ${start}% ${offset / total * 100}%`];
+  });
+  if (offset < total) stops.push(`${emptyColor} ${offset / total * 100}% 100%`);
+  return `conic-gradient(${stops.join(", ")})`;
 }
 
 function budgetProgressByGroup(categories: Category[], data: AppData, summary: Summary | null): Record<BudgetGroup, number> {
