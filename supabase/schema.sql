@@ -786,6 +786,7 @@ as $$
           (target_month || '-01')::date + interval '1 month - 1 day'
         )))::integer::text, 2, '0')
       )::date <= current_date
+      and (r.rule_type = 'subscription' or r.to_account_id is not null)
       and not exists (
         select 1 from public.recurring_rule_runs existing
         where existing.telegram_user_id = r.telegram_user_id
@@ -819,11 +820,11 @@ as $$
              when leg.destination then
                case when r.rule_type = 'investment_transfer' then 'investment' else 'transfer' end
              when r.rule_type = 'investment_transfer' then 'transfer'
-             when r.rule_type = 'subscription' then 'expense'
+             when r.rule_type in ('subscription', 'loan_payment') then 'expense'
              else 'transfer'
            end,
-           r.category,
-           category_match.id,
+           case when r.rule_type = 'account_transfer' then null else r.category end,
+           case when r.rule_type = 'account_transfer' then null else category_match.id end,
            case when leg.destination then r.to_account_id else r.from_account_id end,
            case when r.rule_type = 'subscription' then null else r.transfer_group_id end,
            r.id,

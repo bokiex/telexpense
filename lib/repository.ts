@@ -792,7 +792,7 @@ export async function upsertRecurringRule(
     name: values.name,
     rule_type: values.ruleType,
     amount_cents: values.amountCents,
-    category: values.ruleType === "subscription" ? values.category.toLowerCase() : null,
+    category: values.ruleType === "account_transfer" ? null : values.category.toLowerCase(),
     from_account_id: values.fromAccountId,
     to_account_id: values.toAccountId || null,
     day_of_month: values.dayOfMonth,

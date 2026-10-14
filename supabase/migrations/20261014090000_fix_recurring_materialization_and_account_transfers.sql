@@ -16,6 +16,7 @@ with candidates as (
   from public.recurring_rules r
   where r.active and target_month ~ '^\d{4}-(0[1-9]|1[0-2])$' and batch_size between 1 and 500
     and (target_month || '-' || lpad(least(r.day_of_month, extract(day from ((target_month || '-01')::date + interval '1 month - 1 day')))::integer::text, 2, '0'))::date <= current_date
+    and (r.rule_type = 'subscription' or r.to_account_id is not null)
     and not exists (select 1 from public.recurring_rule_runs x where x.telegram_user_id = r.telegram_user_id and x.recurring_rule_id = r.id and x.month = target_month)
   order by r.telegram_user_id, r.id limit batch_size
 ), claimed as (
@@ -28,9 +29,9 @@ with candidates as (
 ), inserted_transactions as (
   insert into public.transactions (telegram_user_id, kind, category, category_id, account_id, transfer_group_id, recurring_rule_id, description, amount_cents, occurred_on)
   select r.telegram_user_id,
-    case when leg.destination and r.rule_type = 'investment_transfer' then 'investment' when leg.destination then 'transfer' when r.rule_type = 'subscription' then 'expense' else 'transfer' end,
-    case when r.rule_type = 'subscription' then r.category else null end,
-    case when r.rule_type = 'subscription' then category_match.id else null end,
+    case when leg.destination and r.rule_type = 'investment_transfer' then 'investment' when leg.destination then 'transfer' when r.rule_type in ('subscription', 'loan_payment') then 'expense' else 'transfer' end,
+    case when r.rule_type = 'account_transfer' then null else r.category end,
+    case when r.rule_type = 'account_transfer' then null else category_match.id end,
     case when leg.destination then r.to_account_id else r.from_account_id end,
     r.transfer_group_id, r.id, r.name,
     case when leg.destination then abs(r.amount_cents) else -abs(r.amount_cents) end,

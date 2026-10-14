@@ -1868,8 +1868,8 @@ function RecurringRuleModal({
     const day = Number(dayOfMonth);
     const fromId = Number(fromAccountId);
     const toId = Number(toAccountId);
-    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || (ruleType === "subscription" && !category.trim()) || !Number.isFinite(fromId)) {
-      setError(ruleType === "subscription" ? "Name, amount, category, and source account are required." : "Name, amount, and source account are required.");
+    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || (ruleType !== "account_transfer" && !category.trim()) || !Number.isFinite(fromId)) {
+      setError(ruleType === "account_transfer" ? "Name, amount, and source account are required." : "Name, amount, category, and source account are required.");
       return;
     }
     if (needsDestination && !Number.isFinite(toId)) {
@@ -1909,7 +1909,7 @@ function RecurringRuleModal({
             <Input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
           </FieldLabel>
         </div>
-        {ruleType === "subscription" ? <FieldLabel label="Category">
+        {ruleType !== "account_transfer" ? <FieldLabel label="Category">
           <Input value={category} placeholder="subscription, investment, loan" onChange={(event) => setCategory(event.target.value)} />
         </FieldLabel> : null}
         <FieldLabel label="From Account">
