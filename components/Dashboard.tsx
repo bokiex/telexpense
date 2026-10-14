@@ -39,6 +39,7 @@ import {
   X
 } from "lucide-react";
 import { displayTransferGroups, transferAccounts } from "@/lib/transfer";
+import { resolveRecurringCategoryId, resolveRecurringSubcategoryId } from "@/lib/recurringRule";
 import { THEME_BUDGET_CATEGORY_PREFIX, isThemeBudgetCategory, themeBudgetCategory } from "@/lib/budgetThemes";
 import { PendingButton, usePendingAction } from "@/components/PendingButton";
 import { Button } from "@/components/ui/button";
@@ -154,6 +155,7 @@ type StoredCategory = {
 
 type SubCategory = {
   id: string;
+  storedId: number;
   name: string;
   categoryId: string;
   budget?: number;
@@ -162,6 +164,7 @@ type SubCategory = {
 
 type Category = {
   id: string;
+  storedId: number | null;
   name: string;
   sourceName: string;
   group: BudgetGroup;
@@ -1852,9 +1855,10 @@ function RecurringRuleModal({
   const [name, setName] = useState(rule?.name || "");
   const [ruleType, setRuleType] = useState<RecurringRuleType>(rule?.ruleType || "subscription");
   const [amount, setAmount] = useState(rule ? String(rule.amountCents / 100) : "");
-  const [category, setCategory] = useState(rule?.category || data.categories[0]?.sourceName || "subscription");
-  const [categoryId, setCategoryId] = useState(rule?.categoryId ? String(rule.categoryId) : data.categories[0]?.id || "");
-  const [subcategoryId, setSubcategoryId] = useState(rule?.subcategoryId ? String(rule.subcategoryId) : "");
+  const initialCategory = data.categories.find((item) => item.storedId === rule?.categoryId) || data.categories[0];
+  const [category, setCategory] = useState(rule?.category || initialCategory?.sourceName || "subscription");
+  const [categoryId, setCategoryId] = useState(initialCategory?.id || "");
+  const [subcategoryId, setSubcategoryId] = useState(rule?.subcategoryId ? initialCategory?.subcategories.find((item) => item.storedId === rule.subcategoryId)?.id || "" : "");
   const [fromAccountId, setFromAccountId] = useState(rule?.fromAccountId ? String(rule.fromAccountId) : "");
   const [toAccountId, setToAccountId] = useState(rule?.toAccountId ? String(rule.toAccountId) : "");
   const [dayOfMonth, setDayOfMonth] = useState(rule ? String(rule.dayOfMonth) : "1");
@@ -1875,7 +1879,11 @@ function RecurringRuleModal({
     const day = Number(dayOfMonth);
     const fromId = Number(fromAccountId);
     const toId = Number(toAccountId);
-    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || (ruleType !== "account_transfer" && !categoryId) || !Number.isFinite(fromId)) {
+    const storedCategoryId = resolveRecurringCategoryId(categoryId, data.categories);
+    const storedSubcategoryId = selectedCategory && subcategoryId
+      ? resolveRecurringSubcategoryId(subcategoryId, selectedCategory.subcategories)
+      : null;
+    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || (ruleType !== "account_transfer" && storedCategoryId === null) || !Number.isFinite(fromId)) {
       setError(ruleType === "account_transfer" ? "Name, amount, and source account are required." : "Name, amount, category, and source account are required.");
       return;
     }
@@ -1893,8 +1901,8 @@ function RecurringRuleModal({
       ruleType,
       amountCents,
       category: category.trim().toLowerCase(),
-      categoryId: ruleType === "account_transfer" ? null : Number(categoryId),
-      subcategoryId: ruleType === "account_transfer" || !subcategoryId ? null : Number(subcategoryId),
+      categoryId: ruleType === "account_transfer" ? null : storedCategoryId,
+      subcategoryId: ruleType === "account_transfer" ? null : storedSubcategoryId,
       fromAccountId: fromId,
       toAccountId: needsDestination ? toId : null,
       dayOfMonth: day,
@@ -2383,6 +2391,7 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
     const stored = storedCategories.get(id);
     const category: Category = {
       id,
+      storedId: stored?.id || null,
       sourceName: stored?.sourceName || name,
       name: stored?.name || titleCase(name),
       group: stored?.group || look.group,
@@ -2437,6 +2446,7 @@ function buildAppData(summary: Summary | null, history?: RecentTransaction[]): A
         const spend = summary.subcategories.find((item) => item.subcategoryId === sub.id);
         category.subcategories.push({
           id,
+          storedId: sub.id,
           name: sub.name,
           categoryId: stored.sourceKey,
           budget: budget?.budgetCents,
