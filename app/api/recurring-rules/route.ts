@@ -17,6 +17,8 @@ export async function POST(request: NextRequest) {
     const ruleType = String(body.ruleType || "").trim();
     const amountCents = Number(body.amountCents);
     const category = String(body.category || "").trim().toLowerCase();
+    const categoryId = body.categoryId === null || body.categoryId === undefined || body.categoryId === "" ? null : Number(body.categoryId);
+    const subcategoryId = body.subcategoryId === null || body.subcategoryId === undefined || body.subcategoryId === "" ? null : Number(body.subcategoryId);
     const fromAccountId = Number(body.fromAccountId);
     const toAccountId = body.toAccountId === null || body.toAccountId === undefined || body.toAccountId === "" ? null : Number(body.toAccountId);
     const dayOfMonth = Number(body.dayOfMonth || 1);
@@ -26,7 +28,8 @@ export async function POST(request: NextRequest) {
     if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
     if (!ruleTypes.has(ruleType)) return NextResponse.json({ error: "Rule type is not valid." }, { status: 400 });
     if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return NextResponse.json({ error: "Amount must be a positive integer number of cents." }, { status: 400 });
-    if (ruleType !== "account_transfer" && !category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
+    if (ruleType !== "account_transfer" && (!Number.isSafeInteger(categoryId) || (categoryId !== null && categoryId <= 0))) return NextResponse.json({ error: "Category is required." }, { status: 400 });
+    if (subcategoryId !== null && (!Number.isSafeInteger(subcategoryId) || subcategoryId <= 0)) return NextResponse.json({ error: "Subcategory is not valid." }, { status: 400 });
     if (!Number.isSafeInteger(fromAccountId) || fromAccountId <= 0) return NextResponse.json({ error: "From account is required." }, { status: 400 });
     if (ruleType !== "subscription" && (!Number.isSafeInteger(toAccountId) || Number(toAccountId) <= 0)) {
       return NextResponse.json({ error: "To account is required for transfers." }, { status: 400 });
@@ -44,6 +47,8 @@ export async function POST(request: NextRequest) {
       ruleType: ruleType as RecurringRuleType,
       amountCents,
       category,
+      categoryId,
+      subcategoryId,
       fromAccountId,
       toAccountId: Number.isSafeInteger(toAccountId) ? toAccountId : null,
       dayOfMonth,

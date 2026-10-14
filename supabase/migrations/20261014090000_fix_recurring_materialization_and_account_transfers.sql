@@ -31,14 +31,14 @@ with candidates as (
   select r.telegram_user_id,
     case when leg.destination and r.rule_type = 'investment_transfer' then 'investment' when leg.destination then 'transfer' when r.rule_type in ('subscription', 'loan_payment') then 'expense' else 'transfer' end,
     case when r.rule_type = 'account_transfer' then null else r.category end,
-    case when r.rule_type = 'account_transfer' then null else category_match.id end,
+     case when r.rule_type = 'account_transfer' then null else category_match.id end,
     case when leg.destination then r.to_account_id else r.from_account_id end,
     r.transfer_group_id, r.id, r.name,
     case when leg.destination then abs(r.amount_cents) else -abs(r.amount_cents) end,
     (target_month || '-' || lpad(least(r.day_of_month, extract(day from ((target_month || '-01')::date + interval '1 month - 1 day')))::integer::text, 2, '0'))::date
   from claimed_rules r cross join lateral (values (false), (true)) as leg(destination)
-  left join lateral (select c.id from public.categories c where c.telegram_user_id = r.telegram_user_id and public.normalize_identity(c.source_name) = public.normalize_identity(r.category) limit 1) category_match on true
-  where not leg.destination or (r.rule_type <> 'subscription' and r.to_account_id is not null)
+   left join lateral (select c.id from public.categories c where c.telegram_user_id = r.telegram_user_id and public.normalize_identity(c.source_name) = public.normalize_identity(r.category) limit 1) category_match on true
+   where not leg.destination or (r.rule_type <> 'subscription' and r.to_account_id is not null)
   returning recurring_rule_id
 )
 select count(distinct telegram_user_id)::bigint, count(*)::bigint from claimed;

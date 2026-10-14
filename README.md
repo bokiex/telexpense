@@ -184,10 +184,11 @@ parent categories, or child subcategories.
   ordinary Needs/Wants spending is reported separately from Savings allocated
   through Savings-category expenses and investment transactions.
 - Summary reads are read-only. The daily recurring job creates due transactions
-  idempotently, in bounded batches, for the current UTC month. Subscriptions
-  create one categorized expense; investment transfers and loan payments create
-  their existing two-leg entries; account transfers create two categoryless
-  transfer entries.
+  idempotently, in bounded batches, for the current UTC month. A valid target
+  month can also be materialized explicitly, including overdue scheduled dates.
+  Subscriptions create one categorized expense; investment transfers and loan
+  payments create their existing two-leg entries; account transfers create two
+  categoryless transfer entries.
 - Transaction history is loaded separately for the selected month and uses a
   stable `(occurredOn, id)` cursor. Request
   `/api/transactions/history?month=2026-06&limit=50`; pass the returned
@@ -211,7 +212,8 @@ parent categories, or child subcategories.
 - Portfolio snapshots and recurring rules accept only accounts owned by the
   authenticated Telegram user. Account transfers, investment transfers, and
   loan payments require distinct source and destination accounts. Account
-  transfers do not require a category; other recurring rule types do.
+  transfers do not require a category; other recurring rule types select an
+  owned category and may select one of its subcategories.
 - Account balances are opening balance plus all account transactions. Assets
   are positive; loan and card liabilities are stored as negative values, while
   debt-only fields display their absolute amount.

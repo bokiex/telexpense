@@ -120,6 +120,10 @@ check.
   databases have the new account and budget subcategory columns.
 - Keep `supabase/schema.sql` safe to re-run when evolving the schema, and update
   repository types/queries and dashboard API payloads together.
+- Recurring materialization accepts a valid target month and includes rules whose
+  scheduled day has passed; the daily job still requests the current UTC month.
+  Non-transfer recurring rules store owned category and optional subcategory
+  identities, while account transfers remain categoryless.
 - Evolve deployed data with versioned files created by `supabase migration new`;
   keep `schema.sql` aligned for fresh installs. Summary GET handlers must remain
   read-only: recurring materialization belongs in an explicit write/job path.
