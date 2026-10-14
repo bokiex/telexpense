@@ -37,7 +37,7 @@ with candidates as (
     (target_month || '-' || lpad(least(r.day_of_month, extract(day from ((target_month || '-01')::date + interval '1 month - 1 day')))::integer::text, 2, '0'))::date
   from claimed_rules r cross join lateral (values (false), (true)) as leg(destination)
   left join lateral (select c.id from public.categories c where c.telegram_user_id = r.telegram_user_id and public.normalize_identity(c.source_name) = public.normalize_identity(r.category) limit 1) category_match on true
-  where r.rule_type <> 'subscription' or not leg.destination
+  where not leg.destination or (r.rule_type <> 'subscription' and r.to_account_id is not null)
   returning recurring_rule_id
 )
 select count(distinct telegram_user_id)::bigint, count(*)::bigint from claimed;
