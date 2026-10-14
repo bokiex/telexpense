@@ -819,7 +819,8 @@ as $$
              when leg.destination then
                case when r.rule_type = 'investment_transfer' then 'investment' else 'transfer' end
              when r.rule_type = 'investment_transfer' then 'transfer'
-             else 'expense'
+             when r.rule_type = 'subscription' then 'expense'
+             else 'transfer'
            end,
            r.category,
            category_match.id,
