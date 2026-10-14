@@ -18,6 +18,7 @@ import { displayTransferGroups, transferAccounts } from "../lib/transfer";
 import { isValidDate, isValidMonth, transactionAmountError } from "../lib/validation";
 import crypto from "node:crypto";
 import { validateTelegramInitData } from "../lib/telegram";
+import { resolveRecurringCategoryId, resolveRecurringSubcategoryId } from "../lib/recurringRule";
 
 test("transfers omit categories while expense and income still require them", () => {
   assert.equal(transactionCategory("transfer", undefined), null);
@@ -28,6 +29,14 @@ test("transfers omit categories while expense and income still require them", ()
   assert.equal(transactionCategoryError("transfer", null), null);
   assert.equal(transactionCategoryError("expense", null), "Category is required.");
   assert.equal(transactionCategoryError("income", null), "Category is required.");
+});
+
+test("recurring category selection translates dashboard slugs to stored IDs", () => {
+  const categories = [{ id: "food", storedId: 42 }, { id: "travel", storedId: 73 }];
+
+  assert.equal(resolveRecurringCategoryId("food", categories), 42);
+  assert.equal(resolveRecurringCategoryId("missing", categories), null);
+  assert.equal(resolveRecurringSubcategoryId("food:stored-9", [{ id: "food:stored-9", storedId: 9 }]), 9);
 });
 
 test("calendar validation rejects normalized impossible dates and months", () => {
