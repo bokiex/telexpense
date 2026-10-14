@@ -841,12 +841,16 @@ export async function upsertRecurringRule(
 export async function triggerDueRecurringTransactions(telegramUserId: number, month = currentMonth()) {
   if (month !== currentMonth()) return { triggered: false };
   try {
-    if (!(await hasDueRecurringRule(telegramUserId, month))) return { triggered: false };
-    await materializeRecurringTransactions(month, 500, 10_000, telegramUserId);
+    let triggered = false;
+    while (await hasDueRecurringRule(telegramUserId, month)) {
+      triggered = true;
+      const result = await materializeRecurringTransactions(month, 500, 500, telegramUserId);
+      if (!result.rulesMaterialized) break;
+    }
+    return { triggered };
   } catch {
     return { triggered: false };
   }
-  return { triggered: true };
 }
 
 export function isRecurringRuleDue(dayOfMonth: number, daysInMonth: number, todayDay: number, alreadyRun: boolean) {
