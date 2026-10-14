@@ -838,6 +838,52 @@ export async function upsertRecurringRule(
   return Number(data.id);
 }
 
+export async function triggerDueRecurringTransactions(telegramUserId: number, month = currentMonth()) {
+  if (month !== currentMonth()) return { triggered: false };
+  try {
+    let triggered = false;
+    while (await hasDueRecurringRule(telegramUserId, month)) {
+      triggered = true;
+      const result = await materializeRecurringTransactions(month, 500, 500, telegramUserId);
+      if (!result.rulesMaterialized) break;
+    }
+    return { triggered };
+  } catch {
+    return { triggered: false };
+  }
+}
+
+export function isRecurringRuleDue(dayOfMonth: number, daysInMonth: number, todayDay: number, alreadyRun: boolean) {
+  return !alreadyRun && Math.min(dayOfMonth, daysInMonth) <= todayDay;
+}
+
+async function hasDueRecurringRule(telegramUserId: number, month: string) {
+  const supabase = createSupabaseAdmin();
+  const { data: rules, error: rulesError } = await supabase
+    .from("recurring_rules")
+    .select("id, day_of_month")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("active", true);
+  if (rulesError && isMissingSchemaError(rulesError)) return false;
+  if (rulesError) throw rulesError;
+  if (!rules?.length) return false;
+
+  const { data: runs, error: runsError } = await supabase
+    .from("recurring_rule_runs")
+    .select("recurring_rule_id")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("month", month);
+  if (runsError && isMissingSchemaError(runsError)) return false;
+  if (runsError) throw runsError;
+  const completed = new Set((runs || []).map((run) => Number(run.recurring_rule_id)));
+  const today = new Date();
+  const todayDay = today.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).getUTCDate();
+  return rules.some((rule) => {
+    return isRecurringRuleDue(Number(rule.day_of_month), daysInMonth, todayDay, completed.has(Number(rule.id)));
+  });
+}
+
 export async function deleteRecurringRule(telegramUserId: number, ruleId: number) {
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
@@ -1330,7 +1376,7 @@ async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[
   }));
 }
 
-export async function materializeRecurringTransactions(month: string, batchSize = 100, maxRules = batchSize) {
+export async function materializeRecurringTransactions(month: string, batchSize = 100, maxRules = batchSize, telegramUserId?: number) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Month must use YYYY-MM format.");
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 500) {
     throw new Error("Batch size must be between 1 and 500.");
@@ -1344,10 +1390,16 @@ export async function materializeRecurringTransactions(month: string, batchSize 
   let batchesProcessed = 0;
   while (rulesMaterialized < maxRules) {
     const requested = Math.min(batchSize, maxRules - rulesMaterialized);
-    const { data, error } = await supabase.rpc("materialize_recurring_transactions", {
-      target_month: month,
-      batch_size: requested
-    });
+    const { data, error } = telegramUserId === undefined
+      ? await supabase.rpc("materialize_recurring_transactions", {
+          target_month: month,
+          batch_size: requested
+        })
+      : await supabase.rpc("materialize_recurring_transactions_for_user", {
+          target_month: month,
+          batch_size: requested,
+          target_telegram_user_id: telegramUserId
+        });
     if (error && isMissingSchemaError(error)) break;
     if (error) throw error;
     const result = Array.isArray(data) ? data[0] : data;

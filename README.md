@@ -13,7 +13,8 @@ The deployable version is a single Next.js app:
 - `/api/transfers` creates grouped transfers, and
   `/api/transfers/{transferGroupId}` edits or deletes both legs of a grouped
   transfer.
-- `/api/jobs/recurring` materializes recurring transactions from a Vercel cron.
+- `/api/summary` triggers due recurring transactions for the authenticated user
+  when the dashboard is opened; `/api/jobs/recurring` remains the daily fallback.
 - Supabase Postgres stores users, transactions, and budgets.
 
 ## Can One Vercel Project Host Both?
@@ -183,9 +184,10 @@ parent categories, or child subcategories.
   Needs, Wants, and Savings progress to show monthly budget left or overage;
   ordinary Needs/Wants spending is reported separately from Savings allocated
   through Savings-category expenses and investment transactions.
-- Summary reads are read-only. The daily recurring job creates due transactions
-  idempotently, in bounded batches, for the current UTC month. A valid target
-  month can also be materialized explicitly, including overdue scheduled dates.
+- Opening the dashboard triggers due recurring transactions for the authenticated
+  user only. The trigger is idempotent and runs in bounded batches for the current
+  UTC month; the daily recurring job remains a fallback. A valid target month can
+  also be materialized explicitly, including overdue scheduled dates.
   Subscriptions create one categorized expense; investment transfers and loan
   payments create their existing two-leg entries; account transfers create two
   categoryless transfer entries.
