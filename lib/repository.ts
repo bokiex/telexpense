@@ -841,7 +841,11 @@ export async function upsertRecurringRule(
 export async function triggerDueRecurringTransactions(telegramUserId: number, month = currentMonth()) {
   if (month !== currentMonth()) return { triggered: false };
   if (!(await hasDueRecurringRule(telegramUserId, month))) return { triggered: false };
-  await materializeRecurringTransactions(month);
+  try {
+    await materializeRecurringTransactions(month, 500, 10_000, telegramUserId);
+  } catch {
+    return { triggered: false };
+  }
   return { triggered: true };
 }
 
@@ -1368,7 +1372,7 @@ async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[
   }));
 }
 
-export async function materializeRecurringTransactions(month: string, batchSize = 100, maxRules = batchSize) {
+export async function materializeRecurringTransactions(month: string, batchSize = 100, maxRules = batchSize, telegramUserId?: number) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Month must use YYYY-MM format.");
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 500) {
     throw new Error("Batch size must be between 1 and 500.");
@@ -1382,10 +1386,16 @@ export async function materializeRecurringTransactions(month: string, batchSize 
   let batchesProcessed = 0;
   while (rulesMaterialized < maxRules) {
     const requested = Math.min(batchSize, maxRules - rulesMaterialized);
-    const { data, error } = await supabase.rpc("materialize_recurring_transactions", {
-      target_month: month,
-      batch_size: requested
-    });
+    const { data, error } = telegramUserId === undefined
+      ? await supabase.rpc("materialize_recurring_transactions", {
+          target_month: month,
+          batch_size: requested
+        })
+      : await supabase.rpc("materialize_recurring_transactions_for_user", {
+          target_month: month,
+          batch_size: requested,
+          target_telegram_user_id: telegramUserId
+        });
     if (error && isMissingSchemaError(error)) break;
     if (error) throw error;
     const result = Array.isArray(data) ? data[0] : data;
