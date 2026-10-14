@@ -29,12 +29,14 @@
 8. Bot replies with a breadcrumb save confirmation, Edit and Undo actions, and
    an optional warning.
 9. Mini App calls `/api/summary` with `X-Telegram-Init-Data`.
-10. Backend validates Telegram init data and returns only that user's dashboard
-   data. Summary reads do not materialize recurring transactions.
+10. Backend validates Telegram init data, materializes due recurring transactions
+    for that user when needed, and returns only that user's dashboard data.
 
-The recurring job calls an idempotent Postgres function in bounded batches for
-the current UTC month. The function also accepts any valid target month for
-explicit materialization, and its scheduled-date cutoff includes overdue rules.
+The summary path checks for due rules and calls a user-scoped, idempotent Postgres
+function in bounded batches for the current UTC month. The recurring job performs
+the same materialization globally as a daily fallback. The function also accepts
+any valid target month for explicit materialization, and its scheduled-date cutoff
+includes overdue rules.
 A unique rule/month run claim prevents duplicate materialization across retries
 or concurrent invocations. Subscriptions create one categorized expense.
 Investment transfers and loan payments preserve their existing two-leg
