@@ -28,7 +28,7 @@ with candidates as (
 ), inserted_transactions as (
   insert into public.transactions (telegram_user_id, kind, category, category_id, account_id, transfer_group_id, recurring_rule_id, description, amount_cents, occurred_on)
   select r.telegram_user_id,
-    case when leg.destination and destination.account_type = 'investment' then 'investment' when leg.destination then 'transfer' when r.rule_type = 'subscription' then 'expense' else 'transfer' end,
+    case when leg.destination and r.rule_type = 'investment_transfer' then 'investment' when leg.destination then 'transfer' when r.rule_type = 'subscription' then 'expense' else 'transfer' end,
     case when r.rule_type = 'subscription' then r.category else null end,
     case when r.rule_type = 'subscription' then category_match.id else null end,
     case when leg.destination then r.to_account_id else r.from_account_id end,
@@ -36,7 +36,6 @@ with candidates as (
     case when leg.destination then abs(r.amount_cents) else -abs(r.amount_cents) end,
     (target_month || '-' || lpad(least(r.day_of_month, extract(day from ((target_month || '-01')::date + interval '1 month - 1 day')))::integer::text, 2, '0'))::date
   from claimed_rules r cross join lateral (values (false), (true)) as leg(destination)
-  left join public.accounts destination on destination.id = r.to_account_id and destination.telegram_user_id = r.telegram_user_id
   left join lateral (select c.id from public.categories c where c.telegram_user_id = r.telegram_user_id and public.normalize_identity(c.source_name) = public.normalize_identity(r.category) limit 1) category_match on true
   where r.rule_type <> 'subscription' or not leg.destination
   returning recurring_rule_id
