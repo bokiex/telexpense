@@ -798,6 +798,7 @@ export async function upsertRecurringRule(
     if (values.subcategoryId !== null && values.subcategoryId !== undefined && !category.subcategories.some((item) => item.id === values.subcategoryId)) {
       throw new Error("Subcategory is not available for this category.");
     }
+    values = { ...values, category: category.sourceName };
   }
   const supabase = createSupabaseAdmin();
   const payload = {

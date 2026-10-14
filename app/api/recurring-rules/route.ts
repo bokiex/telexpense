@@ -28,7 +28,6 @@ export async function POST(request: NextRequest) {
     if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
     if (!ruleTypes.has(ruleType)) return NextResponse.json({ error: "Rule type is not valid." }, { status: 400 });
     if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return NextResponse.json({ error: "Amount must be a positive integer number of cents." }, { status: 400 });
-    if (ruleType !== "account_transfer" && !category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
     if (ruleType !== "account_transfer" && (!Number.isSafeInteger(categoryId) || (categoryId !== null && categoryId <= 0))) return NextResponse.json({ error: "Category is required." }, { status: 400 });
     if (subcategoryId !== null && (!Number.isSafeInteger(subcategoryId) || subcategoryId <= 0)) return NextResponse.json({ error: "Subcategory is not valid." }, { status: 400 });
     if (!Number.isSafeInteger(fromAccountId) || fromAccountId <= 0) return NextResponse.json({ error: "From account is required." }, { status: 400 });
