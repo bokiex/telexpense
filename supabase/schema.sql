@@ -106,6 +106,10 @@ create table if not exists public.subcategories (
   unique (telegram_user_id, category_id, name)
 );
 
+alter table public.recurring_rules
+  add column if not exists category_id bigint references public.categories(id) on delete set null,
+  add column if not exists subcategory_id bigint references public.subcategories(id) on delete set null;
+
 alter table public.budgets
   add column if not exists subcategory_id bigint references public.subcategories(id) on delete cascade;
 
@@ -780,6 +784,7 @@ as $$
     where r.active
       and target_month ~ '^\d{4}-(0[1-9]|1[0-2])$'
       and batch_size between 1 and 500
+      and target_month = to_char(current_date, 'YYYY-MM')
       and (
         target_month || '-' ||
         lpad(least(r.day_of_month, extract(day from (
@@ -811,8 +816,8 @@ as $$
       on r.telegram_user_id = c.telegram_user_id and r.id = c.recurring_rule_id
   ),
   inserted_transactions as (
-    insert into public.transactions (
-      telegram_user_id, kind, category, category_id, account_id,
+     insert into public.transactions (
+       telegram_user_id, kind, category, category_id, subcategory_id, account_id,
        transfer_group_id, recurring_rule_id, description, amount_cents, occurred_on
     )
     select r.telegram_user_id,
@@ -824,7 +829,8 @@ as $$
              else 'transfer'
            end,
            case when r.rule_type = 'account_transfer' then null else r.category end,
-           case when r.rule_type = 'account_transfer' then null else category_match.id end,
+           case when r.rule_type = 'account_transfer' then null else r.category_id end,
+           case when r.rule_type = 'account_transfer' then null else r.subcategory_id end,
            case when leg.destination then r.to_account_id else r.from_account_id end,
            case when r.rule_type = 'subscription' then null else r.transfer_group_id end,
            r.id,
@@ -838,12 +844,6 @@ as $$
            )::date
     from claimed_rules r
     cross join lateral (values (false), (true)) as leg(destination)
-    left join lateral (
-      select c.id from public.categories c
-      where c.telegram_user_id = r.telegram_user_id
-        and public.normalize_identity(c.source_name) = public.normalize_identity(r.category)
-      limit 1
-    ) category_match on true
     where not leg.destination or (r.rule_type <> 'subscription' and r.to_account_id is not null)
     returning recurring_rule_id
   )

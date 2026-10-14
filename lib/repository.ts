@@ -107,6 +107,8 @@ export type RecurringRule = {
   ruleType: RecurringRuleType;
   amountCents: number;
   category: string;
+  categoryId: number | null;
+  subcategoryId: number | null;
   fromAccountId: number;
   toAccountId: number | null;
   dayOfMonth: number;
@@ -773,6 +775,8 @@ export async function upsertRecurringRule(
     ruleType: RecurringRuleType;
     amountCents: number;
     category: string;
+    categoryId?: number | null;
+    subcategoryId?: number | null;
     fromAccountId: number;
     toAccountId?: number | null;
     dayOfMonth: number;
@@ -786,6 +790,15 @@ export async function upsertRecurringRule(
   if (values.ruleType !== "subscription" && values.toAccountId === values.fromAccountId) {
     throw new Error("From and to accounts must be different.");
   }
+  if (values.ruleType !== "account_transfer") {
+    if (!values.categoryId) throw new Error("Category is required.");
+    const categories = await getStoredCategories(telegramUserId);
+    const category = categories.find((item) => item.id === values.categoryId && item.active);
+    if (!category) throw new Error("Category is not available.");
+    if (values.subcategoryId !== null && values.subcategoryId !== undefined && !category.subcategories.some((item) => item.id === values.subcategoryId)) {
+      throw new Error("Subcategory is not available for this category.");
+    }
+  }
   const supabase = createSupabaseAdmin();
   const payload = {
     telegram_user_id: telegramUserId,
@@ -793,6 +806,8 @@ export async function upsertRecurringRule(
     rule_type: values.ruleType,
     amount_cents: values.amountCents,
     category: values.ruleType === "account_transfer" ? null : values.category.toLowerCase(),
+    category_id: values.ruleType === "account_transfer" ? null : values.categoryId,
+    subcategory_id: values.ruleType === "account_transfer" ? null : values.subcategoryId || null,
     from_account_id: values.fromAccountId,
     to_account_id: values.toAccountId || null,
     day_of_month: values.dayOfMonth,
@@ -1292,7 +1307,7 @@ async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
     .from("recurring_rules")
-    .select("id, name, rule_type, amount_cents, category, from_account_id, to_account_id, day_of_month, active")
+    .select("id, name, rule_type, amount_cents, category, category_id, subcategory_id, from_account_id, to_account_id, day_of_month, active")
     .eq("telegram_user_id", telegramUserId)
     .order("name");
 
@@ -1305,6 +1320,8 @@ async function getRecurringRules(telegramUserId: number): Promise<RecurringRule[
     ruleType: row.rule_type as RecurringRuleType,
     amountCents: Number(row.amount_cents),
     category: row.category,
+    categoryId: row.category_id === null || row.category_id === undefined ? null : Number(row.category_id),
+    subcategoryId: row.subcategory_id === null || row.subcategory_id === undefined ? null : Number(row.subcategory_id),
     fromAccountId: Number(row.from_account_id),
     toAccountId: row.to_account_id === null ? null : Number(row.to_account_id),
     dayOfMonth: Number(row.day_of_month),

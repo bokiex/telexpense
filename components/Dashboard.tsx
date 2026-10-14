@@ -58,6 +58,8 @@ type Tab = "home" | "transactions" | "accounts" | "budget";
 
 type CategorySpend = {
   category: string;
+  categoryId: number | null;
+  subcategoryId: number | null;
   spentCents: number;
 };
 
@@ -236,6 +238,8 @@ type RecurringRule = {
   ruleType: RecurringRuleType;
   amountCents: number;
   category: string;
+  categoryId: number | null;
+  subcategoryId: number | null;
   fromAccountId: number;
   toAccountId: number | null;
   dayOfMonth: number;
@@ -1849,6 +1853,8 @@ function RecurringRuleModal({
   const [ruleType, setRuleType] = useState<RecurringRuleType>(rule?.ruleType || "subscription");
   const [amount, setAmount] = useState(rule ? String(rule.amountCents / 100) : "");
   const [category, setCategory] = useState(rule?.category || data.categories[0]?.sourceName || "subscription");
+  const [categoryId, setCategoryId] = useState(rule?.categoryId ? String(rule.categoryId) : data.categories[0]?.id || "");
+  const [subcategoryId, setSubcategoryId] = useState(rule?.subcategoryId ? String(rule.subcategoryId) : "");
   const [fromAccountId, setFromAccountId] = useState(rule?.fromAccountId ? String(rule.fromAccountId) : "");
   const [toAccountId, setToAccountId] = useState(rule?.toAccountId ? String(rule.toAccountId) : "");
   const [dayOfMonth, setDayOfMonth] = useState(rule ? String(rule.dayOfMonth) : "1");
@@ -1861,6 +1867,7 @@ function RecurringRuleModal({
     if (ruleType === "loan_payment") return account.accountType === "loan";
     return true;
   });
+  const selectedCategory = data.categories.find((item) => item.id === categoryId);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -1868,7 +1875,7 @@ function RecurringRuleModal({
     const day = Number(dayOfMonth);
     const fromId = Number(fromAccountId);
     const toId = Number(toAccountId);
-    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || (ruleType !== "account_transfer" && !category.trim()) || !Number.isFinite(fromId)) {
+    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || (ruleType !== "account_transfer" && !categoryId) || !Number.isFinite(fromId)) {
       setError(ruleType === "account_transfer" ? "Name, amount, and source account are required." : "Name, amount, category, and source account are required.");
       return;
     }
@@ -1886,6 +1893,8 @@ function RecurringRuleModal({
       ruleType,
       amountCents,
       category: category.trim().toLowerCase(),
+      categoryId: ruleType === "account_transfer" ? null : Number(categoryId),
+      subcategoryId: ruleType === "account_transfer" || !subcategoryId ? null : Number(subcategoryId),
       fromAccountId: fromId,
       toAccountId: needsDestination ? toId : null,
       dayOfMonth: day,
@@ -1909,9 +1918,20 @@ function RecurringRuleModal({
             <Input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
           </FieldLabel>
         </div>
-        {ruleType !== "account_transfer" ? <FieldLabel label="Category">
-          <Input value={category} placeholder="subscription, investment, loan" onChange={(event) => setCategory(event.target.value)} />
-        </FieldLabel> : null}
+        {ruleType !== "account_transfer" ? <>
+          <FieldLabel label="Category">
+            <select value={categoryId} onChange={(event) => { setCategoryId(event.target.value); setCategory(data.categories.find((item) => item.id === event.target.value)?.sourceName || ""); setSubcategoryId(""); }}>
+              <option value="">Select category</option>
+              {data.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </FieldLabel>
+          {selectedCategory?.subcategories.length ? <FieldLabel label="Subcategory (optional)">
+            <select value={subcategoryId} onChange={(event) => setSubcategoryId(event.target.value)}>
+              <option value="">No subcategory</option>
+              {selectedCategory.subcategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </FieldLabel> : null}
+        </> : null}
         <FieldLabel label="From Account">
           <select value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}>
             <option value="">Select account</option>
