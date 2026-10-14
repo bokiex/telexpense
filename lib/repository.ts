@@ -838,6 +838,44 @@ export async function upsertRecurringRule(
   return Number(data.id);
 }
 
+export async function triggerDueRecurringTransactions(telegramUserId: number, month = currentMonth()) {
+  if (month !== currentMonth()) return { triggered: false };
+  if (!(await hasDueRecurringRule(telegramUserId, month))) return { triggered: false };
+  await materializeRecurringTransactions(month);
+  return { triggered: true };
+}
+
+export function isRecurringRuleDue(dayOfMonth: number, daysInMonth: number, todayDay: number, alreadyRun: boolean) {
+  return !alreadyRun && Math.min(dayOfMonth, daysInMonth) <= todayDay;
+}
+
+async function hasDueRecurringRule(telegramUserId: number, month: string) {
+  const supabase = createSupabaseAdmin();
+  const { data: rules, error: rulesError } = await supabase
+    .from("recurring_rules")
+    .select("id, day_of_month")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("active", true);
+  if (rulesError && isMissingSchemaError(rulesError)) return false;
+  if (rulesError) throw rulesError;
+  if (!rules?.length) return false;
+
+  const { data: runs, error: runsError } = await supabase
+    .from("recurring_rule_runs")
+    .select("recurring_rule_id")
+    .eq("telegram_user_id", telegramUserId)
+    .eq("month", month);
+  if (runsError && isMissingSchemaError(runsError)) return false;
+  if (runsError) throw runsError;
+  const completed = new Set((runs || []).map((run) => Number(run.recurring_rule_id)));
+  const today = new Date();
+  const todayDay = today.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).getUTCDate();
+  return rules.some((rule) => {
+    return isRecurringRuleDue(Number(rule.day_of_month), daysInMonth, todayDay, completed.has(Number(rule.id)));
+  });
+}
+
 export async function deleteRecurringRule(telegramUserId: number, ruleId: number) {
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase

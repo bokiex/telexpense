@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSummary, currentMonth } from "@/lib/repository";
+import { getSummary, currentMonth, triggerDueRecurringTransactions } from "@/lib/repository";
 import { validateTelegramInitData } from "@/lib/telegram";
 import { requireEnv } from "@/lib/env";
 import { isValidMonth } from "@/lib/validation";
@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
     const { user } = validateTelegramInitData(initData, requireEnv("TELEGRAM_BOT_TOKEN"));
     const month = request.nextUrl.searchParams.get("month") || currentMonth();
     if (!isValidMonth(month)) return NextResponse.json({ error: "Month must be YYYY-MM." }, { status: 400 });
+    await triggerDueRecurringTransactions(user.id, month);
     const summary = await getSummary(user.id, month);
     const response = NextResponse.json(summary);
     response.headers.set("Server-Timing", `summary;dur=${(performance.now() - started).toFixed(1)}`);

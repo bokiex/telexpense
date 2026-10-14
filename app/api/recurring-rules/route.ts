@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEnv } from "@/lib/env";
-import { deleteRecurringRule, upsertRecurringRule } from "@/lib/repository";
+import { deleteRecurringRule, triggerDueRecurringTransactions, upsertRecurringRule } from "@/lib/repository";
 import { validateTelegramInitData } from "@/lib/telegram";
 import type { RecurringRuleType } from "@/lib/repository";
 
@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
       dayOfMonth,
       active
     });
+    await triggerDueRecurringTransactions(userId);
     return NextResponse.json({ ok: true, id: savedId });
   } catch (error) {
     return errorResponse(error);
