@@ -1868,8 +1868,8 @@ function RecurringRuleModal({
     const day = Number(dayOfMonth);
     const fromId = Number(fromAccountId);
     const toId = Number(toAccountId);
-    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || !category.trim() || !Number.isFinite(fromId)) {
-      setError("Name, amount, category, and source account are required.");
+    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || (ruleType === "subscription" && !category.trim()) || !Number.isFinite(fromId)) {
+      setError(ruleType === "subscription" ? "Name, amount, category, and source account are required." : "Name, amount, and source account are required.");
       return;
     }
     if (needsDestination && !Number.isFinite(toId)) {
