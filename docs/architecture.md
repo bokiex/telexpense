@@ -34,7 +34,10 @@
 
 The recurring job calls an idempotent Postgres function in bounded batches for
 the current UTC month. A unique rule/month run claim prevents duplicate
-materialization across retries or concurrent invocations.
+materialization across retries or concurrent invocations. Subscriptions create
+one categorized expense. Investment transfers and loan payments preserve their
+existing two-leg classifications. Account transfers create two categoryless
+transfer legs and do not need a category.
 
 Full transaction history is exposed separately at
 `/api/transactions/history`, scoped to the requested month and ordered by date
@@ -75,9 +78,11 @@ section: add transaction on Home or History, add account on Accounts, and add
 category on Budget.
 
 Mutation routes validate safe integer SGD cents, financial sign conventions,
-real calendar dates, and valid calendar months. Portfolio snapshots and recurring rules verify that referenced
-accounts belong to the authenticated Telegram user; recurring transfer
-endpoints also reject identical source and destination accounts. Budget
+real calendar dates, and valid calendar months. Portfolio snapshots and recurring
+rules verify that referenced accounts belong to the authenticated Telegram user;
+account, investment, and loan recurring transfers also reject identical source
+and destination accounts. Account-transfer rules omit the category, while other
+recurring rule types retain their category requirement. Budget
 mutations also verify that a supplied subcategory belongs to the selected
 user-owned parent category.
 

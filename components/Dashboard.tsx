@@ -53,7 +53,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 type BudgetGroup = "Needs" | "Wants" | "Savings";
 type TransactionType = "income" | "expense";
 type AccountType = "cash" | "bank" | "card" | "investment" | "loan" | "other";
-type RecurringRuleType = "subscription" | "investment_transfer" | "loan_payment";
+type RecurringRuleType = "subscription" | "account_transfer" | "investment_transfer" | "loan_payment";
 type Tab = "home" | "transactions" | "accounts" | "budget";
 
 type CategorySpend = {
@@ -307,7 +307,7 @@ const FALLBACK_COLORS = ["#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", 
 const CATEGORY_COLORS = ["#4ade80", "#f87171", "#60a5fa", "#fb923c", "#a78bfa", "#f472b6", "#34d399", "#fbbf24", "#e879f9", "#38bdf8"];
 const CATEGORY_ICONS = ["Wallet", "Home", "ShoppingCart", "Car", "Tv", "ShoppingBag", "Shield", "TrendingUp", "Briefcase", "Utensils", "Coffee", "Heart", "BookOpen", "Music", "Plane"];
 const ACCOUNT_TYPES: AccountType[] = ["cash", "bank", "card", "investment", "loan", "other"];
-const RECURRING_TYPES: RecurringRuleType[] = ["subscription", "investment_transfer", "loan_payment"];
+const RECURRING_TYPES: RecurringRuleType[] = ["subscription", "account_transfer", "investment_transfer", "loan_payment"];
 const THEME_TARGET_PREFIX = "theme:";
 
 async function fetchHistoryPage(month: string, cursor: HistoryPage["nextCursor"], errorMessage: string): Promise<HistoryPage> {
@@ -1855,7 +1855,7 @@ function RecurringRuleModal({
   const [active, setActive] = useState(rule?.active ?? true);
   const [error, setError] = useState("");
   const saveAction = usePendingAction();
-  const needsDestination = ruleType === "investment_transfer" || ruleType === "loan_payment";
+  const needsDestination = ruleType !== "subscription";
   const destinationAccounts = data.accounts.filter((account) => {
     if (ruleType === "investment_transfer") return account.accountType === "investment";
     if (ruleType === "loan_payment") return account.accountType === "loan";
@@ -1868,8 +1868,8 @@ function RecurringRuleModal({
     const day = Number(dayOfMonth);
     const fromId = Number(fromAccountId);
     const toId = Number(toAccountId);
-    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || !category.trim() || !Number.isFinite(fromId)) {
-      setError("Name, amount, category, and source account are required.");
+    if (!name.trim() || !Number.isFinite(amountCents) || amountCents <= 0 || (ruleType !== "account_transfer" && !category.trim()) || !Number.isFinite(fromId)) {
+      setError(ruleType === "account_transfer" ? "Name, amount, and source account are required." : "Name, amount, category, and source account are required.");
       return;
     }
     if (needsDestination && !Number.isFinite(toId)) {
@@ -1909,9 +1909,9 @@ function RecurringRuleModal({
             <Input value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => setAmount(event.target.value)} />
           </FieldLabel>
         </div>
-        <FieldLabel label="Category">
+        {ruleType !== "account_transfer" ? <FieldLabel label="Category">
           <Input value={category} placeholder="subscription, investment, loan" onChange={(event) => setCategory(event.target.value)} />
-        </FieldLabel>
+        </FieldLabel> : null}
         <FieldLabel label="From Account">
           <select value={fromAccountId} onChange={(event) => setFromAccountId(event.target.value)}>
             <option value="">Select account</option>
@@ -1919,7 +1919,7 @@ function RecurringRuleModal({
           </select>
         </FieldLabel>
         {needsDestination ? (
-          <FieldLabel label={ruleType === "investment_transfer" ? "Investment Account" : "Loan Account"}>
+          <FieldLabel label={ruleType === "investment_transfer" ? "Investment Account" : ruleType === "loan_payment" ? "Loan Account" : "To Account"}>
             <select value={toAccountId} onChange={(event) => setToAccountId(event.target.value)}>
               <option value="">Select account</option>
               {destinationAccounts.map((account) => <option key={account.id} value={account.id || ""}>{account.name}</option>)}
@@ -2620,6 +2620,7 @@ function isDebtAccount(account: Account) {
 
 function recurringTypeLabel(type: RecurringRuleType) {
   if (type === "subscription") return "Subscription";
+  if (type === "account_transfer") return "Account transfer";
   if (type === "investment_transfer") return "Investment";
   return "Loan";
 }

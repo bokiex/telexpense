@@ -176,3 +176,10 @@ git ls-files -s AGENTS.md CLAUDE.md
 
 Keep `CLAUDE.md` as a relative symlink to this file so agent guidance cannot
 diverge.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

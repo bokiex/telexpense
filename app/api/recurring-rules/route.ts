@@ -6,7 +6,7 @@ import type { RecurringRuleType } from "@/lib/repository";
 
 export const runtime = "nodejs";
 
-const ruleTypes = new Set(["subscription", "investment_transfer", "loan_payment"]);
+const ruleTypes = new Set(["subscription", "account_transfer", "investment_transfer", "loan_payment"]);
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,9 +26,9 @@ export async function POST(request: NextRequest) {
     if (!name) return NextResponse.json({ error: "Name is required." }, { status: 400 });
     if (!ruleTypes.has(ruleType)) return NextResponse.json({ error: "Rule type is not valid." }, { status: 400 });
     if (!Number.isSafeInteger(amountCents) || amountCents <= 0) return NextResponse.json({ error: "Amount must be a positive integer number of cents." }, { status: 400 });
-    if (!category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
+    if (ruleType !== "account_transfer" && !category) return NextResponse.json({ error: "Category is required." }, { status: 400 });
     if (!Number.isSafeInteger(fromAccountId) || fromAccountId <= 0) return NextResponse.json({ error: "From account is required." }, { status: 400 });
-    if ((ruleType === "investment_transfer" || ruleType === "loan_payment") && (!Number.isSafeInteger(toAccountId) || Number(toAccountId) <= 0)) {
+    if (ruleType !== "subscription" && (!Number.isSafeInteger(toAccountId) || Number(toAccountId) <= 0)) {
       return NextResponse.json({ error: "To account is required for transfers." }, { status: 400 });
     }
     if (Number.isSafeInteger(toAccountId) && toAccountId === fromAccountId) {

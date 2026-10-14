@@ -53,9 +53,9 @@ create table if not exists public.recurring_rules (
   id bigint primary key generated always as identity,
   telegram_user_id bigint not null references public.users(telegram_user_id) on delete cascade,
   name text not null,
-  rule_type text not null check (rule_type in ('subscription', 'investment_transfer', 'loan_payment')),
+  rule_type text not null check (rule_type in ('subscription', 'account_transfer', 'investment_transfer', 'loan_payment')),
   amount_cents integer not null,
-  category text not null,
+  category text,
   from_account_id bigint not null references public.accounts(id) on delete cascade,
   to_account_id bigint references public.accounts(id) on delete set null,
   day_of_month integer not null default 1 check (day_of_month between 1 and 31),
@@ -786,6 +786,7 @@ as $$
           (target_month || '-01')::date + interval '1 month - 1 day'
         )))::integer::text, 2, '0')
       )::date <= current_date
+      and (r.rule_type = 'subscription' or r.to_account_id is not null)
       and not exists (
         select 1 from public.recurring_rule_runs existing
         where existing.telegram_user_id = r.telegram_user_id
@@ -819,10 +820,11 @@ as $$
              when leg.destination then
                case when r.rule_type = 'investment_transfer' then 'investment' else 'transfer' end
              when r.rule_type = 'investment_transfer' then 'transfer'
-             else 'expense'
+             when r.rule_type in ('subscription', 'loan_payment') then 'expense'
+             else 'transfer'
            end,
-           r.category,
-           category_match.id,
+           case when r.rule_type = 'account_transfer' then null else r.category end,
+           case when r.rule_type = 'account_transfer' then null else category_match.id end,
            case when leg.destination then r.to_account_id else r.from_account_id end,
            case when r.rule_type = 'subscription' then null else r.transfer_group_id end,
            r.id,
