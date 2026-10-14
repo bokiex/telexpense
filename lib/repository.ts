@@ -840,8 +840,8 @@ export async function upsertRecurringRule(
 
 export async function triggerDueRecurringTransactions(telegramUserId: number, month = currentMonth()) {
   if (month !== currentMonth()) return { triggered: false };
-  if (!(await hasDueRecurringRule(telegramUserId, month))) return { triggered: false };
   try {
+    if (!(await hasDueRecurringRule(telegramUserId, month))) return { triggered: false };
     await materializeRecurringTransactions(month, 500, 10_000, telegramUserId);
   } catch {
     return { triggered: false };
