@@ -16,7 +16,7 @@
    text, and `/income` or `/invest` commands into a normalized transaction.
 4. Comma-separated input uses `lib/identity` to resolve normalized category and
    account names and aliases to active, user-owned records. Concise input uses
-   `lib/transactionCapture` to resolve the subcategory, its parent category,
+   `lib/conciseCapture` to resolve the subcategory, its parent category,
    and the active account.
 5. Unknown or ambiguous concise identities are resolved with inline keyboard
    choices. The 15-minute selection state is stored in

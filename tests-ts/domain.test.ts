@@ -4,7 +4,7 @@ import { formatAmount } from "../lib/amountFormat";
 import { debtAmount, loanMetrics, netWorth, netWorthWithPortfolioValues, normalizeOpeningBalance } from "../lib/finance";
 import { normalizeIdentity, resolveIdentity } from "../lib/identity";
 import { isConciseTransactionMessage, parseConciseCommandMessage, parseConciseTransactionMessage, parseTransactionMessage } from "../lib/parser";
-import { callbackData, resolveConciseAccount, resolveConciseCapture } from "../lib/transactionCapture";
+import { resolveConciseAccount, resolveConciseCapture } from "../lib/conciseCapture";
 import type { StoredAccount, StoredCategory } from "../lib/repository";
 import { budgetActivityTotals, budgetStatusSpentCents, effectiveBudgetCents, incomeAllocationTotals, spendingTrend, subcategoryDisplayName } from "../lib/repository";
 import { themeBudgetCategory } from "../lib/budgetThemes";
@@ -363,10 +363,9 @@ test("a category without subcategories returns explicit guidance state", () => {
   if (result.status === "no-subcategories") assert.equal(result.category.id, 1);
 });
 
-test("unknown concise text starts category selection and callback payloads stay compact", () => {
+test("unknown concise text starts category selection", () => {
   const result = resolveConciseCapture("mystery", [category(1, "Food", "Eat out")], [account]);
   assert.equal(result.status, "choose-category");
-  assert.ok(Buffer.byteLength(callbackData("0123456789abcdef", "s", Number.MAX_SAFE_INTEGER)) <= 64);
 });
 
 test("liability signs, net worth, and repayment are consistent", () => {
