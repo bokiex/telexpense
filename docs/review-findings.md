@@ -7,7 +7,7 @@ cover the deployed Next.js application, not the legacy Python prototype.
 
 | ID | Priority | Status | Finding |
 | --- | --- | --- | --- |
-| 1 | Critical | Complete | Authenticate Telegram webhook requests with Telegram's secret-token header. |
+| 1 | Critical | Accepted risk | Authenticate Telegram webhook requests with Telegram's secret-token header. Deferred while the webhook remains unprotected. |
 | 2 | High | Complete | Reject ungrouped `transfer` messages received through the bot parser flow. |
 | 3 | High | Complete | Keep recurring subscriptions out of transfer groups, and repair existing affected rows. |
 | 4 | High | Complete | Exclude grouped investment-transfer destination legs from Savings allocation. |
@@ -22,11 +22,10 @@ cover the deployed Next.js application, not the legacy Python prototype.
 
 ### 1. Authenticate Telegram webhook requests
 
-`app/api/telegram/webhook/route.ts` accepts arbitrary JSON and trusts user IDs in
-the body. A forged callback can act as another Telegram user and delete that
-user's transaction. Register the webhook with a Telegram secret token, store the
-same value server-side, and reject missing or mismatched
-`X-Telegram-Bot-Api-Secret-Token` headers before reading the body.
+The active webhook currently accepts arbitrary JSON and trusts user IDs in the
+body. A forged callback can act as another Telegram user and delete that user's
+transaction. This remains an accepted risk until webhook authentication is
+restored.
 
 ### 2. Reject ungrouped bot transfers
 

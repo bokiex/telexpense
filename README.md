@@ -53,7 +53,6 @@ Required values:
 
 ```bash
 TELEGRAM_BOT_TOKEN=123456:replace-me
-TELEGRAM_WEBHOOK_SECRET_TOKEN=replace-with-a-long-random-token
 APP_BASE_URL=https://your-app.vercel.app
 BUDGET_WARNING_RATIO=0.8
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
@@ -62,10 +61,7 @@ SUPABASE_SECRET_KEY=sb_secret_replace_me
 CRON_SECRET=replace-with-a-long-random-secret
 ```
 
-`TELEGRAM_WEBHOOK_SECRET_TOKEN` authenticates requests to
-`/api/telegram/webhook`. Generate a value using `openssl rand -hex 32`, add it
-to your Vercel environment variables, and deploy it before registering the
-webhook. `CRON_SECRET` protects `/api/jobs/recurring`. Vercel sends it as
+`CRON_SECRET` protects `/api/jobs/recurring`. Vercel sends it as
 `Authorization: Bearer $CRON_SECRET` when invoking the daily schedule in
 `vercel.json`.
 
@@ -80,13 +76,11 @@ The local Mini App runs at `http://localhost:3000`, but Telegram production Mini
 
 ## Telegram Setup
 
-Create your bot with BotFather. After deploying
-`TELEGRAM_WEBHOOK_SECRET_TOKEN`, register the webhook with that same value:
+Create your bot with BotFather, then register the webhook:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
-  --data-urlencode "url=$APP_BASE_URL/api/telegram/webhook" \
-  --data-urlencode "secret_token=$TELEGRAM_WEBHOOK_SECRET_TOKEN"
+  --data-urlencode "url=$APP_BASE_URL/api/telegram/webhook"
 ```
 
 Configure the Mini App or menu button in BotFather to point to:
@@ -102,9 +96,7 @@ curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
 ```
 
 `result.url` must be your deployed Vercel webhook URL. If it is empty, Telegram
-is not sending messages to your app. Telegram sends the configured value in the
-`X-Telegram-Bot-Api-Secret-Token` header. Register a new webhook after changing
-this value.
+is not sending messages to your app.
 
 Sending `/start` initializes the Telegram user before returning the dashboard
 button.
