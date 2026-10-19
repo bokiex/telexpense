@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
   try {
     if (text.startsWith("/start")) {
       await upsertTelegramUser(user);
-      await sendTelegramMessage(chatId, "Send expenses like: 4.20 lunch. Add @account when needed. Use /income 5000 salary or /invest 200 voo for other entries.", dashboardKeyboard());
+      await sendTelegramMessage(chatId, "Send expenses like: 4.20 lunch. Add @account when needed. Use /income 5000 salary for income entries.", dashboardKeyboard());
       return NextResponse.json({ ok: true });
     }
 
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const messageText = error instanceof Error ? error.message : "Could not save transaction.";
     console.error("Telegram webhook handler failed", error);
-    await safeSendTelegramMessage(chatId, `${messageText}\nExamples: 4.20 lunch, 4.20 lunch @dbs, /income 5000 salary, /invest 200 voo`);
+    await safeSendTelegramMessage(chatId, `${messageText}\nExamples: 4.20 lunch, 4.20 lunch @dbs, /income 5000 salary`);
     return NextResponse.json({ ok: true });
   }
 }

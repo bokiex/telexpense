@@ -76,11 +76,10 @@ export function parseConciseTransactionMessage(
 }
 
 export function parseConciseCommandMessage(text: string): ConciseTransaction | null {
-  const match = /^\/(?<command>income|invest)(?:@\w+)?(?:\s+(?<body>.+))?\s*$/i.exec(text);
+  const match = /^\/(?<command>income)(?:@\w+)?(?:\s+(?<body>.+))?\s*$/i.exec(text);
   if (!match?.groups?.command) return null;
 
-  const kind = match.groups.command.toLowerCase() === "income" ? "income" : "investment";
-  return parseConciseTransactionMessage(match.groups.body || "", kind);
+  return parseConciseTransactionMessage(match.groups.body || "", "income");
 }
 
 export function isConciseTransactionMessage(text: string) {

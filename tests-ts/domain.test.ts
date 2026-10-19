@@ -284,9 +284,7 @@ test("concise Telegram parser extracts amount and subcategory text", () => {
   assert.deepEqual(parseConciseCommandMessage("/income 5,000 salary"), {
     kind: "income", description: "salary", accountHint: null, amountCents: 500_000
   });
-  assert.deepEqual(parseConciseCommandMessage("/invest 200 voo @brokerage"), {
-    kind: "investment", description: "voo", accountHint: "brokerage", amountCents: -20_000
-  });
+  assert.equal(parseConciseCommandMessage("/invest 200 voo @brokerage"), null);
   assert.throws(() => parseConciseTransactionMessage("food, card, lunch, 4.20"));
 });
 

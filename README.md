@@ -121,7 +121,6 @@ If the bot receives messages but does not reply, check the Vercel function logs 
 4.20 lunch
 4.20 lunch @debit card
 /income 5000 salary
-/invest 200 voo @brokerage
 food, debit card, lunch, 4.20
 transport, debit card, train, 2.00
 income, salary, debit card, paycheck, 5000
@@ -131,8 +130,8 @@ income, salary, debit card, paycheck, 5000
 
 Default transaction kind is `expense`. The short form is `amount subcategory`,
 with an optional `@account` suffix when the usual account is not correct. Use
-`/income amount category` for income and `/invest amount subcategory` for
-investments. The bot remembers the last-used account and asks with buttons when
+`/income amount category` for income. Investment transfers are managed in the
+dashboard. The bot remembers the last-used account and asks with buttons when
 it cannot choose one safely. Add categories from the Mini App Budget tab and
 accounts from the Accounts tab before using them in bot messages.
 
@@ -152,6 +151,19 @@ actions.
 The `/budget` bot command sets parent-category monthly budgets. Use the Mini
 App budget tab to set or delete budgets for Needs, Wants, and Savings themes,
 parent categories, or child subcategories.
+
+### Register slash commands
+
+In BotFather, run `/setcommands`, select the bot, and paste:
+
+```text
+start - Show usage instructions
+income - Record income
+budget - Set a monthly budget
+```
+
+The bot does not register `/invest`; investment transfers are managed in the
+dashboard.
 
 ## Dashboard Behavior
 
