@@ -3,7 +3,7 @@
 Status: open
 
 This tracker records the full-repository review completed on 2026-09-17. Findings
-cover the deployed Next.js application, not the legacy Python prototype.
+cover the deployed Next.js application.
 
 | ID | Priority | Status | Finding |
 | --- | --- | --- | --- |

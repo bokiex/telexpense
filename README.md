@@ -233,5 +233,3 @@ npm test
 npm run typecheck
 npm run build
 ```
-
-The previous Python/FastAPI prototype remains in `app/*.py` for reference, but the Vercel deployment path is the Next.js implementation.

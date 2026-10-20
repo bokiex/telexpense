@@ -2,8 +2,8 @@
 
 ## What is deployed
 
-This repository contains two implementations. The active product is the Next.js
-15/React 19 application deployed as one Vercel project:
+The active product is the Next.js 15/React 19 application deployed as one Vercel
+project:
 
 - `app/page.tsx` renders the Telegram Mini App dashboard through
   `components/Dashboard.tsx`.
@@ -15,13 +15,6 @@ This repository contains two implementations. The active product is the Next.js
   owns Supabase access and summary calculations.
 - `supabase/schema.sql` is the Postgres schema applied through the Supabase SQL
   editor. It includes additive statements for older deployed schemas.
-
-The Python files under `app/*.py`, the `static/` dashboard, and `tests/*.py` are
-the previous FastAPI/SQLite prototype. Keep them as reference unless a task
-explicitly targets the legacy implementation. They are not part of the Vercel
-runtime, and a Python test passing does not validate the TypeScript equivalent.
-The legacy webhook path is `/telegram/webhook`; the active path is
-`/api/telegram/webhook`.
 
 ## Local setup
 
@@ -36,19 +29,6 @@ npm run dev
 The dashboard is available at `http://localhost:3000`, but a real Telegram Mini
 App needs an HTTPS URL (a Vercel deployment or tunnel) and valid Telegram
 `initData`.
-
-Only set up Python when working on the reference implementation:
-
-```bash
-python3.12 -m venv .venv
-. .venv/bin/activate
-pip install -e '.[dev]'
-pytest
-```
-
-The Python prototype reads `.env` and `DATABASE_PATH` (default
-`./telexpense.sqlite3`); the Next.js application reads `.env.local` and never
-uses `DATABASE_PATH`.
 
 ## Environment and deployment
 
@@ -145,8 +125,8 @@ check.
   `.eq("telegram_user_id", userId)` can expose or mutate another user's
   financial data even though RLS is enabled.
 - Do not log bot tokens, Supabase keys, raw `initData`, or financial payloads.
-  Keep secret-bearing `.env*` files, SQLite files, `.next/`, and `node_modules/`
-  untracked; keep the sanitized `.env.example` template tracked.
+  Keep secret-bearing `.env*` files, `.next/`, and `node_modules/` untracked;
+  keep the sanitized `.env.example` template tracked.
 - `APP_BASE_URL` controls a Telegram `web_app` link. Production values must be
   the intended HTTPS origin; preview URLs should not silently replace the
   production bot target.
@@ -161,8 +141,7 @@ npm run typecheck
 npm run build
 ```
 
-Run `pytest` as well when touching the Python reference code. `npm run lint`
-currently delegates to deprecated `next lint` and opens an interactive setup
+`npm run lint` currently delegates to deprecated `next lint` and opens an interactive setup
 prompt because the repository has no ESLint configuration; it is not a usable
 non-interactive gate until lint configuration is committed. For
 documentation-only changes, review the diff, check Markdown formatting, and
