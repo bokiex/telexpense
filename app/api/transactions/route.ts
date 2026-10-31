@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     if (amountError) return NextResponse.json({ error: amountError }, { status: 400 });
     if (!isValidDate(occurredOn)) return NextResponse.json({ error: "Date must be a valid YYYY-MM-DD date." }, { status: 400 });
 
-    const id = await addTransactionFields(user.id, {
+    const transaction = await addTransactionFields(user.id, {
       kind: kind as ParsedTransaction["kind"],
       category,
       accountId,
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
       amountCents,
       occurredOn
     });
-    return NextResponse.json({ ok: true, id });
+    return NextResponse.json({ ok: true, id: transaction.id, transaction });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 401 });
   }

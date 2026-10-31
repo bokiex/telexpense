@@ -266,7 +266,8 @@ export async function addTransaction(
     amount_cents: transaction.amountCents,
     occurred_on: new Date().toISOString().slice(0, 10)
   };
-  return insertTransactionCompat(supabase, insert, transaction.account);
+  const inserted = await insertTransactionCompat(supabase, insert, transaction.account);
+  return Number(inserted.id);
 }
 
 export async function addTransactionFields(
@@ -302,7 +303,22 @@ export async function addTransactionFields(
     occurred_on: values.occurredOn
   };
   const accountName = await getAccountName(telegramUserId, values.accountId);
-  return insertTransactionCompat(supabase, insert, accountName.toLowerCase());
+  const row = await insertTransactionCompat(supabase, insert, accountName.toLowerCase());
+  return {
+    id: Number(row.id),
+    kind: row.kind,
+    category: row.category ?? null,
+    subcategoryId: row.subcategory_id ?? null,
+    accountId: row.account_id ?? null,
+    transferGroupId: row.transfer_group_id ?? null,
+    savingsAllocation: row.savings_allocation === true,
+    transferFromAccountId: null,
+    transferToAccountId: null,
+    recurringRuleId: row.recurring_rule_id ?? null,
+    description: row.description,
+    amountCents: row.amount_cents,
+    occurredOn: row.occurred_on
+  };
 }
 
 export async function addTransferFields(
@@ -1780,8 +1796,8 @@ async function insertTransactionCompat(
 ) {
   const values = { ...insert };
   for (;;) {
-    const result = await supabase.from("transactions").insert(values).select("id").single();
-    if (!result.error) return Number(result.data.id);
+    const result = await supabase.from("transactions").insert(values).select("*").single();
+    if (!result.error) return result.data;
     if (isLegacyAccountColumnRequired(result.error) && !("account" in values)) {
       values.account = account;
       continue;

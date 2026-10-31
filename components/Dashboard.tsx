@@ -4,6 +4,8 @@ import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { netWorthWithPortfolioValues } from "@/lib/finance";
 import { formatAmount } from "@/lib/amountFormat";
+import { createDashboardCache, telegramCacheUserId } from "@/lib/dashboardCache";
+import { applyCreatedTransaction } from "@/lib/dashboardTransaction";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -76,7 +78,7 @@ type Budget = {
   budgetCents: number;
 };
 
-type RecentTransaction = {
+export type RecentTransaction = {
   id: number;
   kind: "expense" | "income" | "investment" | "transfer";
   category: string | null;
@@ -115,7 +117,7 @@ type IncomeAllocation = {
 
 type TrendPoint = { periodStart: string; spentCents: number };
 
-type Summary = {
+export type Summary = {
   user: {
     firstName: string | null;
     username: string | null;
@@ -328,6 +330,15 @@ async function fetchHistoryPage(month: string, cursor: HistoryPage["nextCursor"]
   return (await response.json()) as HistoryPage;
 }
 
+function dashboardCache() {
+  try {
+    const id = telegramCacheUserId(window.Telegram?.WebApp?.initData || "");
+    return id === null ? null : createDashboardCache(window.localStorage, id);
+  } catch {
+    return null;
+  }
+}
+
 export default function Dashboard() {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -337,6 +348,7 @@ export default function Dashboard() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [summaryRefreshing, setSummaryRefreshing] = useState(false);
+  const [summarySavedAt, setSummarySavedAt] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [history, setHistory] = useState<RecentTransaction[] | null>(null);
   const [historyCursor, setHistoryCursor] = useState<HistoryPage["nextCursor"]>(null);
@@ -345,6 +357,14 @@ export default function Dashboard() {
   const [historyError, setHistoryError] = useState("");
   const [historyRetryKey, setHistoryRetryKey] = useState(0);
   const historyRequestVersion = useRef(0);
+  const summaryRef = useRef(summary);
+  const monthRef = useRef(month);
+  const historyLoadingRef = useRef(historyLoading);
+  const historyCursorRef = useRef(historyCursor);
+  summaryRef.current = summary;
+  monthRef.current = month;
+  historyLoadingRef.current = historyLoading;
+  historyCursorRef.current = historyCursor;
 
   useEffect(() => {
     const webApp = window.Telegram?.WebApp;
@@ -356,6 +376,16 @@ export default function Dashboard() {
     let ignore = false;
     async function load() {
       setError("");
+      const cache = dashboardCache();
+      const cached = cache?.read<Summary>(month);
+      if (cached && cached.value.month === month) {
+        setSummary(cached.value);
+        setSummarySavedAt(cached.savedAt);
+        setLoading(false);
+        setSummaryRefreshing(false);
+        return;
+      }
+      const generation = cache?.generation() ?? null;
       const hasCurrentSummary = summary?.month === month;
       setLoading(!hasCurrentSummary);
       setSummaryRefreshing(hasCurrentSummary);
@@ -367,7 +397,14 @@ export default function Dashboard() {
           return;
         }
         const data = (await response.json()) as Summary;
-        if (!ignore) setSummary(data);
+        if (!ignore) {
+          if (generation !== null && cache?.generation() !== generation) {
+            setRefreshKey((value) => value + 1);
+            return;
+          }
+          setSummary(data);
+          setSummarySavedAt(cache?.write(month, data, generation) ?? Date.now());
+        }
       } catch {
         if (!ignore) setError("Could not load dashboard.");
       } finally {
@@ -382,6 +419,25 @@ export default function Dashboard() {
       ignore = true;
     };
   }, [month, refreshKey]);
+
+  useEffect(() => {
+    if (summarySavedAt === null) return;
+    const saved = new Date(summarySavedAt);
+    const nextUtcDay = Date.UTC(saved.getUTCFullYear(), saved.getUTCMonth(), saved.getUTCDate() + 1);
+    const expiresAt = Math.min(summarySavedAt + 60 * 60 * 1000, nextUtcDay);
+    const refreshIfExpired = () => {
+      if (Date.now() >= expiresAt) setRefreshKey((value) => value + 1);
+    };
+    const timer = window.setTimeout(refreshIfExpired, Math.max(0, expiresAt - Date.now()));
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshIfExpired();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [summarySavedAt]);
 
   useEffect(() => {
     if (activeTab !== "transactions") return;
@@ -459,6 +515,7 @@ export default function Dashboard() {
     [history, summary]
   );
   const reload = () => {
+    dashboardCache()?.invalidate();
     historyRequestVersion.current += 1;
     if (activeTab === "transactions" && history === null) setHistoryRetryKey((value) => value + 1);
     setRefreshKey((value) => value + 1);
@@ -528,14 +585,45 @@ export default function Dashboard() {
       occurredOn: tx.date
     };
     const path = tx.sourceId ? `/api/transactions/${tx.sourceId}` : "/api/transactions";
+    const cache = dashboardCache();
+    const generation = cache?.generation() ?? null;
+    const originalSummary = summaryRef.current;
     const response = await apiRequest(path, tx.sourceId ? "PATCH" : "POST", body);
     if (!response.ok) {
       const result = await response.json().catch(() => null);
       setError(result?.error || "Could not save transaction.");
       return false;
     }
+    const result = tx.sourceId ? null : await response.json().catch(() => null);
+    const now = Date.now();
+    const savedAt = summarySavedAt;
+    const fresh = savedAt !== null && now >= savedAt && now - savedAt < 60 * 60 * 1000 &&
+      new Date(savedAt).toISOString().slice(0, 10) === new Date(now).toISOString().slice(0, 10);
+    let updated: Summary | null = null;
+    if (fresh && originalSummary && summaryRef.current === originalSummary && monthRef.current === month &&
+        !summaryRefreshing && !historyLoadingRef.current && generation !== null && cache?.generation() === generation + 1) {
+      try {
+        updated = applyCreatedTransaction(originalSummary, result?.transaction);
+      } catch {
+        // A snapshot that cannot be safely updated must be reconciled with the server.
+      }
+    }
     setModal({ type: "none" });
-    reload();
+    if (!updated) {
+      reload();
+      return true;
+    }
+    summaryRef.current = updated;
+    setSummary(updated);
+    cache?.write(month, updated, generation! + 1, savedAt!);
+    const inserted: RecentTransaction = result.transaction;
+    setHistory((current) => {
+      if (!current || current.some((item) => item.id === inserted.id)) return current;
+      const last = current.at(-1);
+      if (historyCursorRef.current && last && (inserted.occurredOn < last.occurredOn ||
+          (inserted.occurredOn === last.occurredOn && inserted.id < last.id))) return current;
+      return [...current, inserted].sort((a, b) => b.occurredOn.localeCompare(a.occurredOn) || b.id - a.id);
+    });
     return true;
   }
 
@@ -761,6 +849,7 @@ export default function Dashboard() {
 
         <div className="mini-content" aria-busy={summaryRefreshing || undefined}>
           {summaryRefreshing ? <div className="refresh-status" role="status">Updating dashboard</div> : null}
+          {!loading && summarySavedAt !== null ? <div className="refresh-status">Updated {new Date(summarySavedAt).toLocaleString()}</div> : null}
           {loading ? <DashboardSkeleton /> : null}
           {!loading && activeTab === "home" ? (
             <HomeView
@@ -2546,7 +2635,7 @@ function storedSubcategoryNumber(subcategoryId?: string) {
 
 async function apiRequest(path: string, method: string, body?: unknown) {
   const initData = window.Telegram?.WebApp?.initData || "";
-  return fetch(path, {
+  const response = await fetch(path, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -2554,6 +2643,8 @@ async function apiRequest(path: string, method: string, body?: unknown) {
     },
     body: body ? JSON.stringify(body) : undefined
   });
+  if (response.ok && method !== "GET") dashboardCache()?.invalidate();
+  return response;
 }
 
 function signedCents(type: TransactionType, cents: number) {
