@@ -23,13 +23,16 @@ test("payment source type changes do not erase statement payments", async ({ req
     return (await response.json()).statements.find((s: { accountId: number }) => s.accountId === card.id).remainingAmountCents;
   };
   expect(await remaining()).toBe(7000);
+  // Only the increase beyond the first snapshot's historical baseline is tracked.
+  expect((await request.patch(`/api/transfers/${group}`, { headers, data: { ...payment, amountCents: 5000 } })).status()).toBe(200);
+  expect(await remaining()).toBe(5000);
   await post("/api/accounts", { ...source, accountType: "cash" });
+  expect(await remaining()).toBe(5000);
+  expect((await request.patch(`/api/transfers/${group}`, { headers, data: { ...payment, amountCents: 5000, fromAccountId: cash.id } })).status()).toBe(200);
   expect(await remaining()).toBe(7000);
-  expect((await request.patch(`/api/transfers/${group}`, { headers, data: { ...payment, fromAccountId: cash.id } })).status()).toBe(200);
-  expect(await remaining()).toBe(10000);
 });
 
-test("an edited overpayment restores an imported paid statement", async ({ request }) => {
+test("editing an overpayment does not restore an imported paid portion", async ({ request }) => {
   const headers = { "X-Telegram-Init-Data": syntheticInitData(900000000001) };
   const post = async (url: string, data: object) => {
     const response = await request.post(url, { headers, data });
@@ -44,11 +47,17 @@ test("an edited overpayment restores an imported paid statement", async ({ reque
   await post("/api/card-statements", { accountId: card.id, closingDate: "2024-02-29", dueDate: "2024-03-20", originalAmountCents: 10000, remainingAmountCents: 0 });
   const summary = await (await request.get("/api/summary?month=2024-02", { headers })).json();
   const group = summary.recent.find((tx: { description: string }) => tx.description === payment.description).transferGroupId;
+  const remaining = async () => {
+    const response = await request.get("/api/card-statements", { headers });
+    expect(response.status()).toBe(200);
+    const statements = (await response.json()).statements.filter((s: { accountId: number }) => s.accountId === card.id);
+    return Object.fromEntries(statements.map((s: { closingDate: string; remainingAmountCents: number }) => [s.closingDate, s.remainingAmountCents]));
+  };
+  expect(await remaining()).toEqual({ "2024-01-31": 0, "2024-02-29": 0 });
   expect((await request.patch(`/api/transfers/${group}`, { headers, data: { ...payment, amountCents: 10000 } })).status()).toBe(200);
-  const response = await request.get("/api/card-statements", { headers });
-  expect(response.status()).toBe(200);
-  const statements = (await response.json()).statements.filter((s: { accountId: number }) => s.accountId === card.id);
-  expect(statements.map((s: { remainingAmountCents: number }) => s.remainingAmountCents)).toEqual([0, 10000]);
+  expect(await remaining()).toEqual({ "2024-01-31": 0, "2024-02-29": 0 });
+  expect((await request.delete(`/api/transfers/${group}`, { headers })).status()).toBe(200);
+  expect(await remaining()).toEqual({ "2024-01-31": 10000, "2024-02-29": 0 });
 });
 
 test("changing a payment source type refreshes the displayed card status", async ({ page, request }) => {
@@ -120,6 +129,7 @@ for (const delayOldResponse of [false, true]) {
         // A saved snapshot initiates a real statement refresh, which we hold
         // until after the later summary-triggered refresh has completed.
         await cardView.getByRole("button", { name: "Add statement snapshot" }).click();
+        await expect(cardView).toContainText("The already-paid portion is not attributed to tracked payments or credit");
         await cardView.getByLabel("Closing date").fill("2024-02-29");
         await cardView.getByLabel("Due date").fill("2024-03-20");
         await cardView.getByLabel("Original statement amount").fill("10");

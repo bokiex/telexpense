@@ -1323,7 +1323,7 @@ function CardStatementDetail({ accountId, statements, error, onSaved }: { accoun
       <FieldLabel label="Due date"><Input type="date" required value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></FieldLabel>
       <FieldLabel label="Original statement amount"><Input inputMode="decimal" required value={original} onChange={(event) => setOriginal(event.target.value)} /></FieldLabel>
       <FieldLabel label="Remaining amount"><Input inputMode="decimal" required value={remaining} onChange={(event) => setRemaining(event.target.value)} /></FieldLabel>
-      <p>Any previously tracked card credit is assumed to have paid the already-paid portion of this statement first. Editing those payments later can change the amount due.</p>
+      <p>The remaining amount is authoritative. The already-paid portion is not attributed to tracked payments or credit; editing those payments later will not restore it.</p>
       <label><input type="checkbox" checked={replaceLegacy} onChange={(event) => setReplaceLegacy(event.target.checked)} /> Re-enter a legacy statement using its current remaining amount</label>
       {formError ? <p role="alert">{formError}</p> : null}
       <PendingButton type="submit" pending={action.pending} pendingLabel="Saving…">Save statement</PendingButton>

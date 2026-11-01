@@ -40,7 +40,8 @@ export type CardPayment = PaymentBaseline & { accountId: number };
 // implied paid portion is historical and is never attributed to tracked credit.
 // The first baseline is historical. Only group amounts above
 // that baseline are tracked, including across subsequent captures. Reductions
-// remove tracked credit first and then allocations newest-first;
+// undo the newest payment tranche first, removing its credit and then its
+// allocations newest-statement-first;
 // allocations on newer statements can move to newly restored older debt.
 // Credit can fill restored debt only on statements captured before that credit
 // arose; older credit must not indirectly override an authoritative snapshot.
@@ -86,90 +87,79 @@ export function reconcileStatementPayments(
       if (amount) buckets.set(cutoff, (buckets.get(cutoff) ?? 0) + amount);
     };
     const remaining: number[] = [];
-    const allocatedTotals = new Array<number>(ordered.length).fill(0);
     const apply = (target: Map<string, number>) => {
       // Undo all reductions before allocating increases, including replacements.
       const restored = new Array<number>(remaining.length).fill(0);
       const oldest = remaining.map((_, i) => i).sort((a, b) =>
         ordered[a].closingDate.localeCompare(ordered[b].closingDate) || ordered[a].id - ordered[b].id);
+      const positions = new Map(oldest.map((i, position) => [i, position]));
       for (const id of ids) {
         const group = ledger.get(id)!;
         const next = target.get(id) ?? 0;
         let reduction = Math.max(0, group.amount - next);
-        for (const n of [...group.credit.keys()].sort((a, b) => b - a)) {
+        if (!reduction) continue;
+        const cutoffs = new Set(group.credit.keys());
+        for (const buckets of group.allocated.values()) for (const cutoff of buckets.keys()) cutoffs.add(cutoff);
+        for (const cutoff of [...cutoffs].sort((a, b) => b - a)) {
           if (!reduction) break;
-          const amount = group.credit.get(n)!;
-          const credit = Math.min(reduction, amount);
-          if (amount === credit) group.credit.delete(n);
-          else group.credit.set(n, amount - credit);
-          reduction -= credit;
-        }
-        for (const i of [...oldest].reverse()) {
-          if (reduction <= 0) break;
-          const buckets = group.allocated.get(i);
-          if (!buckets) continue;
-          for (const cutoff of [...buckets.keys()].sort((a, b) => b - a)) {
-            const undo = Math.min(reduction, buckets.get(cutoff)!);
-            const left = buckets.get(cutoff)! - undo;
-            if (left) buckets.set(cutoff, left);
-            else buckets.delete(cutoff);
-            allocatedTotals[i] -= undo;
+          const credit = group.credit.get(cutoff) ?? 0;
+          const undoCredit = Math.min(reduction, credit);
+          if (credit === undoCredit) group.credit.delete(cutoff);
+          else group.credit.set(cutoff, credit - undoCredit);
+          reduction -= undoCredit;
+          for (const i of [...oldest].reverse()) {
+            if (!reduction) break;
+            const buckets = group.allocated.get(i);
+            const amount = buckets?.get(cutoff) ?? 0;
+            if (!amount || !buckets) continue;
+            const undo = Math.min(reduction, amount);
+            if (amount === undo) buckets.delete(cutoff);
+            else buckets.set(cutoff, amount - undo);
+            if (!buckets.size) group.allocated.delete(i);
             remaining[i] += undo;
             restored[i] += undo;
             reduction -= undo;
-            if (reduction === 0) break;
           }
-          if (!buckets.size) group.allocated.delete(i);
         }
       }
       // Only fill newly restored debt: pre-existing unpaid snapshot amounts
       // must not consume allocations that the snapshot already included.
       for (const [position, older] of oldest.entries()) {
-        // Most observations restore no debt. Stop as soon as the restored
-        // amount is filled, rather than scanning every later allocation.
-        for (let p = position + 1; p < oldest.length && restored[older] > 0; p++) {
-          const newer = oldest[p];
-          if (allocatedTotals[newer] === 0) continue;
-          for (const id of ids) {
-            if (restored[older] === 0 || allocatedTotals[newer] === 0) break;
-            const group = ledger.get(id)!;
-            const buckets = group.allocated.get(newer);
-            if (!buckets) continue;
-            for (const [cutoff, amount] of buckets) {
-              if (cutoff <= older) continue;
-              const moved = Math.min(restored[older], amount);
-              if (amount === moved) buckets.delete(cutoff);
-              else buckets.set(cutoff, amount - moved);
-              addAllocation(allocation(group, older), cutoff, moved);
-              allocatedTotals[newer] -= moved;
-              allocatedTotals[older] += moved;
-              remaining[newer] += moved;
-              remaining[older] -= moved;
-              restored[newer] += moved;
-              restored[older] -= moved;
-              if (restored[older] === 0) break;
+        if (!restored[older]) continue;
+        // Choose the most restricted eligible source first, whether credit or
+        // an allocation. Capture order can differ from closing-date order, so
+        // a more flexible source may be needed by a later restored statement.
+        const candidates: { id: string; cutoff: number; newer: number | null; position: number }[] = [];
+        for (const id of ids) {
+          const group = ledger.get(id)!;
+          for (const cutoff of group.credit.keys()) {
+            if (cutoff > older) candidates.push({ id, cutoff, newer: null, position: oldest.length });
+          }
+          for (const [newer, buckets] of group.allocated) {
+            const p = positions.get(newer)!;
+            if (p <= position) continue;
+            for (const cutoff of buckets.keys()) {
+              if (cutoff > older) candidates.push({ id, cutoff, newer, position: p });
             }
-            if (!buckets.size) group.allocated.delete(newer);
           }
         }
-        // Use the earliest eligible cutoff across all groups first. A later
-        // cutoff can also cover newer restored debt; an earlier one cannot.
-        if (restored[older] > 0) {
-          const candidates = ids.flatMap((id) => [...ledger.get(id)!.credit.keys()]
-            .filter((n) => n > older).map((n) => ({ id, n })));
-          candidates.sort((a, b) => a.n - b.n || a.id.localeCompare(b.id));
-          for (const { id, n } of candidates) {
-            if (!restored[older]) break;
-            const group = ledger.get(id)!;
-            const amount = group.credit.get(n)!;
-            const moved = Math.min(restored[older], amount);
-            if (amount === moved) group.credit.delete(n);
-            else group.credit.set(n, amount - moved);
-            addAllocation(allocation(group, older), n, moved);
-            allocatedTotals[older] += moved;
-            remaining[older] -= moved;
-            restored[older] -= moved;
+        candidates.sort((a, b) => a.cutoff - b.cutoff || a.position - b.position || a.id.localeCompare(b.id));
+        for (const { id, cutoff, newer } of candidates) {
+          if (!restored[older]) break;
+          const group = ledger.get(id)!;
+          const buckets = newer === null ? group.credit : group.allocated.get(newer)!;
+          const amount = buckets.get(cutoff)!;
+          const moved = Math.min(restored[older], amount);
+          if (amount === moved) buckets.delete(cutoff);
+          else buckets.set(cutoff, amount - moved);
+          if (newer !== null) {
+            if (!buckets.size) group.allocated.delete(newer);
+            remaining[newer] += moved;
+            restored[newer] += moved;
           }
+          addAllocation(allocation(group, older), cutoff, moved);
+          remaining[older] -= moved;
+          restored[older] -= moved;
         }
       }
       for (const id of ids) {
@@ -181,7 +171,6 @@ export function reconcileStatementPayments(
           const paid = Math.min(increase, remaining[i]);
           remaining[i] -= paid;
           if (paid) addAllocation(allocation(group, i), remaining.length, paid);
-          allocatedTotals[i] += paid;
           increase -= paid;
         }
         if (increase) group.credit.set(remaining.length, (group.credit.get(remaining.length) ?? 0) + increase);

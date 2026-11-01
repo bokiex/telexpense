@@ -286,3 +286,50 @@ test("deleting an overpayment cannot inflate a later full snapshot and retained 
   assert.deepEqual(reconcileStatementPayments(partiallyPaid, [{ groupId: "p", accountId: 1, amountCents: 10000 }]),
     { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
 });
+
+test("reducing a group reverses its newest tranche before older restricted credit", () => {
+  const p = (amountCents: number) => ({ groupId: "p", amountCents });
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 0, remainingAmountCents: 0, baseline: [] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 100, remainingAmountCents: 100, baseline: [p(100)] },
+    { id: 3, accountId: 1, closingDate: "2024-03-31", originalAmountCents: 0, remainingAmountCents: 0, baseline: [p(150)] }
+  ];
+  assert.deepEqual(reconcileStatementPayments(statements, [{ ...p(100), accountId: 1 }]),
+    { remainingById: { 1: 0, 2: 100, 3: 0 }, creditByAccount: { 1: 100 } });
+  assert.deepEqual(reconcileStatementPayments(statements, [{ ...p(125), accountId: 1 }]),
+    { remainingById: { 1: 0, 2: 75, 3: 0 }, creditByAccount: { 1: 100 } });
+});
+
+test("a moved allocation keeps its tranche when its payment is later reduced", () => {
+  const p = (amountCents: number) => ({ groupId: "p", amountCents });
+  const q = { groupId: "q", amountCents: 100 };
+  const statement = (id: number, amount: number, baseline: { groupId: string; amountCents: number }[]) => ({
+    id, accountId: 1, closingDate: `2024-0${id}-01`, originalAmountCents: amount, remainingAmountCents: amount, baseline
+  });
+  const statements = [statement(1, 100, []), statement(2, 100, [p(100)]),
+    statement(3, 0, [p(100), q]), statement(4, 0, [p(150), q]), statement(5, 0, [p(150)])];
+  assert.deepEqual(reconcileStatementPayments(statements, [{ ...p(100), accountId: 1 }]),
+    { remainingById: { 1: 0, 2: 100, 3: 0, 4: 0, 5: 0 }, creditByAccount: { 1: 0 } });
+});
+
+for (const restrictedIsCredit of [false, true]) {
+  test(`out-of-order captures preserve flexible allocations when restricted funds are ${restrictedIsCredit ? "credit" : "allocated"}`, () => {
+    const payment = (groupId: string) => ({ groupId, amountCents: 100 });
+    const [a, b, restricted, flexible] = ["A", "B", "R", "F"].map(payment);
+    const statement = (id: number, closingDate: string, baseline: ReturnType<typeof payment>[], amount = 100) => ({
+      id, captureOrder: id, accountId: 1, closingDate,
+      originalAmountCents: amount, remainingAmountCents: amount, baseline
+    });
+    const statements = [
+      statement(1, "2024-01-31", []),
+      statement(2, "2024-04-30", [a], restrictedIsCredit ? 0 : 100),
+      statement(3, "2024-02-29", [a, restricted]),
+      statement(4, "2024-03-31", [a, restricted, b]),
+      statement(5, "2024-05-31", [a, restricted, b, flexible], 0)
+    ];
+    assert.deepEqual(reconcileStatementPayments(statements, [restricted, flexible].map((p) => ({ ...p, accountId: 1 }))), {
+      remainingById: { 1: 0, 2: restrictedIsCredit ? 0 : 100, 3: 0, 4: 100, 5: 0 },
+      creditByAccount: { 1: 0 }
+    });
+  });
+}

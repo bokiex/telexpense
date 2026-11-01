@@ -53,13 +53,13 @@ Statement reconciliation recognizes balanced, owned bank-to-card transfers as
 payments. A payment captured in a card's snapshot baseline remains recognized
 for that card if its source account type changes, but new non-bank transfers are
 not payments. For older transfers without captured role information, the source's
-historical type may be unknowable. For an imported
-snapshot, previously unallocated tracked credit is assumed to cover its
-already-paid portion first; untracked issuer payments cannot be distinguished
-from that credit. Subsequent edits or deletion of those tracked payments can
-restore debt. Payments captured in the first tracked snapshot are historical:
-they do not establish available credit or explain any of its already-paid
-amount. With no snapshot, available tracked credit is zero.
+historical type may be unknowable. Each imported snapshot's remaining amount is
+authoritative: its already-paid portion is not attributed to tracked payments
+or credit. Editing or deleting a tracked payment can restore debt it was
+allocated to, but does not restore a snapshot's unattributed paid portion.
+Payments captured in the first tracked snapshot are historical: they do not
+establish available credit or explain any of its already-paid amount. With no
+snapshot, available tracked credit is zero.
 
 For transfers predating role tracking, migration uses captured baseline evidence
 where available and otherwise freezes each account's **current** type as a
@@ -82,13 +82,13 @@ create a payment. Thus, if a historical group actually paid the snapshot, its
 later reduction cannot be reflected without explicit payment-to-statement
 history. Likewise, changes occurring entirely between captures cannot be
 reconstructed. Moving a historical group to a different tracked card is treated
-as a new payment on that card. Later snapshots attribute their paid portion to
-carried tracked credit, deterministically by group ID when ambiguous; this can
-also differ from the issuer's actual history. Reductions undo tracked credit
-and then newer allocations before increases are applied; surviving newer
-allocations and credit move to newly restored older debt.
-Retained credit is not automatically applied to a later full imported snapshot,
-whose remaining amount is authoritative.
+as a new payment on that card. Reductions undo each group's newest tracked
+increment first, removing that increment's credit before its newer statement
+allocations; reductions precede increases. Eligible surviving allocations and
+credit move to newly restored older debt, prioritizing the most restricted
+capture boundary so later debt can retain eligible funds. Retained credit is not
+automatically applied to any later imported snapshot, whether fully or
+partially paid; its remaining amount is authoritative.
 
 ## Environment Variables
 
