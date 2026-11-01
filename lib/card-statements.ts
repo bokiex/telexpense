@@ -33,16 +33,18 @@ export type ReconciliationStatement = {
 };
 export type CardPayment = PaymentBaseline & { accountId: number };
 
-// Each imported remaining amount is authoritative at its own baseline. Compare
-// payments by group identity against each baseline, accounting for allocations
-// to older statements before applying changes to this statement.
-// Negative deltas restore debt (including debt that was implicit in a snapshot).
-// Attribution rule: an imported snapshot's already-paid portion consumes any
-// available older credit first. The issuer may actually have received an
-// untracked payment, but that distinction cannot be recovered from the input.
-// The remaining amount is authoritative at capture; later payment reductions
-// restore the attributed portion. Unused credit remains available only when it
-// can be established from changes after a first snapshot.
+// Replay the observed baseline changes in closing-date order, then today's
+// payments. A group owns its allocations and credit, so reductions can undo
+// them without exploring combinations of other baselines. When identity is
+// ambiguous, group IDs are processed lexicographically. A snapshot is
+// authoritative when captured: only already-paid debt consumes prior credit.
+// The first baseline's payments are attributed to its already-paid portion
+// (up to that amount); any remainder is historical and is not available credit.
+// Later reductions remove credit first and then allocations newest-first;
+// allocations on newer statements can move to newly restored older debt.
+// After sorting, this is O(S^3 * G + B) time and O(S * G + B) space per
+// account, for S statements, G groups and B baseline/payment entries. It does
+// not explore combinations of baselines.
 export function reconcileStatementPayments(
   statements: readonly ReconciliationStatement[], payments: readonly CardPayment[]
 ): { remainingById: Record<number, number>; creditByAccount: Record<number, number> } {
@@ -52,64 +54,93 @@ export function reconcileStatementPayments(
     const ordered = statements.filter((s) => s.accountId === accountId)
       .sort((a, b) => a.closingDate.localeCompare(b.closingDate) || a.id - b.id);
     const accountPayments = payments.filter((p) => p.accountId === accountId);
-    const ids = [...new Set([...accountPayments, ...ordered.flatMap((s) => s.baseline)].map((p) => p.groupId))].sort();
-    const vector = (items: readonly PaymentBaseline[]) => ids.map((id) => items.filter((p) => p.groupId === id).reduce((sum, p) => sum + p.amountCents, 0));
-    const total = (values: readonly number[]) => values.reduce((sum, value) => sum + value, 0);
-    const current = vector(accountPayments);
     if (!ordered.length) {
       creditByAccount[accountId] = 0;
       continue;
     }
-    const baselines = ordered.map((s) => vector(s.baseline));
-    const memo = new Map<string, number>();
-    const allocatedThrough = (count: number, values: readonly number[]): number => {
-      if (!count) return 0;
-      const key = `${count}:${values.join(",")}`;
-      const cached = memo.get(key);
-      if (cached !== undefined) return cached;
-      const i = count - 1;
-      const baseline = baselines[i];
-      // Restore reductions first, before applying increases/new identities.
-      // Netting them would hide a replacement when restoration is capped.
-      const reduced = values.map((value, index) => Math.min(value, baseline[index]));
-      const beforeBase = allocatedThrough(i, baseline);
-      const beforeReduced = allocatedThrough(i, reduced);
-      const before = allocatedThrough(i, values);
-      let decrease = total(reduced) - total(baseline) - beforeReduced + beforeBase;
-      const priorCredit = creditThrough(i, baseline);
-      const attributedCredit = Math.min(priorCredit, ordered[i].originalAmountCents - ordered[i].remainingAmountCents);
-      if (decrease < 0) decrease += Math.min(-decrease, priorCredit - attributedCredit);
-      const restoredLimit = ordered[i].remainingAmountCents - ordered[i].originalAmountCents;
-      const afterDecrease = Math.max(restoredLimit, Math.min(ordered[i].remainingAmountCents, decrease));
-      const increase = total(values) - total(reduced) - before + beforeReduced;
-      const result = before + Math.max(restoredLimit, Math.min(ordered[i].remainingAmountCents, afterDecrease + increase));
-      memo.set(key, result);
+    const ids = [...new Set([...accountPayments, ...ordered.flatMap((s) => s.baseline)].map((p) => p.groupId))].sort();
+    const amounts = (items: readonly PaymentBaseline[]) => {
+      const result = new Map<string, number>();
+      for (const item of items) result.set(item.groupId, (result.get(item.groupId) ?? 0) + item.amountCents);
       return result;
     };
-    // Attribute only credit established after an earlier snapshot; transactions
-    // already present at the first capture do not imply historical credit.
-    const creditMemo = new Map<string, number>();
-    const creditThrough = (count: number, values: readonly number[]): number => {
-      if (!count) return 0;
-      const key = `${count}:${values.join(",")}`;
-      const cached = creditMemo.get(key);
-      if (cached !== undefined) return cached;
-      const baseline = baselines[count - 1];
-      const reduced = values.map((value, index) => Math.min(value, baseline[index]));
-      const previousCredit = creditThrough(count - 1, baseline);
-      const attributedCredit = Math.min(previousCredit, ordered[count - 1].originalAmountCents - ordered[count - 1].remainingAmountCents);
-      const afterDecrease = Math.max(0, previousCredit - attributedCredit + total(reduced) - total(baseline) -
-        allocatedThrough(count, reduced) + allocatedThrough(count, baseline));
-      const credit = Math.max(0, afterDecrease + total(values) - total(reduced) -
-        allocatedThrough(count, values) + allocatedThrough(count, reduced));
-      creditMemo.set(key, credit);
-      return credit;
+    const ledger = new Map(ids.map((id) => [id, { amount: 0, credit: 0, allocated: new Array<number>(ordered.length).fill(0) }]));
+    const remaining: number[] = [];
+    const apply = (target: Map<string, number>) => {
+      // Undo all reductions before allocating increases, including replacements.
+      const restored = new Array<number>(remaining.length).fill(0);
+      for (const id of ids) {
+        const group = ledger.get(id)!;
+        const next = target.get(id) ?? 0;
+        let reduction = Math.max(0, group.amount - next);
+        const credit = Math.min(reduction, group.credit);
+        group.credit -= credit;
+        reduction -= credit;
+        for (let i = remaining.length - 1; i >= 0 && reduction > 0; i--) {
+          const undo = Math.min(reduction, group.allocated[i]);
+          group.allocated[i] -= undo;
+          remaining[i] += undo;
+          restored[i] += undo;
+          reduction -= undo;
+        }
+      }
+      // Only fill newly restored debt: pre-existing unpaid snapshot amounts
+      // must not consume allocations that the snapshot already included.
+      for (let older = 0; older < remaining.length; older++) {
+        for (let newer = older + 1; newer < remaining.length && restored[older] > 0; newer++) {
+          for (const id of ids) {
+            const group = ledger.get(id)!;
+            const moved = Math.min(restored[older], group.allocated[newer]);
+            group.allocated[newer] -= moved;
+            group.allocated[older] += moved;
+            remaining[newer] += moved;
+            remaining[older] -= moved;
+            restored[newer] += moved;
+            restored[older] -= moved;
+          }
+        }
+      }
+      for (const id of ids) {
+        const group = ledger.get(id)!;
+        const next = target.get(id) ?? 0;
+        let increase = Math.max(0, next - group.amount);
+        for (let i = 0; i < remaining.length && increase > 0; i++) {
+          const paid = Math.min(increase, remaining[i]);
+          remaining[i] -= paid;
+          group.allocated[i] += paid;
+          increase -= paid;
+        }
+        group.credit += increase;
+        group.amount = next;
+      }
     };
-    ordered.forEach((statement, i) => {
-      const paid = allocatedThrough(i + 1, current) - allocatedThrough(i, current);
-      remainingById[statement.id] = statement.remainingAmountCents - paid;
-    });
-    creditByAccount[accountId] = creditThrough(ordered.length, current);
+    const first = ordered[0];
+    const initial = amounts(first.baseline);
+    remaining.push(first.remainingAmountCents);
+    let implicitPaid = first.originalAmountCents - first.remainingAmountCents;
+    for (const id of ids) {
+      const group = ledger.get(id)!;
+      group.amount = initial.get(id) ?? 0;
+      const attributed = Math.min(group.amount, implicitPaid);
+      group.allocated[0] = attributed;
+      implicitPaid -= attributed;
+    }
+    for (let i = 1; i < ordered.length; i++) {
+      const statement = ordered[i];
+      apply(amounts(statement.baseline));
+      remaining.push(statement.remainingAmountCents);
+      let paid = statement.originalAmountCents - statement.remainingAmountCents;
+      for (const id of ids) {
+        const group = ledger.get(id)!;
+        const attributed = Math.min(group.credit, paid);
+        group.credit -= attributed;
+        group.allocated[i] = attributed;
+        paid -= attributed;
+      }
+    }
+    apply(amounts(accountPayments));
+    ordered.forEach((statement, i) => { remainingById[statement.id] = remaining[i]; });
+    creditByAccount[accountId] = ids.reduce((sum, id) => sum + ledger.get(id)!.credit, 0);
   }
   return { remainingById, creditByAccount };
 }

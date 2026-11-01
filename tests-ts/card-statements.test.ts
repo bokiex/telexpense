@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { allocateStatementPayments, parseStatementSnapshot, reconcileStatementPayments } from "../lib/card-statements";
 
 const snapshot = { accountId: 1, closingDate: "2024-02-29", dueDate: "2024-03-20", originalAmountCents: 12000, remainingAmountCents: 5000 };
@@ -111,6 +112,36 @@ test("a paid imported snapshot consumes prior credit and restores debt if that p
   assert.deepEqual(status(15000), { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
   assert.deepEqual(status(25000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 5000 } });
   assert.deepEqual(reconcileStatementPayments(statements, []), { remainingById: { 1: 10000, 2: 10000 }, creditByAccount: { 1: 0 } });
+});
+
+test("ambiguous first-snapshot payments are attributed deterministically by group identity", () => {
+  const a = { groupId: "a", amountCents: 1000 };
+  const b = { groupId: "b", amountCents: 1000 };
+  const statement = { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 1000, remainingAmountCents: 0, baseline: [b, a] };
+  assert.deepEqual(reconcileStatementPayments([statement], [{ ...b, accountId: 1 }]),
+    { remainingById: { 1: 1000 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(reconcileStatementPayments([statement], [{ ...a, accountId: 1 }]),
+    { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
+});
+
+test("a removed older payment moves a newer allocation to the restored oldest debt", () => {
+  const a = { groupId: "a", amountCents: 1000 };
+  const b = { groupId: "b", amountCents: 1000 };
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 1000, remainingAmountCents: 0, baseline: [a] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 1000, remainingAmountCents: 1000, baseline: [a] },
+    { id: 3, accountId: 1, closingDate: "2024-03-31", originalAmountCents: 1000, remainingAmountCents: 1000, baseline: [a, b] }
+  ];
+  assert.deepEqual(reconcileStatementPayments(statements, [{ ...b, accountId: 1 }]),
+    { remainingById: { 1: 0, 2: 1000, 3: 1000 }, creditByAccount: { 1: 0 } });
+});
+
+test("divergent 20-by-20 and 24-by-24 baselines finish and restore all deleted payments", () => {
+  // A subprocess makes the timeout effective even for a synchronous exponential implementation.
+  const result = spawnSync(process.execPath, ["--import", "tsx", "tests-ts/fixtures/card-statement-scale.ts"],
+    { cwd: process.cwd(), encoding: "utf8", timeout: 5000 });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
 });
 
 test("rejects invalid dates, identities, and amounts", () => {

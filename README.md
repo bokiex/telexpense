@@ -60,6 +60,19 @@ from that credit. Subsequent edits or deletion of those tracked payments can
 restore debt. Payments predating the first tracked snapshot do not establish
 available credit; with no snapshot, available tracked credit is zero.
 
+Reconciliation replays changes between baselines in statement closing-date
+order (then ID order), not capture order: capture chronology and payment
+allocation history are not stored. When several groups could explain an
+already-paid amount, attribution is deterministic by group ID; the first
+snapshot attributes its already-paid amount to its baseline groups, and later
+snapshots attribute it to carried credit. Other historical amounts remain
+unattributed. Consequently, editing one of several ambiguous payments may
+restore a different amount than an issuer's actual payment history would.
+Reductions undo attributed credit and then newer allocations before increases
+are applied; surviving newer allocations move to newly restored older debt.
+Retained credit is not automatically applied to a later full imported snapshot,
+whose remaining amount is authoritative.
+
 ## Environment Variables
 
 Copy `.env.example` to `.env.local` for local development:
