@@ -24,6 +24,27 @@ export function allocateStatementPayments(
   return { remainingById, creditCents };
 }
 
+// Imported snapshots are authoritative at creation: earlier transfers may already be
+// reflected in their remaining amount. Never replay those transfers into them.
+export function allocateSnapshotPayments(
+  snapshots: readonly { id: number; accountId: number; closingDate: string; remainingAmountCents: number; createdAt: string }[],
+  payments: readonly { accountId: number; amountCents: number; createdAt: string; id: number }[]
+): Record<number, number> {
+  const remaining = Object.fromEntries(snapshots.map((s) => [s.id, s.remainingAmountCents]));
+  const ordered = [...snapshots].sort((a, b) => a.closingDate.localeCompare(b.closingDate) || a.id - b.id);
+  for (const payment of [...payments].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id)) {
+    let credit = payment.amountCents;
+    for (const snapshot of ordered) {
+      if (snapshot.accountId !== payment.accountId || !Number.isFinite(Date.parse(snapshot.createdAt)) || !Number.isFinite(Date.parse(payment.createdAt)) || Date.parse(payment.createdAt) <= Date.parse(snapshot.createdAt)) continue;
+      const allocated = Math.min(remaining[snapshot.id], credit);
+      remaining[snapshot.id] -= allocated;
+      credit -= allocated;
+      if (!credit) break;
+    }
+  }
+  return remaining;
+}
+
 export function parseStatementSnapshot(value: unknown): StatementSnapshotInput | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;

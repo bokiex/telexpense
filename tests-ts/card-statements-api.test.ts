@@ -46,6 +46,7 @@ test("card statement API authenticates, isolates cards and records snapshots wit
     const matches = (row: Record<string, unknown>) => [...url.searchParams].every(([key, value]) => !value.startsWith("eq.") || String(row[key]) === value.slice(3));
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
     if (table === "accounts" && method === "GET") return json(accounts.filter(matches));
+    if (table === "transactions" && method === "GET") return json([]);
     if (table === "card_statement_snapshots" && method === "GET") return json(statements.filter(matches));
     if (table === "card_statement_snapshots" && method === "POST") {
       const row = JSON.parse(String(options?.body)) as Record<string, unknown>;
@@ -75,4 +76,41 @@ test("card statement API authenticates, isolates cards and records snapshots wit
   assert.deepEqual(await (await GET(request("GET", 20))).json(), { statements: [{ id: 90, accountId: 2, closingDate: "2024-02-29", dueDate: "2024-03-20", originalAmountCents: 9000, remainingAmountCents: 9000 }] });
   assert.deepEqual(accounts, beforeAccounts);
   assert.deepEqual(transactions, beforeTransactions);
+});
+
+
+test("authenticated reads reconcile grouped bank payments without modifying balances", async (t) => {
+  const oldFetch = globalThis.fetch;
+  const env = { ...process.env };
+  process.env.TELEGRAM_BOT_TOKEN = token;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
+  process.env.SUPABASE_SECRET_KEY = "test-key";
+  t.after(() => { globalThis.fetch = oldFetch; process.env = env; });
+  const accounts = [{ id: 1, telegram_user_id: 10, account_type: "card", balance_cents: -4000 },
+    { id: 2, telegram_user_id: 10, account_type: "bank", balance_cents: 4000 }];
+  const statements = [{ id: 1, telegram_user_id: 10, account_id: 1, closing_date: "2024-01-31", due_date: "2024-02-20", original_amount_cents: 10000, remaining_amount_cents: 8000, created_at: "2024-02-01T00:00:00Z" }];
+  let amount = 3000;
+  globalThis.fetch = async (resource) => {
+    const url = new URL(typeof resource === "string" || resource instanceof URL ? resource : resource.url);
+    const table = url.pathname.split("/").pop();
+    const user = Number(url.searchParams.get("telegram_user_id")?.slice(3));
+    let rows: unknown[] = [];
+    if (user === 10 && table === "accounts") rows = accounts;
+    if (user === 10 && table === "card_statement_snapshots") rows = statements;
+    if (user === 10 && table === "transactions" && amount) rows = [
+      { id: 1, account_id: 2, transfer_group_id: "payment", amount_cents: -amount, created_at: "2024-02-02T00:00:00Z" },
+      { id: 2, account_id: 1, transfer_group_id: "payment", amount_cents: amount, created_at: "2024-02-02T00:00:00Z" }
+    ];
+    return new Response(JSON.stringify(rows), { headers: { "content-type": "application/json" } });
+  };
+  const remaining = async (user: number) => (await (await GET(request("GET", user))).json()).statements;
+  assert.equal((await remaining(10))[0].remainingAmountCents, 5000);
+  assert.equal((await remaining(10))[0].remainingAmountCents, 5000);
+  assert.deepEqual(await remaining(20), []);
+  amount = 1000;
+  assert.equal((await remaining(10))[0].remainingAmountCents, 7000);
+  amount = 0;
+  assert.equal((await remaining(10))[0].remainingAmountCents, 8000);
+  assert.equal(accounts[0].balance_cents, -4000);
+  assert.equal(accounts[1].balance_cents, 4000);
 });
