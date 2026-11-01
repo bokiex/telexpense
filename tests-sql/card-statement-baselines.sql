@@ -4,11 +4,15 @@ insert into public.users (telegram_user_id) values (910001), (910002);
 insert into public.accounts (id, telegram_user_id, account_key, name, account_type) overriding system value values
   (910001, 910001, 'test-bank', 'Bank', 'bank'),
   (910002, 910001, 'test-card', 'Card', 'card'),
-  (910003, 910002, 'test-card', 'Other card', 'card');
+  (910003, 910002, 'test-card', 'Other card', 'card'),
+  (910004, 910001, 'test-cash', 'Cash', 'cash'),
+  (910005, 910001, 'test-card-2', 'Second card', 'card');
 insert into public.transactions (telegram_user_id, kind, account_id, transfer_group_id, description, amount_cents) values
   (910001, 'transfer', 910001, '00000000-0000-0000-0000-000000000001', 'Payment', -3000),
   (910001, 'transfer', 910002, '00000000-0000-0000-0000-000000000001', 'Payment', 3000),
-  (910001, 'transfer', 910002, '00000000-0000-0000-0000-000000000002', 'Invalid group', 6000);
+  (910001, 'transfer', 910002, '00000000-0000-0000-0000-000000000002', 'Invalid group', 6000),
+  (910001, 'transfer', 910004, '00000000-0000-0000-0000-000000000003', 'Cash transfer', -2000),
+  (910001, 'transfer', 910002, '00000000-0000-0000-0000-000000000003', 'Cash transfer', 2000);
 
 do $$
 declare snapshot_id bigint; data jsonb;
@@ -23,6 +27,32 @@ begin
     raise exception 'baseline was not captured: %', data;
   end if;
   if jsonb_array_length(data->'payments') <> 1 then raise exception 'invalid group counted'; end if;
+  update public.accounts set account_type = 'cash' where id = 910001 and telegram_user_id = 910001;
+  data := public.read_card_statement_inputs(910001);
+  if jsonb_array_length(data->'payments') <> 1 or (data->'payments'->0->>'amountCents')::integer <> 3000 then
+    raise exception 'source account type change lost a historical payment';
+  end if;
+  insert into public.transactions (telegram_user_id, kind, account_id, transfer_group_id, description, amount_cents) values
+    (910001, 'transfer', 910001, '00000000-0000-0000-0000-000000000004', 'New cash transfer', -1000),
+    (910001, 'transfer', 910002, '00000000-0000-0000-0000-000000000004', 'New cash transfer', 1000);
+  if jsonb_array_length(public.read_card_statement_inputs(910001)->'payments') <> 1 then
+    raise exception 'new non-bank transfer counted';
+  end if;
+  update public.transactions set amount_cents = case when amount_cents < 0 then -1500 else 1500 end
+    where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001';
+  data := public.read_card_statement_inputs(910001);
+  if (data->'payments'->0->>'amountCents')::integer <> 1500 then raise exception 'captured payment edit lost'; end if;
+  update public.transactions set account_id = 910005
+    where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001' and amount_cents > 0;
+  if jsonb_array_length(public.read_card_statement_inputs(910001)->'payments') <> 0 then
+    raise exception 'baseline on a different card recognized non-bank transfer';
+  end if;
+  update public.transactions set account_id = 910002
+    where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001' and amount_cents > 0;
+  update public.transactions set amount_cents = case when amount_cents < 0 then -3000 else 3000 end
+    where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001';
+  update public.accounts set account_type = 'bank' where id = 910001 and telegram_user_id = 910001;
+  delete from public.transactions where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000004';
   if jsonb_array_length(public.read_card_statement_inputs(910002)->'statements') <> 0 then raise exception 'cross-user leak'; end if;
   if public.rebaseline_legacy_card_statement(910001, 910002, '2024-01-31', '2024-02-20', 10000, 7000) is not null then
     raise exception 'known baseline was overwritten';

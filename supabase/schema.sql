@@ -1027,22 +1027,33 @@ alter table public.card_statement_snapshots enable row level security;
 alter table public.card_statement_snapshots
   add column if not exists payment_baseline jsonb;
 
--- Exactly two owned, balanced legs, from a bank to a card. A changed or
--- deleted group disappears here but remains in the immutable snapshot baseline.
+-- Exactly two owned, balanced legs into a card. Recognize current bank sources
+-- and groups captured on that card's baseline, even if the source type changes.
+-- Deleted or invalid groups remain only in the immutable snapshot baseline.
 create or replace function public.card_statement_payments(target_user_id bigint)
 returns table (group_id uuid, account_id bigint, amount_cents bigint)
 language sql stable security invoker set search_path = ''
 as $$
-  select t.transfer_group_id,
-    max(t.account_id) filter (where a.account_type = 'card' and t.amount_cents > 0),
-    sum(t.amount_cents) filter (where a.account_type = 'card' and t.amount_cents > 0)
-  from public.transactions t
-  left join public.accounts a on a.id = t.account_id and a.telegram_user_id = t.telegram_user_id
-  where t.telegram_user_id = target_user_id and t.transfer_group_id is not null
-  group by t.transfer_group_id
-  having count(*) = 2 and sum(t.amount_cents) = 0
-    and count(*) filter (where a.account_type = 'bank' and t.amount_cents < 0) = 1
-    and count(*) filter (where a.account_type = 'card' and t.amount_cents > 0) = 1;
+  with groups as (
+    select t.transfer_group_id as group_id,
+      max(t.account_id) filter (where a.account_type = 'card' and t.amount_cents > 0) as account_id,
+      sum(t.amount_cents) filter (where a.account_type = 'card' and t.amount_cents > 0) as amount_cents,
+      bool_or(a.account_type = 'bank' and t.amount_cents < 0) as bank_source
+    from public.transactions t
+    left join public.accounts a on a.id = t.account_id and a.telegram_user_id = t.telegram_user_id
+    where t.telegram_user_id = target_user_id and t.transfer_group_id is not null
+    group by t.transfer_group_id
+    having count(*) = 2 and sum(t.amount_cents) = 0
+      and count(*) filter (where a.id is not null and t.amount_cents < 0) = 1
+      and count(*) filter (where a.account_type = 'card' and t.amount_cents > 0) = 1
+  )
+  select g.group_id, g.account_id, g.amount_cents
+  from groups g
+  where g.bank_source or exists (
+    select 1 from public.card_statement_snapshots s
+    where s.telegram_user_id = target_user_id and s.account_id = g.account_id
+      and s.payment_baseline @> jsonb_build_array(jsonb_build_object('groupId', g.group_id::text))
+  );
 $$;
 
 -- One statement-level MVCC snapshot captures both the insertion and all groups.

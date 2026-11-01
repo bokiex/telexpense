@@ -49,6 +49,12 @@ statement”, and supply the statement's original details and **current** remain
 amount. This captures the current payment groups without changing balances.
 Only legacy snapshots can be replaced this way; new snapshots are unaffected.
 
+Statement reconciliation recognizes balanced, owned bank-to-card transfers as
+payments. A payment captured in a card's snapshot baseline remains recognized
+for that card if its source account type changes, but new non-bank transfers are
+not payments. A payment not yet captured in a baseline cannot be distinguished
+from a non-bank transfer after its source is reclassified.
+
 ## Environment Variables
 
 Copy `.env.example` to `.env.local` for local development:
