@@ -35,9 +35,11 @@ export type CardPayment = PaymentBaseline & { accountId: number };
 // both the current payment total and the baseline total against older statements
 // so an amount already assigned there is not also assigned to this statement.
 // Negative deltas restore debt (including debt that was implicit in a snapshot).
-// creditByAccount is unallocated credit at the current input state. A generator
-// must consume it when calculating the new statement, before capturing that
-// statement's baseline; an imported snapshot's remaining amount is authoritative.
+// Attribution rule: an imported snapshot's already-paid portion consumes any
+// available older credit first. The issuer may actually have received an
+// untracked payment, but that distinction cannot be recovered from the input.
+// The remaining amount is authoritative at capture; later payment reductions
+// restore the attributed portion. Unused credit remains available.
 export function reconcileStatementPayments(
   statements: readonly ReconciliationStatement[], payments: readonly CardPayment[]
 ): { remainingById: Record<number, number>; creditByAccount: Record<number, number> } {
@@ -63,15 +65,16 @@ export function reconcileStatementPayments(
       let available = total - baselines[i] - before + allocatedThrough(i, baselines[i]);
       // Previously unallocated credit absorbs a decrease before debt on a
       // later imported snapshot can be restored.
-      if (available < 0) available += Math.min(-available, creditThrough(i, baselines[i]));
+      const priorCredit = creditThrough(i, baselines[i]);
+      const attributedCredit = Math.min(priorCredit, ordered[i].originalAmountCents - ordered[i].remainingAmountCents);
+      if (available < 0) available += Math.min(-available, priorCredit - attributedCredit);
       const restoredLimit = ordered[i].remainingAmountCents - ordered[i].originalAmountCents;
       const result = before + Math.max(restoredLimit, Math.min(ordered[i].remainingAmountCents, available));
       memo.set(key, result);
       return result;
     };
-    // A newly imported snapshot does not consume pre-existing credit: its
-    // remaining amount already reflects whatever the issuer included. Carry
-    // the credit separately, and only allocate changes since that baseline.
+    // Attribute prior credit to the already-paid portion of this snapshot,
+    // then carry any unused credit separately from later payment changes.
     const creditMemo = new Map<string, number>();
     const creditThrough = (count: number, total: number): number => {
       if (!count) return 0;
@@ -79,7 +82,9 @@ export function reconcileStatementPayments(
       const cached = creditMemo.get(key);
       if (cached !== undefined) return cached;
       const baseline = baselines[count - 1];
-      const credit = Math.max(0, creditThrough(count - 1, baseline) + total - baseline -
+      const previousCredit = creditThrough(count - 1, baseline);
+      const attributedCredit = Math.min(previousCredit, ordered[count - 1].originalAmountCents - ordered[count - 1].remainingAmountCents);
+      const credit = Math.max(0, previousCredit - attributedCredit + total - baseline -
         allocatedThrough(count, total) + allocatedThrough(count, baseline));
       creditMemo.set(key, credit);
       return credit;

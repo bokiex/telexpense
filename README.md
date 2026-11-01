@@ -53,7 +53,11 @@ Statement reconciliation recognizes balanced, owned bank-to-card transfers as
 payments. A payment captured in a card's snapshot baseline remains recognized
 for that card if its source account type changes, but new non-bank transfers are
 not payments. A payment not yet captured in a baseline cannot be distinguished
-from a non-bank transfer after its source is reclassified.
+from a non-bank transfer after its source is reclassified. For an imported
+snapshot, previously unallocated tracked credit is assumed to cover its
+already-paid portion first; untracked issuer payments cannot be distinguished
+from that credit. Subsequent edits or deletion of those tracked payments can
+restore debt.
 
 ## Environment Variables
 

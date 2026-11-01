@@ -61,6 +61,19 @@ test("exposes payments made before any tracked statement as available credit", (
     { remainingById: {}, creditByAccount: { 2: 4500 } });
 });
 
+test("a paid imported snapshot consumes prior credit and restores debt if that payment is reduced", () => {
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 10000, remainingAmountCents: 0, baseline: [{ groupId: "p", amountCents: 20000 }] }
+  ];
+  const status = (amountCents: number) => reconcileStatementPayments(statements, [{ accountId: 1, groupId: "p", amountCents }]);
+  assert.deepEqual(status(20000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(status(10000), { remainingById: { 1: 0, 2: 10000 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(status(15000), { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(status(25000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 5000 } });
+  assert.deepEqual(reconcileStatementPayments(statements, []), { remainingById: { 1: 10000, 2: 10000 }, creditByAccount: { 1: 0 } });
+});
+
 test("rejects invalid dates, identities, and amounts", () => {
   for (const patch of [
     { closingDate: "2023-02-29" }, { dueDate: "2024-13-01" }, { accountId: 0 },
@@ -84,5 +97,5 @@ test("deleting an overpayment cannot inflate a later full snapshot and retained 
     { remainingById: { 1: 0, 2: 10000, 3: 10000 }, creditByAccount: { 1: 10000 } });
   const partiallyPaid = [statements[0], { ...statements[1], remainingAmountCents: 5000 }];
   assert.deepEqual(reconcileStatementPayments(partiallyPaid, [{ groupId: "p", accountId: 1, amountCents: 10000 }]),
-    { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
+    { remainingById: { 1: 0, 2: 10000 }, creditByAccount: { 1: 0 } });
 });

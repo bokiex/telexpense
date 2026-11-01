@@ -1319,6 +1319,7 @@ function CardStatementDetail({ accountId, statements, error, onSaved }: { accoun
       <FieldLabel label="Due date"><Input type="date" required value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></FieldLabel>
       <FieldLabel label="Original statement amount"><Input inputMode="decimal" required value={original} onChange={(event) => setOriginal(event.target.value)} /></FieldLabel>
       <FieldLabel label="Remaining amount"><Input inputMode="decimal" required value={remaining} onChange={(event) => setRemaining(event.target.value)} /></FieldLabel>
+      <p>Any previously tracked card credit is assumed to have paid the already-paid portion of this statement first. Editing those payments later can change the amount due.</p>
       <label><input type="checkbox" checked={replaceLegacy} onChange={(event) => setReplaceLegacy(event.target.checked)} /> Re-enter a legacy statement using its current remaining amount</label>
       {formError ? <p role="alert">{formError}</p> : null}
       <PendingButton type="submit" pending={action.pending} pendingLabel="Saving…">Save statement</PendingButton>
@@ -1352,9 +1353,12 @@ function AccountsView({
   const [statementError, setStatementError] = useState("");
   const [legacyStatements, setLegacyStatements] = useState<{ accountId: number; closingDates: string[] }[]>([]);
   const [statementRefresh, setStatementRefresh] = useState(0);
+  const cardAccountIds = JSON.stringify(accounts.filter((account) => account.accountType === "card" && account.id !== null)
+    .map((account) => account.id).sort((a, b) => (a ?? 0) - (b ?? 0)));
 
   useEffect(() => {
     let ignore = false;
+    setStatements(null);
     async function loadStatements() {
       try {
         const response = await apiRequest("/api/card-statements", "GET");
@@ -1371,7 +1375,7 @@ function AccountsView({
     }
     void loadStatements();
     return () => { ignore = true; };
-  }, [statementRefresh]);
+  }, [statementRefresh, cardAccountIds]);
 
   return (
     <div className="screen-stack">
