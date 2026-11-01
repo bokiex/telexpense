@@ -4,14 +4,17 @@ insert into public.users (telegram_user_id) values (930001);
 insert into public.accounts (id, telegram_user_id, account_key, name, account_type) overriding system value values
   (930001, 930001, 'cash', 'Former bank', 'cash'),
   (930002, 930001, 'card', 'Card', 'card'),
-  (930003, 930001, 'former_card', 'Former card', 'cash');
+  (930003, 930001, 'former_card', 'Former card', 'cash'),
+  (930004, 930001, 'bank', 'Current bank', 'bank');
 insert into public.transactions (telegram_user_id, kind, account_id, transfer_group_id, description, amount_cents) values
   (930001, 'transfer', 930001, '20000000-0000-0000-0000-000000000001', 'Captured', -1000),
   (930001, 'transfer', 930002, '20000000-0000-0000-0000-000000000001', 'Captured', 1000),
   (930001, 'transfer', 930001, '20000000-0000-0000-0000-000000000002', 'Unknown', -2000),
   (930001, 'transfer', 930002, '20000000-0000-0000-0000-000000000002', 'Unknown', 2000),
   (930001, 'transfer', 930001, '20000000-0000-0000-0000-000000000003', 'Former card', -1500),
-  (930001, 'transfer', 930003, '20000000-0000-0000-0000-000000000003', 'Former card', 1500);
+  (930001, 'transfer', 930003, '20000000-0000-0000-0000-000000000003', 'Former card', 1500),
+  (930001, 'transfer', 930004, '20000000-0000-0000-0000-000000000004', 'Unknown history', -500),
+  (930001, 'transfer', 930002, '20000000-0000-0000-0000-000000000004', 'Unknown history', 500);
 insert into public.card_statement_snapshots (telegram_user_id, account_id, closing_date, due_date, original_amount_cents, remaining_amount_cents, payment_baseline)
 values (930001, 930002, '2024-01-31', '2024-02-20', 5000, 4000,
   '[{"groupId":"20000000-0000-0000-0000-000000000001","amountCents":1000,"sourceAccountId":930001},{"groupId":"20000000-0000-0000-0000-000000000002","amountCents":2000}]'),
@@ -21,6 +24,11 @@ drop trigger capture_transfer_account_type on public.transactions;
 update public.transactions set transfer_account_type = null where telegram_user_id = 930001;
 \ir ../supabase/migrations/20261101111855_persistent_transfer_payment_classification.sql
 do $$ begin
+  -- No baseline proves these roles: current types are a practical fallback,
+  -- not evidence of what the account types were when the transfer happened.
+  if not exists (select 1 from public.card_statement_payments(930001) where group_id = '20000000-0000-0000-0000-000000000004') then
+    raise exception 'current-type fallback not applied';
+  end if;
   if (select transfer_account_type from public.transactions where telegram_user_id = 930001 and account_id = 930003) is distinct from 'card' then
     raise exception 'backfill lost captured destination role';
   end if;
@@ -33,7 +41,7 @@ update public.accounts set account_type = 'card' where id = 930003;
 update public.accounts set account_type = 'bank' where id = 930001;
 \ir ../supabase/migrations/20261101111855_persistent_transfer_payment_classification.sql
 do $$ begin
-  if (select count(*) from public.card_statement_payments(930001)) <> 2
+  if (select count(*) from public.card_statement_payments(930001)) <> 3
      or not exists (select 1 from public.card_statement_payments(930001) where group_id = '20000000-0000-0000-0000-000000000001')
      or not exists (select 1 from public.card_statement_payments(930001) where group_id = '20000000-0000-0000-0000-000000000003') then
     raise exception 'backfill guessed or lost historical payment identity';

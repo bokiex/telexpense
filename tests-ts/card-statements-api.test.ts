@@ -128,3 +128,22 @@ test("authenticated reads reconcile grouped bank payments without modifying bala
   assert.equal(accounts[0].balance_cents, -4000);
   assert.equal(accounts[1].balance_cents, 4000);
 });
+
+test("statement API passes persisted capture order to reconciliation", async (t) => {
+  const oldFetch = globalThis.fetch;
+  const env = { ...process.env };
+  process.env.TELEGRAM_BOT_TOKEN = token;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.example.test";
+  process.env.SUPABASE_SECRET_KEY = "test-key";
+  t.after(() => { globalThis.fetch = oldFetch; process.env = env; });
+  const p = { groupId: "payment", accountId: 1, amountCents: 10000 };
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    // IDs intentionally disagree with order, as can happen after re-entry.
+    statements: [
+      { id: 1, capture_order: 2, account_id: 1, closing_date: "2024-01-31", due_date: "2024-02-20", original_amount_cents: 10000, remaining_amount_cents: 10000, payment_baseline: [p] },
+      { id: 2, capture_order: 1, account_id: 1, closing_date: "2024-02-29", due_date: "2024-03-20", original_amount_cents: 10000, remaining_amount_cents: 10000, payment_baseline: [] }
+    ], payments: [p]
+  }), { headers: { "content-type": "application/json" } });
+  const body = await (await GET(request("GET", 10))).json();
+  assert.deepEqual(body.statements.map((s: { remainingAmountCents: number }) => s.remainingAmountCents), [10000, 0]);
+});

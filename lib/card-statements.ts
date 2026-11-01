@@ -28,12 +28,12 @@ export function allocateStatementPayments(
 // non-bank source after reclassification without guessing its identity.
 export type PaymentBaseline = { groupId: string; amountCents: number; sourceAccountId?: number };
 export type ReconciliationStatement = {
-  id: number; accountId: number; closingDate: string; originalAmountCents: number; remainingAmountCents: number;
+  id: number; captureOrder?: number; accountId: number; closingDate: string; originalAmountCents: number; remainingAmountCents: number;
   baseline: readonly PaymentBaseline[];
 };
 export type CardPayment = PaymentBaseline & { accountId: number };
 
-// Replay the observed baseline changes in closing-date order, then today's
+// Replay the observed baseline changes in capture order, then today's
 // payments. A group owns its allocations and credit, so reductions can undo
 // them without exploring combinations of other baselines. When identity is
 // ambiguous, group IDs are processed lexicographically. A snapshot is
@@ -52,7 +52,7 @@ export function reconcileStatementPayments(
   const creditByAccount: Record<number, number> = {};
   for (const accountId of new Set([...statements.map((s) => s.accountId), ...payments.map((p) => p.accountId)])) {
     const ordered = statements.filter((s) => s.accountId === accountId)
-      .sort((a, b) => a.closingDate.localeCompare(b.closingDate) || a.id - b.id);
+      .sort((a, b) => (a.captureOrder ?? a.id) - (b.captureOrder ?? b.id) || a.id - b.id);
     const accountPayments = payments.filter((p) => p.accountId === accountId);
     if (!ordered.length) {
       creditByAccount[accountId] = 0;
@@ -69,6 +69,8 @@ export function reconcileStatementPayments(
     const apply = (target: Map<string, number>) => {
       // Undo all reductions before allocating increases, including replacements.
       const restored = new Array<number>(remaining.length).fill(0);
+      const oldest = remaining.map((_, i) => i).sort((a, b) =>
+        ordered[a].closingDate.localeCompare(ordered[b].closingDate) || ordered[a].id - ordered[b].id);
       for (const id of ids) {
         const group = ledger.get(id)!;
         const next = target.get(id) ?? 0;
@@ -76,7 +78,8 @@ export function reconcileStatementPayments(
         const credit = Math.min(reduction, group.credit);
         group.credit -= credit;
         reduction -= credit;
-        for (let i = remaining.length - 1; i >= 0 && reduction > 0; i--) {
+        for (const i of [...oldest].reverse()) {
+          if (reduction <= 0) break;
           const undo = Math.min(reduction, group.allocated[i]);
           group.allocated[i] -= undo;
           remaining[i] += undo;
@@ -86,8 +89,8 @@ export function reconcileStatementPayments(
       }
       // Only fill newly restored debt: pre-existing unpaid snapshot amounts
       // must not consume allocations that the snapshot already included.
-      for (let older = 0; older < remaining.length; older++) {
-        for (let newer = older + 1; newer < remaining.length && restored[older] > 0; newer++) {
+      for (const [position, older] of oldest.entries()) {
+        for (const newer of oldest.slice(position + 1)) {
           for (const id of ids) {
             const group = ledger.get(id)!;
             const moved = Math.min(restored[older], group.allocated[newer]);
@@ -99,12 +102,23 @@ export function reconcileStatementPayments(
             restored[older] -= moved;
           }
         }
+        // Surviving credit was created after earlier debt was paid. It can
+        // replace a deleted allocation, but not override captured unpaid debt.
+        for (const id of ids) {
+          const group = ledger.get(id)!;
+          const moved = Math.min(restored[older], group.credit);
+          group.credit -= moved;
+          group.allocated[older] += moved;
+          remaining[older] -= moved;
+          restored[older] -= moved;
+        }
       }
       for (const id of ids) {
         const group = ledger.get(id)!;
         const next = target.get(id) ?? 0;
         let increase = Math.max(0, next - group.amount);
-        for (let i = 0; i < remaining.length && increase > 0; i++) {
+        for (const i of oldest) {
+          if (increase <= 0) break;
           const paid = Math.min(increase, remaining[i]);
           remaining[i] -= paid;
           group.allocated[i] += paid;

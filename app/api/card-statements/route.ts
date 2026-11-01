@@ -11,7 +11,7 @@ function authenticate(request: NextRequest) {
 }
 
 type StatementRow = {
-  id: number; account_id: number; closing_date: string; due_date: string;
+  id: number; capture_order: number; account_id: number; closing_date: string; due_date: string;
   original_amount_cents: number; remaining_amount_cents: number; payment_baseline: PaymentBaseline[] | null;
 };
 
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   const legacy = rows.filter((row) => row.payment_baseline === null);
   const affected = new Set(legacy.map((row) => row.account_id));
   const usable = rows.filter((row) => !affected.has(row.account_id));
-  const snapshots = usable.map((row) => ({ id: row.id, accountId: row.account_id, closingDate: row.closing_date,
+  const snapshots = usable.map((row) => ({ id: row.id, captureOrder: row.capture_order, accountId: row.account_id, closingDate: row.closing_date,
     originalAmountCents: row.original_amount_cents, remainingAmountCents: row.remaining_amount_cents, baseline: row.payment_baseline ?? [] }));
   const { remainingById } = reconcileStatementPayments(snapshots, data.payments as CardPayment[]);
   return NextResponse.json({ statements: usable.map((row) => ({

@@ -52,24 +52,35 @@ Only legacy snapshots can be replaced this way; new snapshots are unaffected.
 Statement reconciliation recognizes balanced, owned bank-to-card transfers as
 payments. A payment captured in a card's snapshot baseline remains recognized
 for that card if its source account type changes, but new non-bank transfers are
-not payments. A payment not yet captured in a baseline cannot be distinguished
-from a non-bank transfer after its source is reclassified. For an imported
+not payments. For older transfers without captured role information, the source's
+historical type may be unknowable. For an imported
 snapshot, previously unallocated tracked credit is assumed to cover its
 already-paid portion first; untracked issuer payments cannot be distinguished
 from that credit. Subsequent edits or deletion of those tracked payments can
 restore debt. Payments predating the first tracked snapshot do not establish
 available credit; with no snapshot, available tracked credit is zero.
 
-Reconciliation replays changes between baselines in statement closing-date
-order (then ID order), not capture order: capture chronology and payment
-allocation history are not stored. When several groups could explain an
+For transfers predating role tracking, migration uses captured baseline evidence
+where available and otherwise freezes each account's **current** type as a
+practical fallback. Historical account types cannot be recovered from current
+metadata: this can include transfers that were not bank-to-card payments at the
+time, or exclude genuine payments. Review affected older transfers and statement
+amounts; this inference is not a guarantee of historical accuracy. New transfers
+capture roles when created, and changing account identities on a transfer
+reclassifies both legs.
+
+Reconciliation replays baselines in recorded capture order, while allocating
+payments to the oldest available closing date. Older snapshots are ordered by
+insert ID during migration; a legacy re-entry made before this ordering was
+recorded cannot be placed reliably. Concurrent captures follow the assigned
+sequence, not necessarily commit order. When several groups could explain an
 already-paid amount, attribution is deterministic by group ID; the first
 snapshot attributes its already-paid amount to its baseline groups, and later
 snapshots attribute it to carried credit. Other historical amounts remain
 unattributed. Consequently, editing one of several ambiguous payments may
 restore a different amount than an issuer's actual payment history would.
 Reductions undo attributed credit and then newer allocations before increases
-are applied; surviving newer allocations move to newly restored older debt.
+are applied; surviving newer allocations and credit move to newly restored older debt.
 Retained credit is not automatically applied to a later full imported snapshot,
 whose remaining amount is authoritative.
 

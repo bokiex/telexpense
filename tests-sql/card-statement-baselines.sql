@@ -15,10 +15,11 @@ insert into public.transactions (telegram_user_id, kind, account_id, transfer_gr
   (910001, 'transfer', 910002, '00000000-0000-0000-0000-000000000003', 'Cash transfer', 2000);
 
 do $$
-declare snapshot_id bigint; data jsonb;
+declare snapshot_id bigint; data jsonb; initial_order bigint;
 begin
   snapshot_id := public.create_card_statement_snapshot(910001, 910002, '2024-01-31', '2024-02-20', 10000, 8000);
   if snapshot_id is null then raise exception 'snapshot not created'; end if;
+  select capture_order into initial_order from public.card_statement_snapshots where id = snapshot_id;
   if public.create_card_statement_snapshot(910001, 910003, '2024-01-31', '2024-02-20', 10000, 8000) is not null then
     raise exception 'cross-user card accepted';
   end if;
@@ -77,6 +78,9 @@ begin
   end if;
   if public.rebaseline_legacy_card_statement(910001, 910002, '2024-01-31', '2024-02-20', 10000, 7000) is distinct from snapshot_id then
     raise exception 'legacy baseline was not replaced';
+  end if;
+  if (select capture_order from public.card_statement_snapshots where id = snapshot_id) <= initial_order then
+    raise exception 'legacy re-entry did not record a new capture order';
   end if;
   if (public.read_card_statement_inputs(910001)->'statements'->0->'payment_baseline'->0->>'sourceAccountId')::bigint <> 910001 then
     raise exception 'legacy rebaseline did not capture source identity';
