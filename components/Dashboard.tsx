@@ -1281,6 +1281,7 @@ function CardStatementDetail({ accountId, statements, error, onSaved }: { accoun
   const [dueDate, setDueDate] = useState("");
   const [original, setOriginal] = useState("");
   const [remaining, setRemaining] = useState("");
+  const [replaceLegacy, setReplaceLegacy] = useState(false);
   const [formError, setFormError] = useState("");
   const action = usePendingAction();
   const next = statements?.filter((item) => item.accountId === accountId && item.remainingAmountCents > 0)
@@ -1297,14 +1298,14 @@ function CardStatementDetail({ accountId, statements, error, onSaved }: { accoun
     setFormError("");
     void action.run(async () => {
       try {
-        const response = await apiRequest("/api/card-statements", "POST", { accountId, closingDate, dueDate, originalAmountCents, remainingAmountCents });
+        const response = await apiRequest("/api/card-statements", "POST", { accountId, closingDate, dueDate, originalAmountCents, remainingAmountCents, replaceLegacy });
         if (!response.ok) {
           const body = await response.json().catch(() => null);
           setFormError(body?.error || "Could not save statement.");
           return;
         }
         setOpen(false);
-        setClosingDate(""); setDueDate(""); setOriginal(""); setRemaining("");
+        setClosingDate(""); setDueDate(""); setOriginal(""); setRemaining(""); setReplaceLegacy(false);
         onSaved();
       } catch { setFormError("Could not save statement."); }
     });
@@ -1318,6 +1319,7 @@ function CardStatementDetail({ accountId, statements, error, onSaved }: { accoun
       <FieldLabel label="Due date"><Input type="date" required value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></FieldLabel>
       <FieldLabel label="Original statement amount"><Input inputMode="decimal" required value={original} onChange={(event) => setOriginal(event.target.value)} /></FieldLabel>
       <FieldLabel label="Remaining amount"><Input inputMode="decimal" required value={remaining} onChange={(event) => setRemaining(event.target.value)} /></FieldLabel>
+      <label><input type="checkbox" checked={replaceLegacy} onChange={(event) => setReplaceLegacy(event.target.checked)} /> Re-enter a legacy statement using its current remaining amount</label>
       {formError ? <p role="alert">{formError}</p> : null}
       <PendingButton type="submit" pending={action.pending} pendingLabel="Saving…">Save statement</PendingButton>
     </form> : null}
@@ -1355,14 +1357,14 @@ function AccountsView({
     async function loadStatements() {
       try {
         const response = await apiRequest("/api/card-statements", "GET");
-        if (!response.ok) throw new Error();
         const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not load card statements.");
         if (!ignore) {
           setStatements(result.statements);
           setStatementError("");
         }
-      } catch {
-        if (!ignore) setStatementError("Could not load card statements.");
+      } catch (error) {
+        if (!ignore) setStatementError(error instanceof Error ? error.message : "Could not load card statements.");
       }
     }
     void loadStatements();

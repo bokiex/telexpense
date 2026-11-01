@@ -24,25 +24,55 @@ export function allocateStatementPayments(
   return { remainingById, creditCents };
 }
 
-// Imported snapshots are authoritative at creation: earlier transfers may already be
-// reflected in their remaining amount. Never replay those transfers into them.
-export function allocateSnapshotPayments(
-  snapshots: readonly { id: number; accountId: number; closingDate: string; remainingAmountCents: number; createdAt: string }[],
-  payments: readonly { accountId: number; amountCents: number; createdAt: string; id: number }[]
-): Record<number, number> {
-  const remaining = Object.fromEntries(snapshots.map((s) => [s.id, s.remainingAmountCents]));
-  const ordered = [...snapshots].sort((a, b) => a.closingDate.localeCompare(b.closingDate) || a.id - b.id);
-  for (const payment of [...payments].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id)) {
-    let credit = payment.amountCents;
-    for (const snapshot of ordered) {
-      if (snapshot.accountId !== payment.accountId || !Number.isFinite(Date.parse(snapshot.createdAt)) || !Number.isFinite(Date.parse(payment.createdAt)) || Date.parse(payment.createdAt) <= Date.parse(snapshot.createdAt)) continue;
-      const allocated = Math.min(remaining[snapshot.id], credit);
-      remaining[snapshot.id] -= allocated;
-      credit -= allocated;
-      if (!credit) break;
+export type PaymentBaseline = { groupId: string; amountCents: number };
+export type ReconciliationStatement = {
+  id: number; accountId: number; closingDate: string; remainingAmountCents: number;
+  baseline: readonly PaymentBaseline[];
+};
+export type CardPayment = PaymentBaseline & { accountId: number };
+
+// Each imported remaining amount is authoritative at its own baseline. Compare
+// both the current payment total and the baseline total against older statements
+// so an amount already assigned there is not also assigned to this statement.
+// Negative deltas restore debt (including debt that was implicit in a snapshot).
+// creditByAccount is unallocated credit at the current input state. A generator
+// must consume it when calculating the new statement, before capturing that
+// statement's baseline; an imported snapshot's remaining amount is authoritative.
+export function reconcileStatementPayments(
+  statements: readonly ReconciliationStatement[], payments: readonly CardPayment[]
+): { remainingById: Record<number, number>; creditByAccount: Record<number, number> } {
+  const remainingById: Record<number, number> = {};
+  const creditByAccount: Record<number, number> = {};
+  for (const accountId of new Set([...statements.map((s) => s.accountId), ...payments.map((p) => p.accountId)])) {
+    const ordered = statements.filter((s) => s.accountId === accountId)
+      .sort((a, b) => a.closingDate.localeCompare(b.closingDate) || a.id - b.id);
+    const current = payments.filter((p) => p.accountId === accountId).reduce((sum, p) => sum + p.amountCents, 0);
+    if (!ordered.length) {
+      creditByAccount[accountId] = Math.max(0, current);
+      continue;
     }
+    const baselines = ordered.map((s) => s.baseline.reduce((sum, p) => sum + p.amountCents, 0));
+    const memo = new Map<string, number>();
+    const allocatedThrough = (count: number, total: number): number => {
+      if (!count) return 0;
+      const key = `${count}:${total}`;
+      const cached = memo.get(key);
+      if (cached !== undefined) return cached;
+      const i = count - 1;
+      const before = allocatedThrough(i, total);
+      const available = total - baselines[i] - before + allocatedThrough(i, baselines[i]);
+      const result = before + Math.min(ordered[i].remainingAmountCents, available);
+      memo.set(key, result);
+      return result;
+    };
+    ordered.forEach((statement, i) => {
+      const paid = allocatedThrough(i + 1, current) - allocatedThrough(i, current);
+      remainingById[statement.id] = statement.remainingAmountCents - paid;
+    });
+    const lastBaseline = baselines[baselines.length - 1];
+    creditByAccount[accountId] = Math.max(0, current - lastBaseline - allocatedThrough(ordered.length, current) + allocatedThrough(ordered.length, lastBaseline));
   }
-  return remaining;
+  return { remainingById, creditByAccount };
 }
 
 export function parseStatementSnapshot(value: unknown): StatementSnapshotInput | null {

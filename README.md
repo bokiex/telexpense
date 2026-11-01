@@ -41,6 +41,14 @@ This works well because Telegram Mini Apps require HTTPS in production, and Verc
 
 Server-side routes use `SUPABASE_SECRET_KEY` or legacy `SUPABASE_SERVICE_ROLE_KEY`. Do not expose this key in frontend code.
 
+Card statements created before payment-baseline tracking cannot be reconciled
+reliably from today's transactions. After applying the baseline migration, the
+statement view identifies any such closing dates instead of guessing. For each,
+open the corresponding card's statement form, select “Re-enter a legacy
+statement”, and supply the statement's original details and **current** remaining
+amount. This captures the current payment groups without changing balances.
+Only legacy snapshots can be replaced this way; new snapshots are unaffected.
+
 ## Environment Variables
 
 Copy `.env.example` to `.env.local` for local development:

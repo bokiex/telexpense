@@ -38,22 +38,28 @@ test("card statement API authenticates, isolates cards and records snapshots wit
   const transactions = [{ id: 1, telegram_user_id: 10, account_id: 1, amount_cents: -15000 }];
   const beforeAccounts = structuredClone(accounts);
   const beforeTransactions = structuredClone(transactions);
-  const statements: Record<string, unknown>[] = [{ id: 90, telegram_user_id: 20, account_id: 2, closing_date: "2024-02-29", due_date: "2024-03-20", original_amount_cents: 9000, remaining_amount_cents: 9000 }];
+  const statements: Record<string, unknown>[] = [{ id: 90, telegram_user_id: 20, account_id: 2, closing_date: "2024-02-29", due_date: "2024-03-20", original_amount_cents: 9000, remaining_amount_cents: 9000, payment_baseline: [] }];
   globalThis.fetch = async (resource, options) => {
     const url = new URL(typeof resource === "string" || resource instanceof URL ? resource : resource.url);
     const table = url.pathname.split("/").pop();
     const method = options?.method || "GET";
-    const matches = (row: Record<string, unknown>) => [...url.searchParams].every(([key, value]) => !value.startsWith("eq.") || String(row[key]) === value.slice(3));
+    const params = JSON.parse(String(options?.body)) as Record<string, unknown>;
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
-    if (table === "accounts" && method === "GET") return json(accounts.filter(matches));
-    if (table === "transactions" && method === "GET") return json([]);
-    if (table === "card_statement_snapshots" && method === "GET") return json(statements.filter(matches));
-    if (table === "card_statement_snapshots" && method === "POST") {
-      const row = JSON.parse(String(options?.body)) as Record<string, unknown>;
-      if (statements.some((s) => s.telegram_user_id === row.telegram_user_id && s.account_id === row.account_id && s.closing_date === row.closing_date)) return json({ code: "23505" }, 409);
-      const saved = { ...row, id: 91 };
-      statements.push(saved);
-      return json({ id: saved.id }, 201);
+    if (table === "read_card_statement_inputs") return json({ statements: statements.filter((s) => s.telegram_user_id === params.target_user_id), payments: [] });
+    if (table === "rebaseline_legacy_card_statement") {
+      const statement = statements.find((s) => s.telegram_user_id === params.target_user_id && s.account_id === params.target_account_id && s.closing_date === params.target_closing_date && s.payment_baseline === null);
+      if (!statement) return json(null);
+      Object.assign(statement, { due_date: params.target_due_date, original_amount_cents: params.target_original_cents,
+        remaining_amount_cents: params.target_remaining_cents, payment_baseline: [] });
+      return json(statement.id);
+    }
+    if (table === "create_card_statement_snapshot") {
+      if (!accounts.some((a) => a.telegram_user_id === params.target_user_id && a.id === params.target_account_id && a.account_type === "card")) return json(null);
+      if (statements.some((s) => s.telegram_user_id === params.target_user_id && s.account_id === params.target_account_id && s.closing_date === params.target_closing_date)) return json({ code: "23505" }, 409);
+      statements.push({ id: 91, telegram_user_id: params.target_user_id, account_id: params.target_account_id,
+        closing_date: params.target_closing_date, due_date: params.target_due_date, original_amount_cents: params.target_original_cents,
+        remaining_amount_cents: params.target_remaining_cents, payment_baseline: [] });
+      return json(91, 201);
     }
     throw new Error(`Unexpected database operation: ${method} ${url}`);
   };
@@ -76,6 +82,14 @@ test("card statement API authenticates, isolates cards and records snapshots wit
   assert.deepEqual(await (await GET(request("GET", 20))).json(), { statements: [{ id: 90, accountId: 2, closingDate: "2024-02-29", dueDate: "2024-03-20", originalAmountCents: 9000, remainingAmountCents: 9000 }] });
   assert.deepEqual(accounts, beforeAccounts);
   assert.deepEqual(transactions, beforeTransactions);
+  statements[1].payment_baseline = null;
+  const legacy = await GET(request("GET", 10));
+  assert.equal(legacy.status, 409);
+  assert.match((await legacy.json()).error, /predates payment baseline/);
+  assert.equal((await POST(request("POST", 20, JSON.stringify({ ...input, replaceLegacy: true })))).status, 404);
+  assert.equal((await POST(request("POST", 10, JSON.stringify({ ...input, replaceLegacy: true })))).status, 201);
+  assert.deepEqual(await (await GET(request("GET", 10))).json(), { statements: [{ id: 91, ...input }] });
+  assert.equal((await POST(request("POST", 10, JSON.stringify({ ...input, replaceLegacy: true })))).status, 404);
 });
 
 
@@ -88,29 +102,26 @@ test("authenticated reads reconcile grouped bank payments without modifying bala
   t.after(() => { globalThis.fetch = oldFetch; process.env = env; });
   const accounts = [{ id: 1, telegram_user_id: 10, account_type: "card", balance_cents: -4000 },
     { id: 2, telegram_user_id: 10, account_type: "bank", balance_cents: 4000 }];
-  const statements = [{ id: 1, telegram_user_id: 10, account_id: 1, closing_date: "2024-01-31", due_date: "2024-02-20", original_amount_cents: 10000, remaining_amount_cents: 8000, created_at: "2024-02-01T00:00:00Z" }];
+  const statements = [{ id: 1, telegram_user_id: 10, account_id: 1, closing_date: "2024-01-31", due_date: "2024-02-20", original_amount_cents: 10000, remaining_amount_cents: 8000, payment_baseline: [{ groupId: "payment", amountCents: 3000 }] }];
+  // The snapshot already includes this payment, but editing/deleting it must
+  // still change the remaining amount relative to its captured value.
   let amount = 3000;
-  globalThis.fetch = async (resource) => {
+  globalThis.fetch = async (resource, options) => {
     const url = new URL(typeof resource === "string" || resource instanceof URL ? resource : resource.url);
-    const table = url.pathname.split("/").pop();
-    const user = Number(url.searchParams.get("telegram_user_id")?.slice(3));
-    let rows: unknown[] = [];
-    if (user === 10 && table === "accounts") rows = accounts;
-    if (user === 10 && table === "card_statement_snapshots") rows = statements;
-    if (user === 10 && table === "transactions" && amount) rows = [
-      { id: 1, account_id: 2, transfer_group_id: "payment", amount_cents: -amount, created_at: "2024-02-02T00:00:00Z" },
-      { id: 2, account_id: 1, transfer_group_id: "payment", amount_cents: amount, created_at: "2024-02-02T00:00:00Z" }
-    ];
-    return new Response(JSON.stringify(rows), { headers: { "content-type": "application/json" } });
+    assert.equal(url.pathname.split("/").pop(), "read_card_statement_inputs");
+    const user = JSON.parse(String(options?.body)).target_user_id;
+    return new Response(JSON.stringify({ statements: user === 10 ? statements : [],
+      payments: user === 10 && amount ? [{ groupId: "payment", accountId: 1, amountCents: amount }] : [] }),
+      { headers: { "content-type": "application/json" } });
   };
   const remaining = async (user: number) => (await (await GET(request("GET", user))).json()).statements;
-  assert.equal((await remaining(10))[0].remainingAmountCents, 5000);
-  assert.equal((await remaining(10))[0].remainingAmountCents, 5000);
+  assert.equal((await remaining(10))[0].remainingAmountCents, 8000);
+  assert.equal((await remaining(10))[0].remainingAmountCents, 8000);
   assert.deepEqual(await remaining(20), []);
   amount = 1000;
-  assert.equal((await remaining(10))[0].remainingAmountCents, 7000);
+  assert.equal((await remaining(10))[0].remainingAmountCents, 10000);
   amount = 0;
-  assert.equal((await remaining(10))[0].remainingAmountCents, 8000);
+  assert.equal((await remaining(10))[0].remainingAmountCents, 11000);
   assert.equal(accounts[0].balance_cents, -4000);
   assert.equal(accounts[1].balance_cents, 4000);
 });

@@ -1,0 +1,50 @@
+-- Run against a disposable database with schema.sql applied, e.g. psql -1 -v ON_ERROR_STOP=1 -f this-file.
+begin;
+insert into public.users (telegram_user_id) values (910001), (910002);
+insert into public.accounts (id, telegram_user_id, account_key, name, account_type) overriding system value values
+  (910001, 910001, 'test-bank', 'Bank', 'bank'),
+  (910002, 910001, 'test-card', 'Card', 'card'),
+  (910003, 910002, 'test-card', 'Other card', 'card');
+insert into public.transactions (telegram_user_id, kind, account_id, transfer_group_id, description, amount_cents) values
+  (910001, 'transfer', 910001, '00000000-0000-0000-0000-000000000001', 'Payment', -3000),
+  (910001, 'transfer', 910002, '00000000-0000-0000-0000-000000000001', 'Payment', 3000),
+  (910001, 'transfer', 910002, '00000000-0000-0000-0000-000000000002', 'Invalid group', 6000);
+
+do $$
+declare snapshot_id bigint; data jsonb;
+begin
+  snapshot_id := public.create_card_statement_snapshot(910001, 910002, '2024-01-31', '2024-02-20', 10000, 8000);
+  if snapshot_id is null then raise exception 'snapshot not created'; end if;
+  if public.create_card_statement_snapshot(910001, 910003, '2024-01-31', '2024-02-20', 10000, 8000) is not null then
+    raise exception 'cross-user card accepted';
+  end if;
+  data := public.read_card_statement_inputs(910001);
+  if data->'statements'->0->'payment_baseline' <> '[{"groupId":"00000000-0000-0000-0000-000000000001","amountCents":3000}]'::jsonb then
+    raise exception 'baseline was not captured: %', data;
+  end if;
+  if jsonb_array_length(data->'payments') <> 1 then raise exception 'invalid group counted'; end if;
+  if jsonb_array_length(public.read_card_statement_inputs(910002)->'statements') <> 0 then raise exception 'cross-user leak'; end if;
+  if public.rebaseline_legacy_card_statement(910001, 910002, '2024-01-31', '2024-02-20', 10000, 7000) is not null then
+    raise exception 'known baseline was overwritten';
+  end if;
+  update public.card_statement_snapshots set payment_baseline = null where id = snapshot_id;
+  if public.rebaseline_legacy_card_statement(910002, 910002, '2024-01-31', '2024-02-20', 10000, 7000) is not null then
+    raise exception 'cross-user legacy update accepted';
+  end if;
+  if public.rebaseline_legacy_card_statement(910001, 910002, '2024-01-31', '2024-02-20', 10000, 7000) is distinct from snapshot_id then
+    raise exception 'legacy baseline was not replaced';
+  end if;
+  update public.transactions set amount_cents = case when amount_cents < 0 then -1000 else 1000 end
+    where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001';
+  data := public.read_card_statement_inputs(910001);
+  if (data->'payments'->0->>'amountCents')::integer <> 1000
+     or (data->'statements'->0->'payment_baseline'->0->>'amountCents')::integer <> 3000 then
+    raise exception 'edit did not preserve the baseline';
+  end if;
+  delete from public.transactions where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001';
+  data := public.read_card_statement_inputs(910001);
+  if jsonb_array_length(data->'payments') <> 0 or jsonb_array_length(data->'statements'->0->'payment_baseline') <> 1 then
+    raise exception 'deletion did not preserve the baseline';
+  end if;
+end $$;
+rollback;
