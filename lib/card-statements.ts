@@ -8,6 +8,22 @@ export type StatementSnapshotInput = {
   remainingAmountCents: number;
 };
 
+// The caller must supply only payments not already represented by the snapshots.
+// This calculation does not mutate statements or account balances.
+export function allocateStatementPayments(
+  statements: readonly { id: number; closingDate: string; remainingAmountCents: number }[],
+  paymentCents: number
+): { remainingById: Record<number, number>; creditCents: number } {
+  const remainingById: Record<number, number> = {};
+  let creditCents = paymentCents;
+  for (const statement of [...statements].sort((a, b) => a.closingDate.localeCompare(b.closingDate) || a.id - b.id)) {
+    const allocated = Math.min(statement.remainingAmountCents, creditCents);
+    remainingById[statement.id] = statement.remainingAmountCents - allocated;
+    creditCents -= allocated;
+  }
+  return { remainingById, creditCents };
+}
+
 export function parseStatementSnapshot(value: unknown): StatementSnapshotInput | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
