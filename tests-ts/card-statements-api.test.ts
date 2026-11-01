@@ -106,8 +106,8 @@ test("authenticated reads reconcile grouped bank payments without modifying bala
   const accounts = [{ id: 1, telegram_user_id: 10, account_type: "card", balance_cents: -4000 },
     { id: 2, telegram_user_id: 10, account_type: "bank", balance_cents: 4000 }];
   const statements = [{ id: 1, telegram_user_id: 10, account_id: 1, closing_date: "2024-01-31", due_date: "2024-02-20", original_amount_cents: 10000, remaining_amount_cents: 8000, payment_baseline: [{ groupId: "payment", amountCents: 3000 }] }];
-  // The snapshot already includes this payment, but editing/deleting it must
-  // still change the remaining amount relative to its captured value.
+  // The historical group has no inferred attribution to the snapshot. Only
+  // the amount above its captured value is treated as a tracked payment.
   let amount = 3000;
   globalThis.fetch = async (resource, options) => {
     const url = new URL(typeof resource === "string" || resource instanceof URL ? resource : resource.url);
@@ -121,10 +121,12 @@ test("authenticated reads reconcile grouped bank payments without modifying bala
   assert.equal((await remaining(10))[0].remainingAmountCents, 8000);
   assert.equal((await remaining(10))[0].remainingAmountCents, 8000);
   assert.deepEqual(await remaining(20), []);
+  amount = 5000;
+  assert.equal((await remaining(10))[0].remainingAmountCents, 6000);
   amount = 1000;
-  assert.equal((await remaining(10))[0].remainingAmountCents, 10000);
+  assert.equal((await remaining(10))[0].remainingAmountCents, 8000);
   amount = 0;
-  assert.equal((await remaining(10))[0].remainingAmountCents, 10000);
+  assert.equal((await remaining(10))[0].remainingAmountCents, 8000);
   assert.equal(accounts[0].balance_cents, -4000);
   assert.equal(accounts[1].balance_cents, 4000);
 });

@@ -24,27 +24,49 @@ test("carries excess payment forward without changing snapshot amounts", () => {
   assert.equal(statements[0].remainingAmountCents, 5000);
 });
 
-test("baseline payment edits and deletions change the snapshot without replaying prior payments", () => {
+test("first-snapshot historical groups do not own the implied paid portion", () => {
+  const historic = { groupId: "historic", accountId: 1, amountCents: 10000 };
+  const statement = { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 5000, baseline: [historic] };
+  const status = (amountCents: number) => reconcileStatementPayments([statement], amountCents ? [{ ...historic, amountCents }] : []);
+  assert.deepEqual(status(10000), { remainingById: { 1: 5000 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(status(5000), status(10000));
+  assert.deepEqual(status(0), status(10000));
+  assert.deepEqual(status(13000), { remainingById: { 1: 2000 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(status(18000), { remainingById: { 1: 0 }, creditByAccount: { 1: 3000 } });
+});
+
+test("reappearing historic amounts across captures do not become new payments, but later increases are reversible", () => {
+  const p = { groupId: "p", accountId: 1, amountCents: 10000 };
+  const first = { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 5000, baseline: [p] };
+  const second = { ...first, id: 2, closingDate: "2024-02-29", remainingAmountCents: 10000, baseline: [] };
+  const third = { ...second, id: 3, closingDate: "2024-03-31", baseline: [{ ...p, amountCents: 13000 }] };
+  assert.deepEqual(reconcileStatementPayments([first, second, third], [p]),
+    { remainingById: { 1: 5000, 2: 10000, 3: 10000 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(reconcileStatementPayments([first, second, third], [{ ...p, amountCents: 13000 }]),
+    { remainingById: { 1: 2000, 2: 10000, 3: 10000 }, creditByAccount: { 1: 0 } });
+});
+
+test("first-baseline payment increases apply without replaying historic amounts", () => {
   const statements = [{ id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 5000,
     baseline: [{ groupId: "old", amountCents: 3000 }] }];
   const payment = (amountCents: number) => [{ accountId: 1, groupId: "old", amountCents }];
   assert.deepEqual(reconcileStatementPayments(statements, payment(3000)), { remainingById: { 1: 5000 }, creditByAccount: { 1: 0 } });
   assert.equal(reconcileStatementPayments(statements, payment(4000)).remainingById[1], 4000);
-  assert.equal(reconcileStatementPayments(statements, payment(1000)).remainingById[1], 7000);
-  assert.equal(reconcileStatementPayments(statements, []).remainingById[1], 8000);
+  assert.equal(reconcileStatementPayments(statements, payment(1000)).remainingById[1], 5000);
+  assert.equal(reconcileStatementPayments(statements, []).remainingById[1], 5000);
   assert.deepEqual(reconcileStatementPayments(statements, [...payment(3000), { accountId: 1, groupId: "new", amountCents: 7000 }]),
     { remainingById: { 1: 0 }, creditByAccount: { 1: 2000 } });
 });
 
-test("replacement payments are applied after restoring each captured payment", () => {
+test("new payments are applied without restoring first-baseline payments", () => {
   const statement = { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000,
     baseline: [{ groupId: "old", amountCents: 10000 }] };
   assert.deepEqual(reconcileStatementPayments([statement], [{ accountId: 1, groupId: "new", amountCents: 10000 }]),
     { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
   assert.deepEqual(reconcileStatementPayments([{ ...statement, remainingAmountCents: 5000 }], [{ accountId: 1, groupId: "new", amountCents: 10000 }]),
-    { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
+    { remainingById: { 1: 0 }, creditByAccount: { 1: 5000 } });
   assert.deepEqual(reconcileStatementPayments([{ ...statement, remainingAmountCents: 5000 }], [{ accountId: 1, groupId: "old", amountCents: 3000 }, { accountId: 1, groupId: "new", amountCents: 10000 }]),
-    { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
+    { remainingById: { 1: 0 }, creditByAccount: { 1: 5000 } });
 });
 
 test("a first snapshot does not infer historic credit from pre-existing payments", () => {
@@ -84,16 +106,16 @@ test("reconciles divergent baselines with a replacement and later edits", () => 
   assert.deepEqual(reconcileStatementPayments(statements, [
     { accountId: 1, groupId: "a", amountCents: 2000 },
     { accountId: 1, groupId: "b", amountCents: 6000 }
-  ]), { remainingById: { 1: 1000, 2: 4000 }, creditByAccount: { 1: 0 } });
+  ]), { remainingById: { 1: 0, 2: 3000 }, creditByAccount: { 1: 0 } });
 });
 
-test("moving or deleting a baseline payment restores only its original card", () => {
+test("moving a first-baseline payment does not restore historical debt on its original card", () => {
   const statements = [
     { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 5000, baseline: [{ groupId: "p", amountCents: 2000 }] },
     { id: 2, accountId: 2, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 4000, baseline: [] }
   ];
   assert.deepEqual(reconcileStatementPayments(statements, [{ groupId: "p", accountId: 2, amountCents: 2000 }]),
-    { remainingById: { 1: 7000, 2: 2000 }, creditByAccount: { 1: 0, 2: 0 } });
+    { remainingById: { 1: 5000, 2: 2000 }, creditByAccount: { 1: 0, 2: 0 } });
 });
 
 test("does not infer available credit before a tracked statement", () => {
@@ -114,12 +136,12 @@ test("a paid imported snapshot consumes prior credit and restores debt if that p
   assert.deepEqual(reconcileStatementPayments(statements, []), { remainingById: { 1: 10000, 2: 10000 }, creditByAccount: { 1: 0 } });
 });
 
-test("ambiguous first-snapshot payments are attributed deterministically by group identity", () => {
+test("no first-snapshot group is attributed the implied paid portion", () => {
   const a = { groupId: "a", amountCents: 1000 };
   const b = { groupId: "b", amountCents: 1000 };
   const statement = { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 1000, remainingAmountCents: 0, baseline: [b, a] };
   assert.deepEqual(reconcileStatementPayments([statement], [{ ...b, accountId: 1 }]),
-    { remainingById: { 1: 1000 }, creditByAccount: { 1: 0 } });
+    { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
   assert.deepEqual(reconcileStatementPayments([statement], [{ ...a, accountId: 1 }]),
     { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
 });
@@ -128,7 +150,7 @@ test("a removed older payment moves a newer allocation to the restored oldest de
   const a = { groupId: "a", amountCents: 1000 };
   const b = { groupId: "b", amountCents: 1000 };
   const statements = [
-    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 1000, remainingAmountCents: 0, baseline: [a] },
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 1000, remainingAmountCents: 1000, baseline: [] },
     { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 1000, remainingAmountCents: 1000, baseline: [a] },
     { id: 3, accountId: 1, closingDate: "2024-03-31", originalAmountCents: 1000, remainingAmountCents: 1000, baseline: [a, b] }
   ];

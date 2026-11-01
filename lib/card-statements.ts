@@ -38,9 +38,10 @@ export type CardPayment = PaymentBaseline & { accountId: number };
 // them without exploring combinations of other baselines. When identity is
 // ambiguous, group IDs are processed lexicographically. A snapshot is
 // authoritative when captured: only already-paid debt consumes prior credit.
-// The first baseline's payments are attributed to its already-paid portion
-// (up to that amount); any remainder is historical and is not available credit.
-// Later reductions remove credit first and then allocations newest-first;
+// The first baseline is historical: neither its payments nor the snapshot's
+// implied paid portion are attributed to one another. Only group amounts above
+// that baseline are tracked, including across subsequent captures. Reductions
+// remove tracked credit first and then allocations newest-first;
 // allocations on newer statements can move to newly restored older debt.
 // Credit can fill restored debt only on statements captured before that credit
 // arose; older credit must not indirectly override an authoritative snapshot.
@@ -65,6 +66,14 @@ export function reconcileStatementPayments(
       const result = new Map<string, number>();
       for (const item of items) result.set(item.groupId, (result.get(item.groupId) ?? 0) + item.amountCents);
       return result;
+    };
+    const initial = amounts(ordered[0].baseline);
+    // Ignore the historical portion on every observation, not just the first:
+    // a deleted and reappearing baseline group is not a new payment.
+    const trackedAmounts = (items: readonly PaymentBaseline[]) => {
+      const observed = amounts(items);
+      for (const [id, amount] of observed) observed.set(id, Math.max(0, amount - (initial.get(id) ?? 0)));
+      return observed;
     };
     // Credit and allocation buckets retain the capture boundary at which the
     // payment arose. Bucket n may fill restored debt at capture indices < n,
@@ -162,21 +171,10 @@ export function reconcileStatementPayments(
         group.amount = next;
       }
     };
-    const first = ordered[0];
-    const initial = amounts(first.baseline);
-    remaining.push(first.remainingAmountCents);
-    let implicitPaid = first.originalAmountCents - first.remainingAmountCents;
-    for (const id of ids) {
-      const group = ledger.get(id)!;
-      group.amount = initial.get(id) ?? 0;
-      const attributed = Math.min(group.amount, implicitPaid);
-      addAllocation(group.allocated[0], 1, attributed);
-      allocatedTotals[0] += attributed;
-      implicitPaid -= attributed;
-    }
+    remaining.push(ordered[0].remainingAmountCents);
     for (let i = 1; i < ordered.length; i++) {
       const statement = ordered[i];
-      apply(amounts(statement.baseline));
+      apply(trackedAmounts(statement.baseline));
       remaining.push(statement.remainingAmountCents);
       let paid = statement.originalAmountCents - statement.remainingAmountCents;
       for (const id of ids) {
@@ -190,7 +188,7 @@ export function reconcileStatementPayments(
         }
       }
     }
-    apply(amounts(accountPayments));
+    apply(trackedAmounts(accountPayments));
     ordered.forEach((statement, i) => { remainingById[statement.id] = remaining[i]; });
     creditByAccount[accountId] = ids.reduce((sum, id) => sum + ledger.get(id)!.credit.reduce((a, b) => a + b, 0), 0);
   }

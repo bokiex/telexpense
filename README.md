@@ -57,8 +57,9 @@ historical type may be unknowable. For an imported
 snapshot, previously unallocated tracked credit is assumed to cover its
 already-paid portion first; untracked issuer payments cannot be distinguished
 from that credit. Subsequent edits or deletion of those tracked payments can
-restore debt. Payments predating the first tracked snapshot do not establish
-available credit; with no snapshot, available tracked credit is zero.
+restore debt. Payments captured in the first tracked snapshot are historical:
+they do not establish available credit or explain any of its already-paid
+amount. With no snapshot, available tracked credit is zero.
 
 For transfers predating role tracking, migration uses captured baseline evidence
 where available and otherwise freezes each account's **current** type as a
@@ -73,14 +74,19 @@ Reconciliation replays baselines in recorded capture order, while allocating
 payments to the oldest available closing date. Older snapshots are ordered by
 insert ID during migration; a legacy re-entry made before this ordering was
 recorded cannot be placed reliably. Concurrent captures follow the assigned
-sequence, not necessarily commit order. When several groups could explain an
-already-paid amount, attribution is deterministic by group ID; the first
-snapshot attributes its already-paid amount to its baseline groups, and later
-snapshots attribute it to carried credit. Other historical amounts remain
-unattributed. Consequently, editing one of several ambiguous payments may
-restore a different amount than an issuer's actual payment history would.
-Reductions undo attributed credit and then newer allocations before increases
-are applied; surviving newer allocations and credit move to newly restored older debt.
+sequence, not necessarily commit order. First-snapshot baseline groups are not
+associated with its implied paid amount. Only the portion of a group's amount
+above its first-baseline amount is tracked; reducing or deleting the historical
+portion does not restore debt, and its reappearance up to that amount does not
+create a payment. Thus, if a historical group actually paid the snapshot, its
+later reduction cannot be reflected without explicit payment-to-statement
+history. Likewise, changes occurring entirely between captures cannot be
+reconstructed. Moving a historical group to a different tracked card is treated
+as a new payment on that card. Later snapshots attribute their paid portion to
+carried tracked credit, deterministically by group ID when ambiguous; this can
+also differ from the issuer's actual history. Reductions undo tracked credit
+and then newer allocations before increases are applied; surviving newer
+allocations and credit move to newly restored older debt.
 Retained credit is not automatically applied to a later full imported snapshot,
 whose remaining amount is authoritative.
 
