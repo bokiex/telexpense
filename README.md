@@ -233,3 +233,5 @@ npm test
 npm run typecheck
 npm run build
 ```
+
+For the disposable local Supabase and Playwright browser suite, see [docs/e2e.md](docs/e2e.md).

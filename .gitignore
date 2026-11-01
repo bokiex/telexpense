@@ -3,5 +3,7 @@
 node_modules/
 .next/
 tsconfig.tsbuildinfo
+playwright-report/
+test-results/
 supabase/.gitignore
 supabase/config.toml

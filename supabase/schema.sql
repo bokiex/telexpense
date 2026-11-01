@@ -33,7 +33,7 @@ create table if not exists public.transactions (
   savings_allocation boolean not null default false,
   recurring_rule_id bigint,
   description text not null,
-  amount_cents integer not null
+  amount_cents integer not null,
   occurred_on date not null default current_date,
   created_at timestamptz not null default now()
 );
@@ -79,7 +79,7 @@ create table if not exists public.budgets (
   telegram_user_id bigint not null references public.users(telegram_user_id) on delete cascade,
   category text not null,
   month text not null,
-  amount_cents integer not null,
+  amount_cents integer not null
 );
 
 create table if not exists public.categories (
@@ -133,6 +133,7 @@ alter table public.transactions
   check (category is not null or transfer_group_id is not null);
 
 drop function if exists public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date);
+drop function if exists public.update_transfer_group(bigint, uuid, bigint, bigint, text, integer, date, boolean);
 
 create function public.update_transfer_group(
   target_user_id bigint,
