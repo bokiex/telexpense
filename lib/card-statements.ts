@@ -34,8 +34,8 @@ export type ReconciliationStatement = {
 export type CardPayment = PaymentBaseline & { accountId: number };
 
 // Each imported remaining amount is authoritative at its own baseline. Compare
-// both the current payment total and the baseline total against older statements
-// so an amount already assigned there is not also assigned to this statement.
+// payments by group identity against each baseline, accounting for allocations
+// to older statements before applying changes to this statement.
 // Negative deltas restore debt (including debt that was implicit in a snapshot).
 // Attribution rule: an imported snapshot's already-paid portion consumes any
 // available older credit first. The issuer may actually have received an
@@ -50,44 +50,57 @@ export function reconcileStatementPayments(
   for (const accountId of new Set([...statements.map((s) => s.accountId), ...payments.map((p) => p.accountId)])) {
     const ordered = statements.filter((s) => s.accountId === accountId)
       .sort((a, b) => a.closingDate.localeCompare(b.closingDate) || a.id - b.id);
-    const current = payments.filter((p) => p.accountId === accountId).reduce((sum, p) => sum + p.amountCents, 0);
+    const accountPayments = payments.filter((p) => p.accountId === accountId);
+    const ids = [...new Set([...accountPayments, ...ordered.flatMap((s) => s.baseline)].map((p) => p.groupId))].sort();
+    const vector = (items: readonly PaymentBaseline[]) => ids.map((id) => items.filter((p) => p.groupId === id).reduce((sum, p) => sum + p.amountCents, 0));
+    const total = (values: readonly number[]) => values.reduce((sum, value) => sum + value, 0);
+    const current = vector(accountPayments);
     if (!ordered.length) {
-      creditByAccount[accountId] = Math.max(0, current);
+      creditByAccount[accountId] = Math.max(0, total(current));
       continue;
     }
-    const baselines = ordered.map((s) => s.baseline.reduce((sum, p) => sum + p.amountCents, 0));
+    const baselines = ordered.map((s) => vector(s.baseline));
     const memo = new Map<string, number>();
-    const allocatedThrough = (count: number, total: number): number => {
+    const allocatedThrough = (count: number, values: readonly number[]): number => {
       if (!count) return 0;
-      const key = `${count}:${total}`;
+      const key = `${count}:${values.join(",")}`;
       const cached = memo.get(key);
       if (cached !== undefined) return cached;
       const i = count - 1;
-      const before = allocatedThrough(i, total);
-      let available = total - baselines[i] - before + allocatedThrough(i, baselines[i]);
-      // Previously unallocated credit absorbs a decrease before debt on a
-      // later imported snapshot can be restored.
-      const priorCredit = creditThrough(i, baselines[i]);
+      const baseline = baselines[i];
+      // Restore reductions first, before applying increases/new identities.
+      // Netting them would hide a replacement when restoration is capped.
+      const reduced = values.map((value, index) => Math.min(value, baseline[index]));
+      const beforeBase = allocatedThrough(i, baseline);
+      const beforeReduced = allocatedThrough(i, reduced);
+      const before = allocatedThrough(i, values);
+      let decrease = total(reduced) - total(baseline) - beforeReduced + beforeBase;
+      const priorCredit = creditThrough(i, baseline);
       const attributedCredit = Math.min(priorCredit, ordered[i].originalAmountCents - ordered[i].remainingAmountCents);
-      if (available < 0) available += Math.min(-available, priorCredit - attributedCredit);
+      if (decrease < 0) decrease += Math.min(-decrease, priorCredit - attributedCredit);
       const restoredLimit = ordered[i].remainingAmountCents - ordered[i].originalAmountCents;
-      const result = before + Math.max(restoredLimit, Math.min(ordered[i].remainingAmountCents, available));
+      const afterDecrease = Math.max(restoredLimit, Math.min(ordered[i].remainingAmountCents, decrease));
+      const increase = total(values) - total(reduced) - before + beforeReduced;
+      const result = before + Math.max(restoredLimit, Math.min(ordered[i].remainingAmountCents, afterDecrease + increase));
       memo.set(key, result);
       return result;
     };
-    // Attribute prior credit to the already-paid portion of this snapshot,
-    // then carry any unused credit separately from later payment changes.
+    // Attribute only credit established after an earlier snapshot; transactions
+    // already present at the first capture do not imply historical credit.
     const creditMemo = new Map<string, number>();
-    const creditThrough = (count: number, total: number): number => {
+    const creditThrough = (count: number, values: readonly number[]): number => {
       if (!count) return 0;
-      const key = `${count}:${total}`;
+      const key = `${count}:${values.join(",")}`;
       const cached = creditMemo.get(key);
       if (cached !== undefined) return cached;
       const baseline = baselines[count - 1];
+      const reduced = values.map((value, index) => Math.min(value, baseline[index]));
       const previousCredit = creditThrough(count - 1, baseline);
       const attributedCredit = Math.min(previousCredit, ordered[count - 1].originalAmountCents - ordered[count - 1].remainingAmountCents);
-      const credit = Math.max(0, previousCredit - attributedCredit + total - baseline -
-        allocatedThrough(count, total) + allocatedThrough(count, baseline));
+      const afterDecrease = Math.max(0, previousCredit - attributedCredit + total(reduced) - total(baseline) -
+        allocatedThrough(count, reduced) + allocatedThrough(count, baseline));
+      const credit = Math.max(0, afterDecrease + total(values) - total(reduced) -
+        allocatedThrough(count, values) + allocatedThrough(count, reduced));
       creditMemo.set(key, credit);
       return credit;
     };

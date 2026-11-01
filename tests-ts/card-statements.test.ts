@@ -35,6 +35,34 @@ test("baseline payment edits and deletions change the snapshot without replaying
     { remainingById: { 1: 0 }, creditByAccount: { 1: 2000 } });
 });
 
+test("replacement payments are applied after restoring each captured payment", () => {
+  const statement = { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000,
+    baseline: [{ groupId: "old", amountCents: 10000 }] };
+  assert.deepEqual(reconcileStatementPayments([statement], [{ accountId: 1, groupId: "new", amountCents: 10000 }]),
+    { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(reconcileStatementPayments([{ ...statement, remainingAmountCents: 5000 }], [{ accountId: 1, groupId: "new", amountCents: 10000 }]),
+    { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(reconcileStatementPayments([{ ...statement, remainingAmountCents: 5000 }], [{ accountId: 1, groupId: "old", amountCents: 3000 }, { accountId: 1, groupId: "new", amountCents: 10000 }]),
+    { remainingById: { 1: 0 }, creditByAccount: { 1: 0 } });
+});
+
+test("a first snapshot does not infer historic credit from pre-existing payments", () => {
+  const payment = { accountId: 1, groupId: "historic", amountCents: 20000 };
+  const statement = { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [payment] };
+  assert.deepEqual(reconcileStatementPayments([statement], [payment]),
+    { remainingById: { 1: 10000 }, creditByAccount: { 1: 0 } });
+});
+
+test("replacement payments flow oldest first across captured statements", () => {
+  const old = { groupId: "old", amountCents: 10000 };
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [old] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [old] }
+  ];
+  assert.deepEqual(reconcileStatementPayments(statements, [{ accountId: 1, groupId: "new", amountCents: 15000 }]),
+    { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
+});
+
 test("allocates across independently captured statement baselines and carries excess", () => {
   const statements = [
     { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 5000, baseline: [] },

@@ -32,10 +32,10 @@ begin
   if jsonb_array_length(data->'payments') <> 1 or (data->'payments'->0->>'amountCents')::integer <> 3000 then
     raise exception 'source account type change lost a historical payment';
   end if;
-  -- Pre-upgrade baselines contain no trustworthy source identity; do not guess.
+  -- Once classified, a payment no longer depends on any statement baseline.
   update public.card_statement_snapshots set payment_baseline = '[{"groupId":"00000000-0000-0000-0000-000000000001","amountCents":3000}]'::jsonb where id = snapshot_id;
-  if jsonb_array_length(public.read_card_statement_inputs(910001)->'payments') <> 0 then
-    raise exception 'source-less historical baseline guessed a non-bank source';
+  if jsonb_array_length(public.read_card_statement_inputs(910001)->'payments') <> 1 then
+    raise exception 'historical classification depended on baseline';
   end if;
   update public.card_statement_snapshots set payment_baseline = data->'statements'->0->'payment_baseline' where id = snapshot_id;
   insert into public.transactions (telegram_user_id, kind, account_id, transfer_group_id, description, amount_cents) values
@@ -49,6 +49,7 @@ begin
   if jsonb_array_length(public.read_card_statement_inputs(910001)->'payments') <> 0 then
     raise exception 'different non-bank source recognized as captured payment';
   end if;
+  update public.accounts set account_type = 'bank' where id = 910001 and telegram_user_id = 910001;
   update public.transactions set account_id = 910001
     where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001' and amount_cents < 0;
   update public.transactions set amount_cents = case when amount_cents < 0 then -1500 else 1500 end
@@ -57,8 +58,8 @@ begin
   if (data->'payments'->0->>'amountCents')::integer <> 1500 then raise exception 'captured payment edit lost'; end if;
   update public.transactions set account_id = 910005
     where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001' and amount_cents > 0;
-  if jsonb_array_length(public.read_card_statement_inputs(910001)->'payments') <> 0 then
-    raise exception 'baseline on a different card recognized non-bank transfer';
+  if (public.read_card_statement_inputs(910001)->'payments'->0->>'accountId')::bigint <> 910005 then
+    raise exception 'changed destination was not reclassified';
   end if;
   update public.transactions set account_id = 910002
     where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001' and amount_cents > 0;

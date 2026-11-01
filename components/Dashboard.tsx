@@ -358,6 +358,7 @@ export default function Dashboard() {
   const [summaryRefreshing, setSummaryRefreshing] = useState(false);
   const [summarySavedAt, setSummarySavedAt] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [summaryRevision, setSummaryRevision] = useState(0);
   const [history, setHistory] = useState<RecentTransaction[] | null>(null);
   const [historyCursor, setHistoryCursor] = useState<HistoryPage["nextCursor"]>(null);
   const [historyPageCount, setHistoryPageCount] = useState(0);
@@ -412,6 +413,8 @@ export default function Dashboard() {
           }
           setSummary(data);
           setSummarySavedAt(cache?.write(month, data, generation) ?? Date.now());
+          // A successful summary request can materialize recurring payments.
+          setSummaryRevision((value) => value + 1);
         }
       } catch {
         if (!ignore) setError("Could not load dashboard.");
@@ -889,6 +892,7 @@ export default function Dashboard() {
               accounts={data.accounts}
               snapshots={summary?.portfolioSnapshots || []}
               recurringRules={summary?.recurringRules || []}
+              summaryRevision={summaryRevision}
               onAddAccount={() => setModal({ type: "add-account" })}
               onEditAccount={(account) => setModal({ type: "edit-account", account })}
               onSetSnapshot={(account) => setModal({ type: "portfolio-snapshot", account })}
@@ -1331,6 +1335,7 @@ function AccountsView({
   accounts,
   snapshots,
   recurringRules,
+  summaryRevision,
   onAddAccount,
   onEditAccount,
   onSetSnapshot,
@@ -1341,6 +1346,7 @@ function AccountsView({
   accounts: Account[];
   snapshots: PortfolioSnapshot[];
   recurringRules: RecurringRule[];
+  summaryRevision: number;
   onAddAccount: () => void;
   onEditAccount: (account: Account) => void;
   onSetSnapshot: (account: Account) => void;
@@ -1375,7 +1381,7 @@ function AccountsView({
     }
     void loadStatements();
     return () => { ignore = true; };
-  }, [statementRefresh, accountTypes]);
+  }, [statementRefresh, accountTypes, summaryRevision]);
 
   return (
     <div className="screen-stack">
