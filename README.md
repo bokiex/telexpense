@@ -41,6 +41,55 @@ This works well because Telegram Mini Apps require HTTPS in production, and Verc
 
 Server-side routes use `SUPABASE_SECRET_KEY` or legacy `SUPABASE_SERVICE_ROLE_KEY`. Do not expose this key in frontend code.
 
+Card statements created before payment-baseline tracking cannot be reconciled
+reliably from today's transactions. After applying the baseline migration, the
+statement view identifies any such closing dates instead of guessing. For each,
+open the corresponding card's statement form, select “Re-enter a legacy
+statement”, and supply the statement's original details and **current** remaining
+amount. This captures the current payment groups without changing balances.
+Only legacy snapshots can be replaced this way; new snapshots are unaffected.
+
+Statement reconciliation recognizes balanced, owned bank-to-card transfers as
+payments. A payment captured in a card's snapshot baseline remains recognized
+for that card if its source account type changes, but new non-bank transfers are
+not payments. For older transfers without captured role information, the source's
+historical type may be unknowable. Each imported snapshot's remaining amount is
+authoritative: its already-paid portion is not attributed to tracked payments
+or credit. Editing or deleting a tracked payment can restore debt it was
+allocated to, but does not restore a snapshot's unattributed paid portion.
+Payments captured in the first tracked snapshot are historical: they do not
+establish available credit or explain any of its already-paid amount. With no
+snapshot, available tracked credit is zero.
+
+For transfers predating role tracking, migration uses captured baseline evidence
+where available and otherwise freezes each account's **current** type as a
+practical fallback. Historical account types cannot be recovered from current
+metadata: this can include transfers that were not bank-to-card payments at the
+time, or exclude genuine payments. Review affected older transfers and statement
+amounts; this inference is not a guarantee of historical accuracy. New transfers
+capture roles when created, and changing account identities on a transfer
+reclassifies both legs.
+
+Reconciliation replays baselines in recorded capture order, while allocating
+payments to the oldest available closing date. Older snapshots are ordered by
+insert ID during migration; a legacy re-entry made before this ordering was
+recorded cannot be placed reliably. Concurrent captures follow the assigned
+sequence, not necessarily commit order. First-snapshot baseline groups are not
+associated with its implied paid amount. Only the portion of a group's amount
+above its first-baseline amount is tracked; reducing or deleting the historical
+portion does not restore debt, and its reappearance up to that amount does not
+create a payment. Thus, if a historical group actually paid the snapshot, its
+later reduction cannot be reflected without explicit payment-to-statement
+history. Likewise, changes occurring entirely between captures cannot be
+reconstructed. Moving a historical group to a different tracked card is treated
+as a new payment on that card. Reductions undo each group's newest tracked
+increment first, removing that increment's credit before its newer statement
+allocations; reductions precede increases. Eligible surviving allocations and
+credit move to newly restored older debt, prioritizing the most restricted
+capture boundary so later debt can retain eligible funds. Retained credit is not
+automatically applied to any later imported snapshot, whether fully or
+partially paid; its remaining amount is authoritative.
+
 ## Environment Variables
 
 Copy `.env.example` to `.env.local` for local development:

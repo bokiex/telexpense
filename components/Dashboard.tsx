@@ -358,6 +358,7 @@ export default function Dashboard() {
   const [summaryRefreshing, setSummaryRefreshing] = useState(false);
   const [summarySavedAt, setSummarySavedAt] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [summaryRevision, setSummaryRevision] = useState(0);
   const [history, setHistory] = useState<RecentTransaction[] | null>(null);
   const [historyCursor, setHistoryCursor] = useState<HistoryPage["nextCursor"]>(null);
   const [historyPageCount, setHistoryPageCount] = useState(0);
@@ -412,6 +413,8 @@ export default function Dashboard() {
           }
           setSummary(data);
           setSummarySavedAt(cache?.write(month, data, generation) ?? Date.now());
+          // A successful summary request can materialize recurring payments.
+          setSummaryRevision((value) => value + 1);
         }
       } catch {
         if (!ignore) setError("Could not load dashboard.");
@@ -889,6 +892,7 @@ export default function Dashboard() {
               accounts={data.accounts}
               snapshots={summary?.portfolioSnapshots || []}
               recurringRules={summary?.recurringRules || []}
+              summaryRevision={summaryRevision}
               onAddAccount={() => setModal({ type: "add-account" })}
               onEditAccount={(account) => setModal({ type: "edit-account", account })}
               onSetSnapshot={(account) => setModal({ type: "portfolio-snapshot", account })}
@@ -1281,6 +1285,7 @@ function CardStatementDetail({ accountId, statements, error, onSaved }: { accoun
   const [dueDate, setDueDate] = useState("");
   const [original, setOriginal] = useState("");
   const [remaining, setRemaining] = useState("");
+  const [replaceLegacy, setReplaceLegacy] = useState(false);
   const [formError, setFormError] = useState("");
   const action = usePendingAction();
   const next = statements?.filter((item) => item.accountId === accountId && item.remainingAmountCents > 0)
@@ -1297,14 +1302,14 @@ function CardStatementDetail({ accountId, statements, error, onSaved }: { accoun
     setFormError("");
     void action.run(async () => {
       try {
-        const response = await apiRequest("/api/card-statements", "POST", { accountId, closingDate, dueDate, originalAmountCents, remainingAmountCents });
+        const response = await apiRequest("/api/card-statements", "POST", { accountId, closingDate, dueDate, originalAmountCents, remainingAmountCents, replaceLegacy });
         if (!response.ok) {
           const body = await response.json().catch(() => null);
           setFormError(body?.error || "Could not save statement.");
           return;
         }
         setOpen(false);
-        setClosingDate(""); setDueDate(""); setOriginal(""); setRemaining("");
+        setClosingDate(""); setDueDate(""); setOriginal(""); setRemaining(""); setReplaceLegacy(false);
         onSaved();
       } catch { setFormError("Could not save statement."); }
     });
@@ -1318,6 +1323,8 @@ function CardStatementDetail({ accountId, statements, error, onSaved }: { accoun
       <FieldLabel label="Due date"><Input type="date" required value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></FieldLabel>
       <FieldLabel label="Original statement amount"><Input inputMode="decimal" required value={original} onChange={(event) => setOriginal(event.target.value)} /></FieldLabel>
       <FieldLabel label="Remaining amount"><Input inputMode="decimal" required value={remaining} onChange={(event) => setRemaining(event.target.value)} /></FieldLabel>
+      <p>The remaining amount is authoritative. The already-paid portion is not attributed to tracked payments or credit; editing those payments later will not restore it.</p>
+      <label><input type="checkbox" checked={replaceLegacy} onChange={(event) => setReplaceLegacy(event.target.checked)} /> Re-enter a legacy statement using its current remaining amount</label>
       {formError ? <p role="alert">{formError}</p> : null}
       <PendingButton type="submit" pending={action.pending} pendingLabel="Saving…">Save statement</PendingButton>
     </form> : null}
@@ -1328,6 +1335,7 @@ function AccountsView({
   accounts,
   snapshots,
   recurringRules,
+  summaryRevision,
   onAddAccount,
   onEditAccount,
   onSetSnapshot,
@@ -1338,6 +1346,7 @@ function AccountsView({
   accounts: Account[];
   snapshots: PortfolioSnapshot[];
   recurringRules: RecurringRule[];
+  summaryRevision: number;
   onAddAccount: () => void;
   onEditAccount: (account: Account) => void;
   onSetSnapshot: (account: Account) => void;
@@ -1348,26 +1357,31 @@ function AccountsView({
   const netWorthTotal = netWorthWithPortfolioValues(accounts, snapshots);
   const [statements, setStatements] = useState<CardStatement[] | null>(null);
   const [statementError, setStatementError] = useState("");
+  const [legacyStatements, setLegacyStatements] = useState<{ accountId: number; closingDates: string[] }[]>([]);
   const [statementRefresh, setStatementRefresh] = useState(0);
+  const accountTypes = JSON.stringify(accounts.filter((account) => account.id !== null)
+    .map((account) => [account.id, account.accountType] as const).sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0)));
 
   useEffect(() => {
     let ignore = false;
+    setStatements(null);
     async function loadStatements() {
       try {
         const response = await apiRequest("/api/card-statements", "GET");
-        if (!response.ok) throw new Error();
         const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not load card statements.");
         if (!ignore) {
           setStatements(result.statements);
+          setLegacyStatements(result.legacyAccounts ?? []);
           setStatementError("");
         }
-      } catch {
-        if (!ignore) setStatementError("Could not load card statements.");
+      } catch (error) {
+        if (!ignore) setStatementError(error instanceof Error ? error.message : "Could not load card statements.");
       }
     }
     void loadStatements();
     return () => { ignore = true; };
-  }, [statementRefresh]);
+  }, [statementRefresh, accountTypes, summaryRevision]);
 
   return (
     <div className="screen-stack">
@@ -1406,7 +1420,10 @@ function AccountsView({
               </Button>
             </div>
             {account.accountType === "investment" ? <InvestmentAccountDetail account={account} snapshot={snapshots.find((item) => item.accountId === account.id)} /> : null}
-            {account.accountType === "card" && account.id !== null ? <CardStatementDetail accountId={account.id} statements={statements} error={statementError} onSaved={() => setStatementRefresh((value) => value + 1)} /> : null}
+            {account.accountType === "card" && account.id !== null ? <CardStatementDetail accountId={account.id} statements={statements} error={statementError || (() => {
+              const legacy = legacyStatements.find((item) => item.accountId === account.id);
+              return legacy ? `Statements predate payment baseline tracking. Re-enter each legacy statement using its current remaining amount and closing date (${legacy.closingDates.join(", ")}) before this card's status can be calculated.` : "";
+            })()} onSaved={() => setStatementRefresh((value) => value + 1)} /> : null}
           </article>
         )) : <EmptyState label="No accounts yet" />}
       </section>
