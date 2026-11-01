@@ -1353,8 +1353,8 @@ function AccountsView({
   const [statementError, setStatementError] = useState("");
   const [legacyStatements, setLegacyStatements] = useState<{ accountId: number; closingDates: string[] }[]>([]);
   const [statementRefresh, setStatementRefresh] = useState(0);
-  const cardAccountIds = JSON.stringify(accounts.filter((account) => account.accountType === "card" && account.id !== null)
-    .map((account) => account.id).sort((a, b) => (a ?? 0) - (b ?? 0)));
+  const accountTypes = JSON.stringify(accounts.filter((account) => account.id !== null)
+    .map((account) => [account.id, account.accountType] as const).sort((a, b) => (a[0] ?? 0) - (b[0] ?? 0)));
 
   useEffect(() => {
     let ignore = false;
@@ -1375,7 +1375,7 @@ function AccountsView({
     }
     void loadStatements();
     return () => { ignore = true; };
-  }, [statementRefresh, cardAccountIds]);
+  }, [statementRefresh, accountTypes]);
 
   return (
     <div className="screen-stack">

@@ -24,7 +24,9 @@ export function allocateStatementPayments(
   return { remainingById, creditCents };
 }
 
-export type PaymentBaseline = { groupId: string; amountCents: number };
+// Older captured baselines predate source identity and cannot preserve a
+// non-bank source after reclassification without guessing its identity.
+export type PaymentBaseline = { groupId: string; amountCents: number; sourceAccountId?: number };
 export type ReconciliationStatement = {
   id: number; accountId: number; closingDate: string; originalAmountCents: number; remainingAmountCents: number;
   baseline: readonly PaymentBaseline[];

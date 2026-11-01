@@ -82,6 +82,19 @@ test("rejects invalid dates, identities, and amounts", () => {
   ]) assert.equal(parseStatementSnapshot({ ...snapshot, ...patch }), null);
 });
 
+test("imported remaining is authoritative and unused credit can fund a future generated statement", () => {
+  const payment = { groupId: "p", accountId: 1, amountCents: 20000 };
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [payment] }
+  ];
+  const status = reconcileStatementPayments(statements, [payment]);
+  assert.equal(status.remainingById[2], 10000);
+  assert.equal(status.creditByAccount[1], 10000);
+  assert.deepEqual(allocateStatementPayments([{ id: 3, closingDate: "2024-03-31", remainingAmountCents: 12000 }], status.creditByAccount[1]),
+    { remainingById: { 3: 2000 }, creditCents: 0 });
+});
+
 test("deleting an overpayment cannot inflate a later full snapshot and retained credit survives capture", () => {
   const statements = [
     { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [] },

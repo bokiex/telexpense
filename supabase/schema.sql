@@ -1028,8 +1028,8 @@ alter table public.card_statement_snapshots
   add column if not exists payment_baseline jsonb;
 
 -- Exactly two owned, balanced legs into a card. Recognize current bank sources
--- and groups captured on that card's baseline, even if the source type changes.
--- Deleted or invalid groups remain only in the immutable snapshot baseline.
+-- and captured groups whose source identity is unchanged, even after reclassification.
+-- Older baselines lack source identity; it cannot safely be inferred from an edited group.
 create or replace function public.card_statement_payments(target_user_id bigint)
 returns table (group_id uuid, account_id bigint, amount_cents bigint)
 language sql stable security invoker set search_path = ''
@@ -1037,6 +1037,7 @@ as $$
   with groups as (
     select t.transfer_group_id as group_id,
       max(t.account_id) filter (where a.account_type = 'card' and t.amount_cents > 0) as account_id,
+      max(t.account_id) filter (where a.id is not null and t.amount_cents < 0) as source_account_id,
       sum(t.amount_cents) filter (where a.account_type = 'card' and t.amount_cents > 0) as amount_cents,
       bool_or(a.account_type = 'bank' and t.amount_cents < 0) as bank_source
     from public.transactions t
@@ -1052,8 +1053,19 @@ as $$
   where g.bank_source or exists (
     select 1 from public.card_statement_snapshots s
     where s.telegram_user_id = target_user_id and s.account_id = g.account_id
-      and s.payment_baseline @> jsonb_build_array(jsonb_build_object('groupId', g.group_id::text))
+      and s.payment_baseline @> jsonb_build_array(jsonb_build_object('groupId', g.group_id::text, 'sourceAccountId', g.source_account_id))
   );
+$$;
+
+-- Payments are validated by card_statement_payments; the negative leg is unique.
+create or replace function public.card_statement_payment_baseline(target_user_id bigint, target_account_id bigint)
+returns jsonb language sql stable security invoker set search_path = ''
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object('groupId', p.group_id, 'amountCents', p.amount_cents,
+    'sourceAccountId', t.account_id) order by p.group_id), '[]'::jsonb)
+  from public.card_statement_payments(target_user_id) p
+  join public.transactions t on t.telegram_user_id = target_user_id and t.transfer_group_id = p.group_id and t.amount_cents < 0
+  where p.account_id = target_account_id;
 $$;
 
 -- One statement-level MVCC snapshot captures both the insertion and all groups.
@@ -1065,8 +1077,7 @@ as $$
   insert into public.card_statement_snapshots
     (telegram_user_id, account_id, closing_date, due_date, original_amount_cents, remaining_amount_cents, payment_baseline)
   select target_user_id, a.id, target_closing_date, target_due_date, target_original_cents, target_remaining_cents,
-    coalesce((select jsonb_agg(jsonb_build_object('groupId', p.group_id, 'amountCents', p.amount_cents) order by p.group_id)
-              from public.card_statement_payments(target_user_id) p where p.account_id = a.id), '[]'::jsonb)
+    public.card_statement_payment_baseline(target_user_id, a.id)
   from public.accounts a
   where a.telegram_user_id = target_user_id and a.id = target_account_id and a.account_type = 'card'
   returning id;
@@ -1082,8 +1093,7 @@ as $$
   update public.card_statement_snapshots s
   set due_date = target_due_date, original_amount_cents = target_original_cents,
       remaining_amount_cents = target_remaining_cents,
-      payment_baseline = coalesce((select jsonb_agg(jsonb_build_object('groupId', p.group_id, 'amountCents', p.amount_cents) order by p.group_id)
-        from public.card_statement_payments(target_user_id) p where p.account_id = s.account_id), '[]'::jsonb)
+      payment_baseline = public.card_statement_payment_baseline(target_user_id, s.account_id)
   where s.telegram_user_id = target_user_id and s.account_id = target_account_id
     and s.closing_date = target_closing_date and s.payment_baseline is null
     and exists (select 1 from public.accounts a where a.id = s.account_id
@@ -1107,10 +1117,12 @@ as $$
 $$;
 
 revoke all on function public.card_statement_payments(bigint) from public, anon, authenticated;
+revoke all on function public.card_statement_payment_baseline(bigint, bigint) from public, anon, authenticated;
 revoke all on function public.create_card_statement_snapshot(bigint, bigint, date, date, integer, integer) from public, anon, authenticated;
 revoke all on function public.read_card_statement_inputs(bigint) from public, anon, authenticated;
 revoke all on function public.rebaseline_legacy_card_statement(bigint, bigint, date, date, integer, integer) from public, anon, authenticated;
 grant execute on function public.card_statement_payments(bigint) to service_role;
+grant execute on function public.card_statement_payment_baseline(bigint, bigint) to service_role;
 grant execute on function public.create_card_statement_snapshot(bigint, bigint, date, date, integer, integer) to service_role;
 grant execute on function public.read_card_statement_inputs(bigint) to service_role;
 grant execute on function public.rebaseline_legacy_card_statement(bigint, bigint, date, date, integer, integer) to service_role;
