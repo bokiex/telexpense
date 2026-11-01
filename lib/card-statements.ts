@@ -36,18 +36,17 @@ export type CardPayment = PaymentBaseline & { accountId: number };
 // Replay the observed baseline changes in capture order, then today's
 // payments. A group owns its allocations and credit, so reductions can undo
 // them without exploring combinations of other baselines. When identity is
-// ambiguous, group IDs are processed lexicographically. A snapshot is
-// authoritative when captured: only already-paid debt consumes prior credit.
-// The first baseline is historical: neither its payments nor the snapshot's
-// implied paid portion are attributed to one another. Only group amounts above
+// ambiguous, group IDs are processed lexicographically. Every snapshot's
+// implied paid portion is historical and is never attributed to tracked credit.
+// The first baseline is historical. Only group amounts above
 // that baseline are tracked, including across subsequent captures. Reductions
 // remove tracked credit first and then allocations newest-first;
 // allocations on newer statements can move to newly restored older debt.
 // Credit can fill restored debt only on statements captured before that credit
 // arose; older credit must not indirectly override an authoritative snapshot.
-// After sorting, this is O(S^4 * G + B) time and O(S^2 * G + B) space per
-// account, for S statements, G groups and B baseline/payment entries. It does
-// not explore combinations of baselines.
+// The ledger stores only nonzero credit and allocation buckets, rather than
+// preallocating a statement-by-group matrix. Its size depends on actual
+// payment changes and allocations, not all possible statement/group pairs.
 export function reconcileStatementPayments(
   statements: readonly ReconciliationStatement[], payments: readonly CardPayment[]
 ): { remainingById: Record<number, number>; creditByAccount: Record<number, number> } {
@@ -76,9 +75,13 @@ export function reconcileStatementPayments(
       return observed;
     };
     // Credit and allocation buckets retain the capture boundary at which the
-    // payment arose. Bucket n may fill restored debt at capture indices < n,
-    // even after credit was attributed to a later already-paid snapshot.
-    const ledger = new Map(ids.map((id) => [id, { amount: 0, credit: new Array<number>(ordered.length + 1).fill(0), allocated: ordered.map(() => new Map<number, number>()) }]));
+    // payment arose. Bucket n may fill restored debt at capture indices < n.
+    const ledger = new Map(ids.map((id) => [id, { amount: 0, credit: new Map<number, number>(), allocated: new Map<number, Map<number, number>>() }]));
+    const allocation = (group: { allocated: Map<number, Map<number, number>> }, i: number) => {
+      let buckets = group.allocated.get(i);
+      if (!buckets) group.allocated.set(i, buckets = new Map());
+      return buckets;
+    };
     const addAllocation = (buckets: Map<number, number>, cutoff: number, amount: number) => {
       if (amount) buckets.set(cutoff, (buckets.get(cutoff) ?? 0) + amount);
     };
@@ -93,24 +96,30 @@ export function reconcileStatementPayments(
         const group = ledger.get(id)!;
         const next = target.get(id) ?? 0;
         let reduction = Math.max(0, group.amount - next);
-        for (let n = remaining.length; n >= 0 && reduction > 0; n--) {
-          const credit = Math.min(reduction, group.credit[n]);
-          group.credit[n] -= credit;
+        for (const n of [...group.credit.keys()].sort((a, b) => b - a)) {
+          if (!reduction) break;
+          const amount = group.credit.get(n)!;
+          const credit = Math.min(reduction, amount);
+          if (amount === credit) group.credit.delete(n);
+          else group.credit.set(n, amount - credit);
           reduction -= credit;
         }
         for (const i of [...oldest].reverse()) {
           if (reduction <= 0) break;
-          for (const cutoff of [...group.allocated[i].keys()].sort((a, b) => b - a)) {
-            const undo = Math.min(reduction, group.allocated[i].get(cutoff)!);
-            const left = group.allocated[i].get(cutoff)! - undo;
-            if (left) group.allocated[i].set(cutoff, left);
-            else group.allocated[i].delete(cutoff);
+          const buckets = group.allocated.get(i);
+          if (!buckets) continue;
+          for (const cutoff of [...buckets.keys()].sort((a, b) => b - a)) {
+            const undo = Math.min(reduction, buckets.get(cutoff)!);
+            const left = buckets.get(cutoff)! - undo;
+            if (left) buckets.set(cutoff, left);
+            else buckets.delete(cutoff);
             allocatedTotals[i] -= undo;
             remaining[i] += undo;
             restored[i] += undo;
             reduction -= undo;
             if (reduction === 0) break;
           }
+          if (!buckets.size) group.allocated.delete(i);
         }
       }
       // Only fill newly restored debt: pre-existing unpaid snapshot amounts
@@ -124,12 +133,14 @@ export function reconcileStatementPayments(
           for (const id of ids) {
             if (restored[older] === 0 || allocatedTotals[newer] === 0) break;
             const group = ledger.get(id)!;
-            for (const [cutoff, amount] of group.allocated[newer]) {
+            const buckets = group.allocated.get(newer);
+            if (!buckets) continue;
+            for (const [cutoff, amount] of buckets) {
               if (cutoff <= older) continue;
               const moved = Math.min(restored[older], amount);
-              if (amount === moved) group.allocated[newer].delete(cutoff);
-              else group.allocated[newer].set(cutoff, amount - moved);
-              addAllocation(group.allocated[older], cutoff, moved);
+              if (amount === moved) buckets.delete(cutoff);
+              else buckets.set(cutoff, amount - moved);
+              addAllocation(allocation(group, older), cutoff, moved);
               allocatedTotals[newer] -= moved;
               allocatedTotals[older] += moved;
               remaining[newer] += moved;
@@ -138,17 +149,23 @@ export function reconcileStatementPayments(
               restored[older] -= moved;
               if (restored[older] === 0) break;
             }
+            if (!buckets.size) group.allocated.delete(newer);
           }
         }
-        // Only credit created after this snapshot can replace a deleted
-        // allocation without indirectly overriding its authoritative amount.
-        for (const id of ids) {
-          if (restored[older] === 0) break;
-          const group = ledger.get(id)!;
-          for (let n = older + 1; n <= remaining.length && restored[older] > 0; n++) {
-            const moved = Math.min(restored[older], group.credit[n]);
-            group.credit[n] -= moved;
-            addAllocation(group.allocated[older], n, moved);
+        // Use the earliest eligible cutoff across all groups first. A later
+        // cutoff can also cover newer restored debt; an earlier one cannot.
+        if (restored[older] > 0) {
+          const candidates = ids.flatMap((id) => [...ledger.get(id)!.credit.keys()]
+            .filter((n) => n > older).map((n) => ({ id, n })));
+          candidates.sort((a, b) => a.n - b.n || a.id.localeCompare(b.id));
+          for (const { id, n } of candidates) {
+            if (!restored[older]) break;
+            const group = ledger.get(id)!;
+            const amount = group.credit.get(n)!;
+            const moved = Math.min(restored[older], amount);
+            if (amount === moved) group.credit.delete(n);
+            else group.credit.set(n, amount - moved);
+            addAllocation(allocation(group, older), n, moved);
             allocatedTotals[older] += moved;
             remaining[older] -= moved;
             restored[older] -= moved;
@@ -163,11 +180,11 @@ export function reconcileStatementPayments(
           if (increase <= 0) break;
           const paid = Math.min(increase, remaining[i]);
           remaining[i] -= paid;
-          addAllocation(group.allocated[i], remaining.length, paid);
+          if (paid) addAllocation(allocation(group, i), remaining.length, paid);
           allocatedTotals[i] += paid;
           increase -= paid;
         }
-        group.credit[remaining.length] += increase;
+        if (increase) group.credit.set(remaining.length, (group.credit.get(remaining.length) ?? 0) + increase);
         group.amount = next;
       }
     };
@@ -176,21 +193,10 @@ export function reconcileStatementPayments(
       const statement = ordered[i];
       apply(trackedAmounts(statement.baseline));
       remaining.push(statement.remainingAmountCents);
-      let paid = statement.originalAmountCents - statement.remainingAmountCents;
-      for (const id of ids) {
-        const group = ledger.get(id)!;
-        for (let n = 0; n <= i && paid > 0; n++) {
-          const attributed = Math.min(group.credit[n], paid);
-          group.credit[n] -= attributed;
-          addAllocation(group.allocated[i], n, attributed);
-          allocatedTotals[i] += attributed;
-          paid -= attributed;
-        }
-      }
     }
     apply(trackedAmounts(accountPayments));
     ordered.forEach((statement, i) => { remainingById[statement.id] = remaining[i]; });
-    creditByAccount[accountId] = ids.reduce((sum, id) => sum + ledger.get(id)!.credit.reduce((a, b) => a + b, 0), 0);
+    creditByAccount[accountId] = ids.reduce((sum, id) => sum + [...ledger.get(id)!.credit.values()].reduce((a, b) => a + b, 0), 0);
   }
   return { remainingById, creditByAccount };
 }

@@ -123,17 +123,19 @@ test("does not infer available credit before a tracked statement", () => {
     { remainingById: {}, creditByAccount: { 2: 0 } });
 });
 
-test("a paid imported snapshot consumes prior credit and restores debt if that payment is reduced", () => {
+test("later imported paid portions remain unattributed when tracked payments are edited", () => {
   const statements = [
     { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [] },
     { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 10000, remainingAmountCents: 0, baseline: [{ groupId: "p", amountCents: 20000 }] }
   ];
   const status = (amountCents: number) => reconcileStatementPayments(statements, [{ accountId: 1, groupId: "p", amountCents }]);
-  assert.deepEqual(status(20000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 0 } });
-  assert.deepEqual(status(10000), { remainingById: { 1: 0, 2: 10000 }, creditByAccount: { 1: 0 } });
-  assert.deepEqual(status(15000), { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
-  assert.deepEqual(status(25000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 5000 } });
-  assert.deepEqual(reconcileStatementPayments(statements, []), { remainingById: { 1: 10000, 2: 10000 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(status(20000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 10000 } });
+  assert.deepEqual(status(10000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(status(15000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 5000 } });
+  assert.deepEqual(status(25000), { remainingById: { 1: 0, 2: 0 }, creditByAccount: { 1: 15000 } });
+  assert.deepEqual(reconcileStatementPayments(statements, []), { remainingById: { 1: 10000, 2: 0 }, creditByAccount: { 1: 0 } });
+  const partial = [statements[0], { ...statements[1], remainingAmountCents: 4000 }];
+  assert.deepEqual(reconcileStatementPayments(partial, []), { remainingById: { 1: 10000, 2: 4000 }, creditByAccount: { 1: 0 } });
 });
 
 test("no first-snapshot group is attributed the implied paid portion", () => {
@@ -169,6 +171,28 @@ test("surviving credit fills debt restored by a deleted payment", () => {
     { remainingById: { 1: 5000, 2: 10000 }, creditByAccount: { 1: 0 } });
 });
 
+test("restricted credit fills the oldest of two restored debts before flexible credit", () => {
+  const p = { groupId: "0-first", amountCents: 100 };
+  const early = { groupId: "z-early", amountCents: 100 };
+  const payer = { groupId: "0-payer", amountCents: 100 };
+  const later = { groupId: "a-later", amountCents: 100 };
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 100, remainingAmountCents: 100, baseline: [] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 100, remainingAmountCents: 100, baseline: [p, early] },
+    // A zero-value capture records the later allocations before deletion.
+    { id: 3, accountId: 1, closingDate: "2024-03-31", originalAmountCents: 0, remainingAmountCents: 0, baseline: [p, early, payer, later] }
+  ];
+  for (const credits of [[early, later], [later, early]]) {
+    assert.deepEqual(reconcileStatementPayments(statements, credits.map((credit) => ({ ...credit, accountId: 1 }))),
+      { remainingById: { 1: 0, 2: 0, 3: 0 }, creditByAccount: { 1: 0 } });
+  }
+  // Renaming the credits must not affect their capture-boundary eligibility.
+  const rename = (item: typeof early) => ({ ...item, groupId: item.groupId === early.groupId ? later.groupId : item.groupId === later.groupId ? early.groupId : item.groupId });
+  assert.deepEqual(reconcileStatementPayments(statements.map((s) => ({ ...s, baseline: s.baseline.map(rename) })),
+    [early, later].map((credit) => ({ ...rename(credit), accountId: 1 }))),
+    { remainingById: { 1: 0, 2: 0, 3: 0 }, creditByAccount: { 1: 0 } });
+});
+
 test("replays capture chronology, but allocates new payments by closing date", () => {
   const p = { groupId: "p", accountId: 1, amountCents: 10000 };
   const statements = [
@@ -185,6 +209,13 @@ test("divergent baselines scale to 120 statements and 600 groups and restore del
   // A subprocess makes the timeout effective even for synchronous replay.
   const result = spawnSync(process.execPath, ["--import", "tsx", "tests-ts/fixtures/card-statement-scale.ts"],
     { cwd: process.cwd(), encoding: "utf8", timeout: 5000 });
+  assert.equal(result.error, undefined, result.error?.message);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("sparse replay handles 1000 statements and 3000 groups in a bounded heap", () => {
+  const result = spawnSync(process.execPath, ["--max-old-space-size=128", "--import", "tsx", "tests-ts/fixtures/card-statement-sparse-scale.ts"],
+    { cwd: process.cwd(), encoding: "utf8", timeout: 15000 });
   assert.equal(result.error, undefined, result.error?.message);
   assert.equal(result.status, 0, result.stderr);
 });
@@ -235,7 +266,7 @@ test("pre-snapshot credit cannot indirectly pay authoritative debt when a later 
   // Nor may that old credit be laundered through a paid later snapshot.
   const paidThird = [statements[0], statements[1], { ...statements[2], remainingAmountCents: 0 }];
   assert.deepEqual(reconcileStatementPayments(paidThird, [old]),
-    { remainingById: { 1: 0, 2: 10000, 3: 0 }, creditByAccount: { 1: 0 } });
+    { remainingById: { 1: 0, 2: 10000, 3: 0 }, creditByAccount: { 1: 10000 } });
 });
 
 test("deleting an overpayment cannot inflate a later full snapshot and retained credit survives capture", () => {
@@ -253,5 +284,5 @@ test("deleting an overpayment cannot inflate a later full snapshot and retained 
     { remainingById: { 1: 0, 2: 10000, 3: 10000 }, creditByAccount: { 1: 10000 } });
   const partiallyPaid = [statements[0], { ...statements[1], remainingAmountCents: 5000 }];
   assert.deepEqual(reconcileStatementPayments(partiallyPaid, [{ groupId: "p", accountId: 1, amountCents: 10000 }]),
-    { remainingById: { 1: 0, 2: 10000 }, creditByAccount: { 1: 0 } });
+    { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
 });
