@@ -228,6 +228,14 @@ type Account = {
   active: boolean;
 };
 
+type CardStatement = {
+  accountId: number;
+  closingDate: string;
+  dueDate: string;
+  originalAmountCents: number;
+  remainingAmountCents: number;
+};
+
 type PortfolioSnapshot = {
   accountId: number;
   month: string;
@@ -1267,6 +1275,55 @@ function TransactionListView({
   );
 }
 
+function CardStatementDetail({ accountId, statements, error, onSaved }: { accountId: number; statements: CardStatement[] | null; error: string; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [closingDate, setClosingDate] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [original, setOriginal] = useState("");
+  const [remaining, setRemaining] = useState("");
+  const [formError, setFormError] = useState("");
+  const action = usePendingAction();
+  const next = statements?.filter((item) => item.accountId === accountId && item.remainingAmountCents > 0)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.closingDate.localeCompare(b.closingDate))[0];
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const parseAmount = (value: string) => /^\d+(?:\.\d{1,2})?$/.test(value) ? Math.round(Number(value) * 100) : NaN;
+    const originalAmountCents = parseAmount(original);
+    const remainingAmountCents = parseAmount(remaining);
+    const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+    if (!validDate(closingDate) || !validDate(dueDate)) { setFormError("Enter valid closing and due dates."); return; }
+    if (!Number.isSafeInteger(originalAmountCents) || !Number.isSafeInteger(remainingAmountCents) || remainingAmountCents > originalAmountCents) { setFormError("Enter nonnegative amounts; remaining cannot exceed the original amount."); return; }
+    setFormError("");
+    void action.run(async () => {
+      try {
+        const response = await apiRequest("/api/card-statements", "POST", { accountId, closingDate, dueDate, originalAmountCents, remainingAmountCents });
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          setFormError(body?.error || "Could not save statement.");
+          return;
+        }
+        setOpen(false);
+        setClosingDate(""); setDueDate(""); setOriginal(""); setRemaining("");
+        onSaved();
+      } catch { setFormError("Could not save statement."); }
+    });
+  }
+
+  return <div style={{ gridColumn: "1 / -1" }}>
+    {error ? <p role="alert">{error}</p> : statements === null ? <p role="status">Loading statements…</p> : next ? <p>Next unpaid statement: {money(next.remainingAmountCents)} · Due {next.dueDate}</p> : <p>No unpaid statement</p>}
+    <Button type="button" variant="ghost" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Cancel" : "Add statement snapshot"}</Button>
+    {open ? <form className="modal-form" onSubmit={submit}>
+      <FieldLabel label="Closing date"><Input type="date" required value={closingDate} onChange={(event) => setClosingDate(event.target.value)} /></FieldLabel>
+      <FieldLabel label="Due date"><Input type="date" required value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></FieldLabel>
+      <FieldLabel label="Original statement amount"><Input inputMode="decimal" required value={original} onChange={(event) => setOriginal(event.target.value)} /></FieldLabel>
+      <FieldLabel label="Remaining amount"><Input inputMode="decimal" required value={remaining} onChange={(event) => setRemaining(event.target.value)} /></FieldLabel>
+      {formError ? <p role="alert">{formError}</p> : null}
+      <PendingButton type="submit" pending={action.pending} pendingLabel="Saving…">Save statement</PendingButton>
+    </form> : null}
+  </div>;
+}
+
 function AccountsView({
   accounts,
   snapshots,
@@ -1289,6 +1346,28 @@ function AccountsView({
   onDeleteRecurringRule: (rule: RecurringRule) => Promise<void>;
 }) {
   const netWorthTotal = netWorthWithPortfolioValues(accounts, snapshots);
+  const [statements, setStatements] = useState<CardStatement[] | null>(null);
+  const [statementError, setStatementError] = useState("");
+  const [statementRefresh, setStatementRefresh] = useState(0);
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadStatements() {
+      try {
+        const response = await apiRequest("/api/card-statements", "GET");
+        if (!response.ok) throw new Error();
+        const result = await response.json();
+        if (!ignore) {
+          setStatements(result.statements);
+          setStatementError("");
+        }
+      } catch {
+        if (!ignore) setStatementError("Could not load card statements.");
+      }
+    }
+    void loadStatements();
+    return () => { ignore = true; };
+  }, [statementRefresh]);
 
   return (
     <div className="screen-stack">
@@ -1327,6 +1406,7 @@ function AccountsView({
               </Button>
             </div>
             {account.accountType === "investment" ? <InvestmentAccountDetail account={account} snapshot={snapshots.find((item) => item.accountId === account.id)} /> : null}
+            {account.accountType === "card" && account.id !== null ? <CardStatementDetail accountId={account.id} statements={statements} error={statementError} onSaved={() => setStatementRefresh((value) => value + 1)} /> : null}
           </article>
         )) : <EmptyState label="No accounts yet" />}
       </section>
