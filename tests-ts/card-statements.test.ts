@@ -188,6 +188,34 @@ test("imported remaining is authoritative and unused credit can fund a future ge
     { remainingById: { 3: 2000 }, creditCents: 0 });
 });
 
+test("pre-snapshot credit cannot indirectly pay authoritative debt when a later payment is deleted", () => {
+  const old = { groupId: "old", accountId: 1, amountCents: 20000 };
+  const later = { groupId: "later", accountId: 1, amountCents: 10000 };
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [old] },
+    { id: 3, accountId: 1, closingDate: "2024-03-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [old, later] }
+  ];
+  assert.deepEqual(reconcileStatementPayments(statements, [old, later]),
+    { remainingById: { 1: 0, 2: 0, 3: 10000 }, creditByAccount: { 1: 10000 } });
+  assert.deepEqual(reconcileStatementPayments(statements, [old, { ...later, amountCents: 4000 }]),
+    { remainingById: { 1: 0, 2: 6000, 3: 10000 }, creditByAccount: { 1: 10000 } });
+  assert.deepEqual(reconcileStatementPayments(statements, [old]),
+    { remainingById: { 1: 0, 2: 10000, 3: 10000 }, creditByAccount: { 1: 10000 } });
+
+  // Credit created after B can fill its restored debt, even when the same
+  // group also retains credit from before B was captured.
+  const increasedOld = { ...old, amountCents: 25000 };
+  const withNewCredit = [statements[0], statements[1], { ...statements[2], baseline: [increasedOld, later] }];
+  assert.deepEqual(reconcileStatementPayments(withNewCredit, [increasedOld]),
+    { remainingById: { 1: 0, 2: 5000, 3: 10000 }, creditByAccount: { 1: 10000 } });
+
+  // Nor may that old credit be laundered through a paid later snapshot.
+  const paidThird = [statements[0], statements[1], { ...statements[2], remainingAmountCents: 0 }];
+  assert.deepEqual(reconcileStatementPayments(paidThird, [old]),
+    { remainingById: { 1: 0, 2: 10000, 3: 0 }, creditByAccount: { 1: 0 } });
+});
+
 test("deleting an overpayment cannot inflate a later full snapshot and retained credit survives capture", () => {
   const statements = [
     { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [] },
