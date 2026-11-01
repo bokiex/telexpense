@@ -39,7 +39,7 @@ try {
   for (let i = 0; i < 2; i++) {
     run('docker', ['exec', '-i', name, 'psql', '-1', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], { input: schema });
   }
-  run('docker', ['exec', '-i', name, 'psql', '-1', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], { input: "grant usage on schema public to service_role; grant all on all tables in schema public to service_role; grant all on all sequences in schema public to service_role; grant execute on all functions in schema public to service_role; insert into public.users (telegram_user_id, first_name) values (900000000001, 'Synthetic'); notify pgrst, 'reload schema';" });
+  run('docker', ['exec', '-i', name, 'psql', '-1', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], { input: "grant usage on schema public to service_role; grant all on all tables in schema public to service_role; grant all on all sequences in schema public to service_role; grant execute on all functions in schema public to service_role; insert into public.users (telegram_user_id, first_name) values (900000000001, 'Synthetic'), (900000000002, 'Synthetic'), (900000000003, 'Synthetic'); notify pgrst, 'reload schema';" });
   const status = run(cli, ['status', '--workdir', workdir, '-o', 'env']);
   const values = Object.fromEntries(status.trim().split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1).replace(/^"|"$/g, '')]; }));
   if (values.API_URL !== 'http://127.0.0.1:54321' || !values.SERVICE_ROLE_KEY) throw new Error('Unverifiable local Supabase API target');
