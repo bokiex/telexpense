@@ -1,19 +1,9 @@
-import { createHmac } from "node:crypto";
 import { expect, test } from "@playwright/test";
-
-function initData(id: number, authDate = Math.floor(Date.now() / 1000)): string {
-  const token = process.env.E2E_BOT_TOKEN;
-  if (!token) throw new Error("E2E_BOT_TOKEN is required");
-  const params = new URLSearchParams({ auth_date: String(authDate), user: JSON.stringify({ id, first_name: "Synthetic" }) });
-  const check = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join("\n");
-  const secret = createHmac("sha256", "WebAppData").update(token).digest();
-  params.set("hash", createHmac("sha256", secret).update(check).digest("hex"));
-  return params.toString();
-}
+import { syntheticInitData } from "./auth";
 
 test("users cannot read or mutate another user's transaction", async ({ request }) => {
-  const owner = { "X-Telegram-Init-Data": initData(900000000002) };
-  const other = { "X-Telegram-Init-Data": initData(900000000003) };
+  const owner = { "X-Telegram-Init-Data": syntheticInitData(900000000002) };
+  const other = { "X-Telegram-Init-Data": syntheticInitData(900000000003) };
   const account = await request.post("/api/accounts", { headers: owner, data: { accountKey: "isolation-wallet", name: "Isolation Wallet", accountType: "cash" } });
   expect(account.ok()).toBeTruthy();
   const accountId = (await account.json()).id;
@@ -39,9 +29,9 @@ test("users cannot read or mutate another user's transaction", async ({ request 
 });
 
 test("invalid signature and expired signed data cannot access protected data", async ({ request }) => {
-  const valid = new URLSearchParams(initData(900000000002));
+  const valid = new URLSearchParams(syntheticInitData(900000000002));
   valid.set("user", JSON.stringify({ id: 900000000003, first_name: "Synthetic" }));
-  for (const value of [valid.toString(), initData(900000000002, Math.floor(Date.now() / 1000) - 86401)]) {
+  for (const value of [valid.toString(), syntheticInitData(900000000002, Math.floor(Date.now() / 1000) - 86401)]) {
     const response = await request.get("/api/transactions/history?month=2026-01", { headers: { "X-Telegram-Init-Data": value } });
     expect(response.status()).toBe(401);
   }

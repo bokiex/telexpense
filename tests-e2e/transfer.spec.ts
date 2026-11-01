@@ -1,30 +1,12 @@
-import { createHmac } from "node:crypto";
 import { expect, test } from "@playwright/test";
-
-// The disposable stack seeds this synthetic identity; the token never enters the browser.
-function syntheticInitData(): string {
-  const token = process.env.E2E_BOT_TOKEN;
-  if (!token) throw new Error("E2E_BOT_TOKEN must be set to the dedicated test bot token");
-  const params = new URLSearchParams({
-    auth_date: String(Math.floor(Date.now() / 1000)),
-    user: JSON.stringify({ id: 900000000001, first_name: "Synthetic" })
-  });
-  const check = [...params.entries()].sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}=${value}`).join("\n");
-  const secret = createHmac("sha256", "WebAppData").update(token).digest();
-  params.set("hash", createHmac("sha256", secret).update(check).digest("hex"));
-  return params.toString();
-}
+import { launchAuthenticated, syntheticInitData } from "./auth";
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, trace: "off", screenshot: "off", video: "off" });
 
 test("a grouped transfer persists both account balance changes", async ({ page }) => {
   page.setDefaultTimeout(10000);
-  const initData = syntheticInitData();
-  await page.goto("/");
-  await page.evaluate((data) => { window.location.hash = new URLSearchParams({ tgWebAppData: data }).toString(); }, initData);
-  await page.reload();
-  expect(await page.evaluate((data) => window.Telegram?.WebApp?.initData === data, initData)).toBe(true);
+  const initData = syntheticInitData(900000000001);
+  await launchAuthenticated(page, initData);
 
   const nav = page.getByRole("navigation", { name: "App sections" });
   await nav.getByRole("button", { name: "Accounts" }).click();
