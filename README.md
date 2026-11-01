@@ -57,7 +57,8 @@ from a non-bank transfer after its source is reclassified. For an imported
 snapshot, previously unallocated tracked credit is assumed to cover its
 already-paid portion first; untracked issuer payments cannot be distinguished
 from that credit. Subsequent edits or deletion of those tracked payments can
-restore debt.
+restore debt. Payments predating the first tracked snapshot do not establish
+available credit; with no snapshot, available tracked credit is zero.
 
 ## Environment Variables
 

@@ -41,7 +41,8 @@ export type CardPayment = PaymentBaseline & { accountId: number };
 // available older credit first. The issuer may actually have received an
 // untracked payment, but that distinction cannot be recovered from the input.
 // The remaining amount is authoritative at capture; later payment reductions
-// restore the attributed portion. Unused credit remains available.
+// restore the attributed portion. Unused credit remains available only when it
+// can be established from changes after a first snapshot.
 export function reconcileStatementPayments(
   statements: readonly ReconciliationStatement[], payments: readonly CardPayment[]
 ): { remainingById: Record<number, number>; creditByAccount: Record<number, number> } {
@@ -56,7 +57,7 @@ export function reconcileStatementPayments(
     const total = (values: readonly number[]) => values.reduce((sum, value) => sum + value, 0);
     const current = vector(accountPayments);
     if (!ordered.length) {
-      creditByAccount[accountId] = Math.max(0, total(current));
+      creditByAccount[accountId] = 0;
       continue;
     }
     const baselines = ordered.map((s) => vector(s.baseline));

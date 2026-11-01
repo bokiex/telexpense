@@ -75,6 +75,17 @@ test("allocates across independently captured statement baselines and carries ex
   assert.deepEqual(status(1000), { remainingById: { 1: 4000, 2: 4000 }, creditByAccount: { 1: 0 } });
 });
 
+test("reconciles divergent baselines with a replacement and later edits", () => {
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 5000, baseline: [{ groupId: "a", amountCents: 4000 }] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 10000, remainingAmountCents: 4000, baseline: [{ groupId: "b", amountCents: 3000 }] }
+  ];
+  assert.deepEqual(reconcileStatementPayments(statements, [
+    { accountId: 1, groupId: "a", amountCents: 2000 },
+    { accountId: 1, groupId: "b", amountCents: 6000 }
+  ]), { remainingById: { 1: 1000, 2: 4000 }, creditByAccount: { 1: 0 } });
+});
+
 test("moving or deleting a baseline payment restores only its original card", () => {
   const statements = [
     { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 5000, baseline: [{ groupId: "p", amountCents: 2000 }] },
@@ -84,9 +95,9 @@ test("moving or deleting a baseline payment restores only its original card", ()
     { remainingById: { 1: 7000, 2: 2000 }, creditByAccount: { 1: 0, 2: 0 } });
 });
 
-test("exposes payments made before any tracked statement as available credit", () => {
+test("does not infer available credit before a tracked statement", () => {
   assert.deepEqual(reconcileStatementPayments([], [{ groupId: "p", accountId: 2, amountCents: 4500 }]),
-    { remainingById: {}, creditByAccount: { 2: 4500 } });
+    { remainingById: {}, creditByAccount: { 2: 0 } });
 });
 
 test("a paid imported snapshot consumes prior credit and restores debt if that payment is reduced", () => {

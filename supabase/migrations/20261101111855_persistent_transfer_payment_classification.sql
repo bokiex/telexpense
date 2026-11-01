@@ -2,11 +2,16 @@
 -- inferring payment status from mutable account metadata or statement history.
 alter table public.transactions add column if not exists transfer_account_type text;
 
--- Backfill what can be inferred today. A captured source identity is stronger
--- evidence than the source account's current type. Source-less old baselines
--- cannot establish that a currently non-bank source was a payment.
+-- Captured baselines establish the destination card role even if the card was
+-- reclassified. A captured source identity also establishes the bank role;
+-- source-less old baselines cannot establish a non-bank source was a payment.
 update public.transactions t
 set transfer_account_type = case
+  when t.amount_cents > 0 and exists (
+    select 1 from public.card_statement_snapshots s
+    where s.telegram_user_id = t.telegram_user_id and s.account_id = t.account_id
+      and s.payment_baseline @> jsonb_build_array(jsonb_build_object('groupId', t.transfer_group_id::text))
+  ) then 'card'
   when t.amount_cents < 0 and exists (
     select 1 from public.transactions destination
     join public.card_statement_snapshots s
