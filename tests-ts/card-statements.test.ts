@@ -159,8 +159,8 @@ test("replays capture chronology, but allocates new payments by closing date", (
     { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
 });
 
-test("divergent 20-by-20 and 24-by-24 baselines finish and restore all deleted payments", () => {
-  // A subprocess makes the timeout effective even for a synchronous exponential implementation.
+test("divergent baselines scale to 120 statements and 600 groups and restore deleted payments", () => {
+  // A subprocess makes the timeout effective even for synchronous replay.
   const result = spawnSync(process.execPath, ["--import", "tsx", "tests-ts/fixtures/card-statement-scale.ts"],
     { cwd: process.cwd(), encoding: "utf8", timeout: 5000 });
   assert.equal(result.error, undefined, result.error?.message);

@@ -63,4 +63,76 @@ begin
   end if;
 end $$;
 SQL
-echo 'concurrent snapshot and grouped edit passed'
+# Exercise both capture paths in both positions. The waiter starts its RPC
+# before the payment edit commits and must read a new READ COMMITTED command
+# snapshot after the advisory lock is released (not its outer SELECT snapshot).
+for mode in create-first rebaseline-first; do
+  "${psql_cmd[@]}" <<'SQL'
+delete from public.card_statement_snapshots where telegram_user_id = 910099;
+insert into public.card_statement_snapshots (telegram_user_id, account_id, closing_date, due_date, original_amount_cents, remaining_amount_cents, payment_baseline)
+values (910099, 910099, '2024-02-29', '2024-03-20', 10000, 9000, null);
+select public.update_transfer_group(910099, '00000000-0000-0000-0000-000000000099', 910098, 910099, 'Payment', 1000, '2024-01-31', false);
+SQL
+  create="select public.create_card_statement_snapshot(910099, 910099, '2024-01-31', '2024-02-20', 10000, 9000)"
+  rebaseline="select public.rebaseline_legacy_card_statement(910099, 910099, '2024-02-29', '2024-03-20', 10000, 9000)"
+  if [[ $mode == create-first ]]; then first=$create; second=$rebaseline; else first=$rebaseline; second=$create; fi
+  PGAPPNAME=statement_capture_first "${psql_cmd[@]}" >"$log" 2>&1 <<SQL &
+begin;
+$first;
+select pg_sleep(5);
+commit;
+SQL
+  first_pid=$!
+  ready=0
+  for _ in {1..100}; do
+    if [[ $("${psql_cmd[@]}" -Atc "select count(*) from pg_stat_activity where application_name = 'statement_capture_first' and wait_event = 'PgSleep'") == 1 ]]; then ready=1; break; fi
+    sleep 0.03
+  done
+  if [[ $ready != 1 ]]; then echo 'first capture did not reach concurrent window' >&2; wait "$first_pid" || true; exit 1; fi
+  PGAPPNAME=statement_capture_second "${psql_cmd[@]}" -c "$second" >>"$log" 2>&1 &
+  second_pid=$!
+  ready=0
+  for _ in {1..100}; do
+    if [[ $("${psql_cmd[@]}" -Atc "select count(*) from pg_stat_activity where application_name = 'statement_capture_second' and wait_event_type = 'Lock' and wait_event = 'advisory'") == 1 ]]; then ready=1; break; fi
+    sleep 0.03
+  done
+  if [[ $ready != 1 ]]; then echo 'second capture did not wait for advisory lock' >&2; wait "$first_pid" || true; wait "$second_pid" || true; exit 1; fi
+  "${psql_cmd[@]}" -c "select public.update_transfer_group(910099, '00000000-0000-0000-0000-000000000099', 910098, 910099, 'Payment', 3000, '2024-01-31', false)"
+  wait "$first_pid" || { echo 'first capture failed' >&2; exit 1; }
+  wait "$second_pid" || { echo 'second capture failed' >&2; exit 1; }
+  "${psql_cmd[@]}" <<'SQL'
+do $$
+declare captured jsonb;
+begin
+  select jsonb_agg(jsonb_build_object('order', capture_order, 'baseline', payment_baseline) order by capture_order)
+    into captured from public.card_statement_snapshots where telegram_user_id = 910099;
+  if jsonb_array_length(captured) <> 2 or
+     (captured->0->'baseline'->0->>'amountCents')::integer is distinct from 1000 or
+     (captured->1->'baseline'->0->>'amountCents')::integer is distinct from 3000 then
+    raise exception 'capture order does not match observed baselines: %', captured;
+  end if;
+end $$;
+SQL
+done
+# Reject transaction-snapshot isolation rather than silently recording stale
+# baselines after waiting, for either entry point.
+"${psql_cmd[@]}" <<'SQL'
+begin isolation level repeatable read;
+do $$
+begin
+  begin
+    perform public.create_card_statement_snapshot(910099, 910099, '2024-04-30', '2024-05-20', 10000, 9000);
+    raise exception 'create unexpectedly accepted repeatable read';
+  exception when raise_exception then
+    if sqlerrm <> 'Card statement capture requires READ COMMITTED isolation' then raise; end if;
+  end;
+  begin
+    perform public.rebaseline_legacy_card_statement(910099, 910099, '2024-02-29', '2024-03-20', 10000, 9000);
+    raise exception 'rebaseline unexpectedly accepted repeatable read';
+  exception when raise_exception then
+    if sqlerrm <> 'Card statement capture requires READ COMMITTED isolation' then raise; end if;
+  end;
+end $$;
+rollback;
+SQL
+echo 'concurrent snapshots, rebaselines and grouped edit passed'
