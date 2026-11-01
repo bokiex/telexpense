@@ -33,7 +33,8 @@ test("card statement API authenticates, isolates cards and records snapshots wit
   const accounts = [
     { id: 1, telegram_user_id: 10, account_type: "card", balance_cents: -15000 },
     { id: 2, telegram_user_id: 20, account_type: "card", balance_cents: -9000 },
-    { id: 3, telegram_user_id: 10, account_type: "cash", balance_cents: 3000 }
+    { id: 3, telegram_user_id: 10, account_type: "cash", balance_cents: 3000 },
+    { id: 4, telegram_user_id: 10, account_type: "card", balance_cents: -3000 }
   ];
   const transactions = [{ id: 1, telegram_user_id: 10, account_id: 1, amount_cents: -15000 }];
   const beforeAccounts = structuredClone(accounts);
@@ -45,7 +46,7 @@ test("card statement API authenticates, isolates cards and records snapshots wit
     const method = options?.method || "GET";
     const params = JSON.parse(String(options?.body)) as Record<string, unknown>;
     const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
-    if (table === "read_card_statement_inputs") return json({ statements: statements.filter((s) => s.telegram_user_id === params.target_user_id), payments: [] });
+    if (table === "read_card_statement_inputs") return json({ statements: statements.filter((s) => s.telegram_user_id === params.target_user_id && accounts.some((a) => a.id === s.account_id && a.telegram_user_id === s.telegram_user_id && a.account_type === "card")), payments: [] });
     if (table === "rebaseline_legacy_card_statement") {
       const statement = statements.find((s) => s.telegram_user_id === params.target_user_id && s.account_id === params.target_account_id && s.closing_date === params.target_closing_date && s.payment_baseline === null);
       if (!statement) return json(null);
@@ -83,12 +84,14 @@ test("card statement API authenticates, isolates cards and records snapshots wit
   assert.deepEqual(accounts, beforeAccounts);
   assert.deepEqual(transactions, beforeTransactions);
   statements[1].payment_baseline = null;
+  statements.push({ id: 92, telegram_user_id: 10, account_id: 3, closing_date: "2023-12-31", due_date: "2024-01-20", original_amount_cents: 1000, remaining_amount_cents: 1000, payment_baseline: null });
+  statements.push({ id: 93, telegram_user_id: 10, account_id: 4, closing_date: "2024-01-31", due_date: "2024-02-20", original_amount_cents: 3000, remaining_amount_cents: 3000, payment_baseline: [] });
   const legacy = await GET(request("GET", 10));
-  assert.equal(legacy.status, 409);
-  assert.match((await legacy.json()).error, /predates payment baseline/);
+  assert.equal(legacy.status, 200);
+  assert.deepEqual(await legacy.json(), { statements: [{ id: 93, accountId: 4, closingDate: "2024-01-31", dueDate: "2024-02-20", originalAmountCents: 3000, remainingAmountCents: 3000 }], legacyAccounts: [{ accountId: 1, closingDates: ["2024-02-29"] }] });
   assert.equal((await POST(request("POST", 20, JSON.stringify({ ...input, replaceLegacy: true })))).status, 404);
   assert.equal((await POST(request("POST", 10, JSON.stringify({ ...input, replaceLegacy: true })))).status, 201);
-  assert.deepEqual(await (await GET(request("GET", 10))).json(), { statements: [{ id: 91, ...input }] });
+  assert.deepEqual(await (await GET(request("GET", 10))).json(), { statements: [{ id: 91, ...input }, { id: 93, accountId: 4, closingDate: "2024-01-31", dueDate: "2024-02-20", originalAmountCents: 3000, remainingAmountCents: 3000 }] });
   assert.equal((await POST(request("POST", 10, JSON.stringify({ ...input, replaceLegacy: true })))).status, 404);
 });
 
@@ -121,7 +124,7 @@ test("authenticated reads reconcile grouped bank payments without modifying bala
   amount = 1000;
   assert.equal((await remaining(10))[0].remainingAmountCents, 10000);
   amount = 0;
-  assert.equal((await remaining(10))[0].remainingAmountCents, 11000);
+  assert.equal((await remaining(10))[0].remainingAmountCents, 10000);
   assert.equal(accounts[0].balance_cents, -4000);
   assert.equal(accounts[1].balance_cents, 4000);
 });

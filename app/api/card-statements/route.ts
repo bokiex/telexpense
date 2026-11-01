@@ -25,17 +25,16 @@ export async function GET(request: NextRequest) {
   // Existing installations did not record this information; guessing would
   // silently treat edited or deleted historical payments as snapshot history.
   const legacy = rows.filter((row) => row.payment_baseline === null);
-  if (legacy.length) {
-    const dates = legacy.map((row) => row.closing_date).join(", ");
-    return NextResponse.json({ error: `A statement predates payment baseline tracking. Re-enter each legacy statement using its current remaining amount and closing date (${dates}) before status can be calculated.` }, { status: 409 });
-  }
-  const snapshots = rows.map((row) => ({ id: row.id, accountId: row.account_id, closingDate: row.closing_date,
-    remainingAmountCents: row.remaining_amount_cents, baseline: row.payment_baseline ?? [] }));
+  const affected = new Set(legacy.map((row) => row.account_id));
+  const usable = rows.filter((row) => !affected.has(row.account_id));
+  const snapshots = usable.map((row) => ({ id: row.id, accountId: row.account_id, closingDate: row.closing_date,
+    originalAmountCents: row.original_amount_cents, remainingAmountCents: row.remaining_amount_cents, baseline: row.payment_baseline ?? [] }));
   const { remainingById } = reconcileStatementPayments(snapshots, data.payments as CardPayment[]);
-  return NextResponse.json({ statements: rows.map((row) => ({
+  return NextResponse.json({ statements: usable.map((row) => ({
     id: row.id, accountId: row.account_id, closingDate: row.closing_date, dueDate: row.due_date,
     originalAmountCents: row.original_amount_cents, remainingAmountCents: remainingById[row.id]
-  })) });
+  })), ...(legacy.length ? { legacyAccounts: [...affected].map((accountId) => ({ accountId,
+    closingDates: legacy.filter((row) => row.account_id === accountId).map((row) => row.closing_date) })) } : {}) });
 }
 
 export async function POST(request: NextRequest) {

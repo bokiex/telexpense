@@ -1350,6 +1350,7 @@ function AccountsView({
   const netWorthTotal = netWorthWithPortfolioValues(accounts, snapshots);
   const [statements, setStatements] = useState<CardStatement[] | null>(null);
   const [statementError, setStatementError] = useState("");
+  const [legacyStatements, setLegacyStatements] = useState<{ accountId: number; closingDates: string[] }[]>([]);
   const [statementRefresh, setStatementRefresh] = useState(0);
 
   useEffect(() => {
@@ -1361,6 +1362,7 @@ function AccountsView({
         if (!response.ok) throw new Error(result.error || "Could not load card statements.");
         if (!ignore) {
           setStatements(result.statements);
+          setLegacyStatements(result.legacyAccounts ?? []);
           setStatementError("");
         }
       } catch (error) {
@@ -1408,7 +1410,10 @@ function AccountsView({
               </Button>
             </div>
             {account.accountType === "investment" ? <InvestmentAccountDetail account={account} snapshot={snapshots.find((item) => item.accountId === account.id)} /> : null}
-            {account.accountType === "card" && account.id !== null ? <CardStatementDetail accountId={account.id} statements={statements} error={statementError} onSaved={() => setStatementRefresh((value) => value + 1)} /> : null}
+            {account.accountType === "card" && account.id !== null ? <CardStatementDetail accountId={account.id} statements={statements} error={statementError || (() => {
+              const legacy = legacyStatements.find((item) => item.accountId === account.id);
+              return legacy ? `Statements predate payment baseline tracking. Re-enter each legacy statement using its current remaining amount and closing date (${legacy.closingDates.join(", ")}) before this card's status can be calculated.` : "";
+            })()} onSaved={() => setStatementRefresh((value) => value + 1)} /> : null}
           </article>
         )) : <EmptyState label="No accounts yet" />}
       </section>

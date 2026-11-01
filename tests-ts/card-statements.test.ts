@@ -24,7 +24,7 @@ test("carries excess payment forward without changing snapshot amounts", () => {
 });
 
 test("baseline payment edits and deletions change the snapshot without replaying prior payments", () => {
-  const statements = [{ id: 1, accountId: 1, closingDate: "2024-01-31", remainingAmountCents: 5000,
+  const statements = [{ id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 5000,
     baseline: [{ groupId: "old", amountCents: 3000 }] }];
   const payment = (amountCents: number) => [{ accountId: 1, groupId: "old", amountCents }];
   assert.deepEqual(reconcileStatementPayments(statements, payment(3000)), { remainingById: { 1: 5000 }, creditByAccount: { 1: 0 } });
@@ -37,8 +37,8 @@ test("baseline payment edits and deletions change the snapshot without replaying
 
 test("allocates across independently captured statement baselines and carries excess", () => {
   const statements = [
-    { id: 1, accountId: 1, closingDate: "2024-01-31", remainingAmountCents: 5000, baseline: [] },
-    { id: 2, accountId: 1, closingDate: "2024-02-29", remainingAmountCents: 4000, baseline: [{ groupId: "p", amountCents: 3000 }] }
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 5000, baseline: [] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 20000, remainingAmountCents: 4000, baseline: [{ groupId: "p", amountCents: 3000 }] }
   ];
   const status = (amountCents: number) => reconcileStatementPayments(statements, [{ accountId: 1, groupId: "p", amountCents }]);
   assert.deepEqual(status(3000), { remainingById: { 1: 2000, 2: 4000 }, creditByAccount: { 1: 0 } });
@@ -49,8 +49,8 @@ test("allocates across independently captured statement baselines and carries ex
 
 test("moving or deleting a baseline payment restores only its original card", () => {
   const statements = [
-    { id: 1, accountId: 1, closingDate: "2024-01-31", remainingAmountCents: 5000, baseline: [{ groupId: "p", amountCents: 2000 }] },
-    { id: 2, accountId: 2, closingDate: "2024-01-31", remainingAmountCents: 4000, baseline: [] }
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 5000, baseline: [{ groupId: "p", amountCents: 2000 }] },
+    { id: 2, accountId: 2, closingDate: "2024-01-31", originalAmountCents: 20000, remainingAmountCents: 4000, baseline: [] }
   ];
   assert.deepEqual(reconcileStatementPayments(statements, [{ groupId: "p", accountId: 2, amountCents: 2000 }]),
     { remainingById: { 1: 7000, 2: 2000 }, creditByAccount: { 1: 0, 2: 0 } });
@@ -67,4 +67,22 @@ test("rejects invalid dates, identities, and amounts", () => {
     { originalAmountCents: -1 }, { remainingAmountCents: -1 }, { remainingAmountCents: 12001 },
     { originalAmountCents: 1.5 }, { originalAmountCents: "12000" }, { originalAmountCents: 2147483648 }
   ]) assert.equal(parseStatementSnapshot({ ...snapshot, ...patch }), null);
+});
+
+test("deleting an overpayment cannot inflate a later full snapshot and retained credit survives capture", () => {
+  const statements = [
+    { id: 1, accountId: 1, closingDate: "2024-01-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [] },
+    { id: 2, accountId: 1, closingDate: "2024-02-29", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [{ groupId: "p", amountCents: 20000 }] }
+  ];
+  assert.deepEqual(reconcileStatementPayments(statements, []), { remainingById: { 1: 10000, 2: 10000 }, creditByAccount: { 1: 0 } });
+  assert.deepEqual(reconcileStatementPayments(statements, [{ groupId: "p", accountId: 1, amountCents: 20000 }]),
+    { remainingById: { 1: 0, 2: 10000 }, creditByAccount: { 1: 10000 } });
+  assert.deepEqual(reconcileStatementPayments(statements, [{ groupId: "p", accountId: 1, amountCents: 25000 }]),
+    { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 10000 } });
+  const third = { id: 3, accountId: 1, closingDate: "2024-03-31", originalAmountCents: 10000, remainingAmountCents: 10000, baseline: [{ groupId: "p", amountCents: 20000 }] };
+  assert.deepEqual(reconcileStatementPayments([...statements, third], [{ groupId: "p", accountId: 1, amountCents: 20000 }]),
+    { remainingById: { 1: 0, 2: 10000, 3: 10000 }, creditByAccount: { 1: 10000 } });
+  const partiallyPaid = [statements[0], { ...statements[1], remainingAmountCents: 5000 }];
+  assert.deepEqual(reconcileStatementPayments(partiallyPaid, [{ groupId: "p", accountId: 1, amountCents: 10000 }]),
+    { remainingById: { 1: 0, 2: 5000 }, creditByAccount: { 1: 0 } });
 });

@@ -34,17 +34,25 @@ begin
   if public.rebaseline_legacy_card_statement(910001, 910002, '2024-01-31', '2024-02-20', 10000, 7000) is distinct from snapshot_id then
     raise exception 'legacy baseline was not replaced';
   end if;
-  update public.transactions set amount_cents = case when amount_cents < 0 then -1000 else 1000 end
-    where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001';
+  perform public.update_transfer_group(910001, '00000000-0000-0000-0000-000000000001', 910001, 910002, 'Edited payment', 1000, '2024-01-31', false);
   data := public.read_card_statement_inputs(910001);
   if (data->'payments'->0->>'amountCents')::integer <> 1000
      or (data->'statements'->0->'payment_baseline'->0->>'amountCents')::integer <> 3000 then
     raise exception 'edit did not preserve the baseline';
   end if;
-  delete from public.transactions where telegram_user_id = 910001 and transfer_group_id = '00000000-0000-0000-0000-000000000001';
+  perform public.delete_transfer_group(910001, '00000000-0000-0000-0000-000000000001');
   data := public.read_card_statement_inputs(910001);
   if jsonb_array_length(data->'payments') <> 0 or jsonb_array_length(data->'statements'->0->'payment_baseline') <> 1 then
     raise exception 'deletion did not preserve the baseline';
+  end if;
+  update public.card_statement_snapshots set payment_baseline = null where id = snapshot_id;
+  update public.accounts set account_type = 'cash' where id = 910002 and telegram_user_id = 910001;
+  if jsonb_array_length(public.read_card_statement_inputs(910001)->'statements') <> 0 then
+    raise exception 'non-card legacy snapshot leaked into card status';
+  end if;
+  update public.accounts set account_type = 'card' where id = 910002 and telegram_user_id = 910001;
+  if jsonb_array_length(public.read_card_statement_inputs(910001)->'statements') <> 1 then
+    raise exception 'legacy snapshot lost after account becomes a card again';
   end if;
 end $$;
 rollback;

@@ -26,7 +26,7 @@ export function allocateStatementPayments(
 
 export type PaymentBaseline = { groupId: string; amountCents: number };
 export type ReconciliationStatement = {
-  id: number; accountId: number; closingDate: string; remainingAmountCents: number;
+  id: number; accountId: number; closingDate: string; originalAmountCents: number; remainingAmountCents: number;
   baseline: readonly PaymentBaseline[];
 };
 export type CardPayment = PaymentBaseline & { accountId: number };
@@ -60,17 +60,35 @@ export function reconcileStatementPayments(
       if (cached !== undefined) return cached;
       const i = count - 1;
       const before = allocatedThrough(i, total);
-      const available = total - baselines[i] - before + allocatedThrough(i, baselines[i]);
-      const result = before + Math.min(ordered[i].remainingAmountCents, available);
+      let available = total - baselines[i] - before + allocatedThrough(i, baselines[i]);
+      // Previously unallocated credit absorbs a decrease before debt on a
+      // later imported snapshot can be restored.
+      if (available < 0) available += Math.min(-available, creditThrough(i, baselines[i]));
+      const restoredLimit = ordered[i].remainingAmountCents - ordered[i].originalAmountCents;
+      const result = before + Math.max(restoredLimit, Math.min(ordered[i].remainingAmountCents, available));
       memo.set(key, result);
       return result;
+    };
+    // A newly imported snapshot does not consume pre-existing credit: its
+    // remaining amount already reflects whatever the issuer included. Carry
+    // the credit separately, and only allocate changes since that baseline.
+    const creditMemo = new Map<string, number>();
+    const creditThrough = (count: number, total: number): number => {
+      if (!count) return 0;
+      const key = `${count}:${total}`;
+      const cached = creditMemo.get(key);
+      if (cached !== undefined) return cached;
+      const baseline = baselines[count - 1];
+      const credit = Math.max(0, creditThrough(count - 1, baseline) + total - baseline -
+        allocatedThrough(count, total) + allocatedThrough(count, baseline));
+      creditMemo.set(key, credit);
+      return credit;
     };
     ordered.forEach((statement, i) => {
       const paid = allocatedThrough(i + 1, current) - allocatedThrough(i, current);
       remainingById[statement.id] = statement.remainingAmountCents - paid;
     });
-    const lastBaseline = baselines[baselines.length - 1];
-    creditByAccount[accountId] = Math.max(0, current - lastBaseline - allocatedThrough(ordered.length, current) + allocatedThrough(ordered.length, lastBaseline));
+    creditByAccount[accountId] = creditThrough(ordered.length, current);
   }
   return { remainingById, creditByAccount };
 }
