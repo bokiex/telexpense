@@ -913,6 +913,50 @@ export async function deleteRecurringRule(telegramUserId: number, ruleId: number
   if (!data) throw new Error("Recurring rule is not available.");
 }
 
+export class CategoryIdentityConflict extends Error {
+  constructor() {
+    super("Category source key is already used by a different category identity. Choose a different category name.");
+  }
+}
+
+// Never update identity columns on a key conflict. Apart from preserving historical
+// text-based financial references, the conditional update protects older schemas
+// and concurrent writers that do not yet have the immutable-identity trigger.
+async function saveCategoryMetadata(
+  telegramUserId: number,
+  sourceKey: string,
+  sourceName: string,
+  metadata: { name: string; budget_group: BudgetGroup; color: string; icon: string; active: boolean }
+) {
+  const supabase = createSupabaseAdmin();
+  sourceKey = normalizeIdentity(sourceKey);
+  sourceName = normalizeIdentity(sourceName);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: existing, error: lookupError } = await supabase.from("categories")
+      .select("id, source_name").eq("telegram_user_id", telegramUserId).eq("source_key", sourceKey);
+    if (lookupError) throw lookupError;
+    const row = existing?.[0];
+    if (row) {
+      if (normalizeIdentity(row.source_name) !== sourceName) throw new CategoryIdentityConflict();
+      const { data, error } = await supabase.from("categories")
+        .update({ ...metadata, updated_at: new Date().toISOString() })
+        .eq("telegram_user_id", telegramUserId).eq("id", row.id)
+        .eq("source_key", sourceKey).eq("source_name", row.source_name).select("id");
+      if (error) throw error;
+      if (data?.length) return Number(data[0].id);
+      continue;
+    }
+    const { data, error } = await supabase.from("categories")
+      .insert({ telegram_user_id: telegramUserId, source_key: sourceKey, source_name: sourceName,
+        ...metadata, updated_at: new Date().toISOString() }).select("id");
+    if (!error && data?.length) return Number(data[0].id);
+    if (error && !isUniqueViolation(error)) throw error;
+    // Another insert may have won the source-key race; re-read before touching it.
+    if (error && attempt === 2) throw error;
+  }
+  throw new CategoryIdentityConflict();
+}
+
 export async function upsertCategory(
   telegramUserId: number,
   values: {
@@ -924,29 +968,9 @@ export async function upsertCategory(
     icon: string;
   }
 ) {
-  const supabase = createSupabaseAdmin();
-  const sourceKey = normalizeIdentity(values.sourceKey);
-  const sourceName = normalizeIdentity(values.sourceName);
-  const { data, error } = await supabase
-    .from("categories")
-    .upsert(
-      {
-        telegram_user_id: telegramUserId,
-        source_key: sourceKey,
-        source_name: sourceName,
-        name: values.name,
-        budget_group: values.group,
-        color: values.color,
-        icon: values.icon,
-        active: true,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "telegram_user_id,source_key" }
-    )
-    .select("id")
-    .single();
-  if (error) throw error;
-  return Number(data.id);
+  return saveCategoryMetadata(telegramUserId, values.sourceKey, values.sourceName, {
+    name: values.name, budget_group: values.group, color: values.color, icon: values.icon, active: true
+  });
 }
 
 export async function addSubcategory(
@@ -1018,25 +1042,14 @@ function isUniqueViolation(error: { code?: string }) {
 }
 
 export async function deleteCategoryMetadata(telegramUserId: number, sourceKey: string, sourceName: string) {
-  const supabase = createSupabaseAdmin();
-  const { error } = await supabase
-    .from("categories")
-    .upsert(
-      {
-        telegram_user_id: telegramUserId,
-        source_key: sourceKey,
-        source_name: sourceName.toLowerCase(),
-        name: titleCase(sourceName),
-        budget_group: "Needs",
-        color: "#4ade80",
-        icon: "Wallet",
-        active: false,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "telegram_user_id,source_key" }
-    );
-  if (error && isMissingSchemaError(error)) return;
-  if (error) throw error;
+  try {
+    await saveCategoryMetadata(telegramUserId, sourceKey, sourceName, {
+      name: titleCase(sourceName), budget_group: "Needs", color: "#4ade80", icon: "Wallet", active: false
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && isMissingSchemaError(error)) return;
+    throw error;
+  }
 }
 
 export async function getStoredCategories(telegramUserId: number): Promise<StoredCategory[]> {
@@ -1406,16 +1419,24 @@ export async function materializeRecurringTransactions(month: string, batchSize 
   let batchesProcessed = 0;
   while (rulesMaterialized < maxRules) {
     const requested = Math.min(batchSize, maxRules - rulesMaterialized);
-    const { data, error } = telegramUserId === undefined
-      ? await supabase.rpc("materialize_recurring_transactions", {
+    const runBatch = () => telegramUserId === undefined
+      ? supabase.rpc("materialize_recurring_transactions", {
           target_month: month,
           batch_size: requested
         })
-      : await supabase.rpc("materialize_recurring_transactions_for_user", {
+      : supabase.rpc("materialize_recurring_transactions_for_user", {
           target_month: month,
           batch_size: requested,
           target_telegram_user_id: telegramUserId
         });
+    let response = await runBatch();
+    // PostgreSQL rolls back the entire RPC on either error. Retry this batch,
+    // not previously committed batches, with a small jitter to reduce contention.
+    for (let retry = 0; retry < 2 && (response.error?.code === "40P01" || response.error?.code === "40001"); retry++) {
+      await new Promise((resolve) => setTimeout(resolve, (25 * 2 ** retry) + Math.random() * 25));
+      response = await runBatch();
+    }
+    const { data, error } = response;
     if (error && isMissingSchemaError(error)) break;
     if (error) throw error;
     const result = Array.isArray(data) ? data[0] : data;

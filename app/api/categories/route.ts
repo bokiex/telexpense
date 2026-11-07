@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addSubcategory, deleteCategoryBudgets, deleteCategoryMetadata, upsertCategory } from "@/lib/repository";
+import { addSubcategory, CategoryIdentityConflict, deleteCategoryBudgets, deleteCategoryMetadata, upsertCategory } from "@/lib/repository";
 import { requireEnv } from "@/lib/env";
 import { validateTelegramInitData } from "@/lib/telegram";
 import type { BudgetGroup } from "@/lib/repository";
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ ok: true, id });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 401 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: error instanceof CategoryIdentityConflict ? 409 : 401 });
   }
 }
 
@@ -73,7 +73,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 401 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: error instanceof CategoryIdentityConflict ? 409 : 401 });
   }
 }
 

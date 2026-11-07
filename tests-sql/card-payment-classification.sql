@@ -16,11 +16,19 @@ insert into public.transactions (telegram_user_id, kind, account_id, transfer_gr
 do $$
 declare g uuid := '10000000-0000-0000-0000-000000000001';
 begin
-  -- Malformed or cross-owned groups must not hide extra legs via a join.
+  -- Owner-scoped references reject a cross-owned leg at insertion.
+  begin
+    insert into public.transactions (telegram_user_id, kind, account_id, transfer_group_id, description, amount_cents)
+    values (920001, 'transfer', 920005, g, 'Cross-owned extra leg', 0);
+    raise exception 'cross-owned account accepted';
+  exception when foreign_key_violation then null;
+  end;
+  -- An extra same-owner leg still makes the group malformed and must not be
+  -- hidden by the account join in payment classification.
   insert into public.transactions (telegram_user_id, kind, account_id, transfer_group_id, description, amount_cents)
-  values (920001, 'transfer', 920005, g, 'Cross-owned extra leg', 0);
+  values (920001, 'transfer', 920002, g, 'Same-owner extra leg', 0);
   if exists (select 1 from public.card_statement_payments(920001) where group_id = g) then
-    raise exception 'malformed group with a cross-owned leg accepted';
+    raise exception 'malformed group with an extra leg accepted';
   end if;
   delete from public.transactions where telegram_user_id = 920001 and transfer_group_id = g and amount_cents = 0;
   -- No snapshot has ever captured either group.

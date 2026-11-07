@@ -82,6 +82,39 @@ try {
   for (let i = 0; i < 2; i++) {
     await run('docker', ['exec', '-i', name, 'psql', '-1', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], { input: schema });
   }
+  // Exercise the forward migration against legacy violations as well as new
+  // inserts/updates. Roll back all synthetic data and DDL before browser tests.
+  const domainMigration = readFileSync(join(root, 'supabase/migrations/20261107113216_schema_domain_invariants.sql'), 'utf8');
+  const domainFixture = readFileSync(join(root, 'tests-ts/fixtures/schema-domain-invariants.sql'), 'utf8')
+    .replaceAll('-- MIGRATION --', () => domainMigration);
+  await run('docker', ['exec', '-i', name, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], { input: `begin;\n${domainFixture}\nrollback;` });
+
+  // Each SQL fixture rolls back DDL and data. Expand its known \ir includes
+  // locally because the container has no repo mount. Concurrency fixtures
+  // commit setup and need independent connections, so run everything serially
+  // on the disposable database before any browser data exists.
+  for (const fixture of [
+    'budget-schema-repair.sql', 'owner-scoped-references.sql',
+    'card-payment-classification.sql', 'card-payment-classification-backfill.sql',
+    'card-statement-baselines.sql', 'card-statement-capture-order.sql',
+    'recurring-legacy-ownership.sql', 'schema-reapply-legacy-violations.sql',
+  ]) {
+    console.log(`Running SQL fixture ${fixture}...`);
+    const source = readFileSync(join(root, 'tests-sql', fixture), 'utf8');
+    const sql = source.replace(/^\\ir \.\.\/supabase\/(schema\.sql|migrations\/[\w.-]+\.sql)[ \t]*$/gm,
+      (_, file) => readFileSync(join(root, 'supabase', file), 'utf8'));
+    if (/^\\ir\b/m.test(sql)) throw new Error(`Unexpanded SQL include in fixture: ${fixture}`);
+    try {
+      await run('docker', ['exec', '-i', name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], { input: sql });
+    } catch { throw new Error(`SQL fixture failed: ${fixture}`); }
+  }
+  for (const fixture of ['card-statement-concurrency.sh', 'owner-budget-concurrency.sh', 'recurring-materialization-concurrency.sh']) {
+    console.log(`Running concurrency fixture ${fixture}...`);
+    const script = readFileSync(join(root, 'tests-sql', fixture));
+    try {
+      await run('docker', ['exec', '-i', name, 'env', '-i', 'PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/tmp', 'PGUSER=postgres', 'PGDATABASE=postgres', 'bash', '-s'], { input: script });
+    } catch { throw new Error(`Concurrency fixture failed: ${fixture}`); }
+  }
   await run('docker', ['exec', '-i', name, 'psql', '-1', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], { input: "grant usage on schema public to service_role; grant all on all tables in schema public to service_role; grant all on all sequences in schema public to service_role; grant execute on all functions in schema public to service_role; insert into public.users (telegram_user_id, first_name) values (900000000001, 'Synthetic'), (900000000002, 'Synthetic'), (900000000003, 'Synthetic'); notify pgrst, 'reload schema';" });
   const status = await run(cli, ['status', '--workdir', workdir, '-o', 'env']);
   const values = Object.fromEntries(status.trim().split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1).replace(/^"|"$/g, '')]; }));

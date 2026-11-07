@@ -1,6 +1,22 @@
 # Local browser E2E
 
-`npm run test:e2e` starts a disposable local Supabase stack and the actual Next.js app, runs Playwright headlessly at a mobile viewport, and removes the stack and its database afterwards. It uses the fresh-install `supabase/schema.sql` snapshot in a transaction (not the upgrade migrations, which require an existing older installation), then seeds separate synthetic users for the browser journey and API isolation checks. Each invocation gets a fresh project and database. Tests create the rest of their data through the UI. The machine's current date is used, so the transaction is entered and checked in the current month. The recurring journey uses UTC and schedules day 1, which is due throughout every month, without replacing the application clock or scheduling logic.
+`npm run test:e2e` starts a disposable local Supabase stack and the actual Next.js app, runs Playwright headlessly at a mobile viewport, and removes the stack and its database afterwards. It applies the fresh-install `supabase/schema.sql` snapshot in a transaction, exercises selected migrations inside rolled-back fixtures, then seeds separate synthetic users for the browser journey and API isolation checks. Each invocation gets a fresh project and database. Tests create the rest of their data through the UI. The machine's current date is used, so the transaction is entered and checked in the current month. The recurring journey uses UTC and schedules day 1, which is due throughout every month, without replacing the application clock or scheduling logic.
+
+## Database fixtures
+
+The E2E command also runs database tests against the verified disposable container, before seeding browser users. After applying `schema.sql` twice, it runs `tests-ts/fixtures/schema-domain-invariants.sql` with its migration substituted inside a transaction that is rolled back. It then runs these fixtures **serially**, stopping on the first failure:
+
+1. `tests-sql/budget-schema-repair.sql` simulates older and partially upgraded budget schemas, checks upserts, ownership and foreign-key repair, and reruns the migration.
+2. `tests-sql/owner-scoped-references.sql` checks ownership and parent relationships, deletion behavior, and installation over historical violations, including migration reruns.
+3. `tests-sql/card-payment-classification.sql` and `card-payment-classification-backfill.sql` check transfer classification, recurring materialization and upgrade backfill.
+4. `tests-sql/card-statement-baselines.sql` and `card-statement-capture-order.sql` check card baselines and the capture-order upgrade.
+5. `tests-sql/recurring-legacy-ownership.sql` checks global and scoped materialization in the presence of historical cross-owner account references.
+6. `tests-sql/schema-reapply-legacy-violations.sql` checks that reapplying the schema preserves historical constraint violations while enforcing constraints on new changes.
+7. `tests-sql/card-statement-concurrency.sh` checks concurrent payment edits and statement captures/rebaselines.
+8. `tests-sql/owner-budget-concurrency.sh` checks budget insertion against concurrent category identity changes and deletion.
+9. `tests-sql/recurring-materialization-concurrency.sh` checks competing global and user-scoped materialization, locking, batching and isolation levels.
+
+The eight SQL files manage their own `BEGIN`/`ROLLBACK`; the runner expands their relative schema and migration includes before streaming them to `psql -X` with `ON_ERROR_STOP`. The concurrency tests necessarily commit setup and use independent PostgreSQL sessions; each cleans up its synthetic users, and the entire database is removed even on failure. They must not run in parallel or against a shared, real, or non-disposable database. Rollbacks do not rewind sequences, but these synthetic IDs and sequence gaps do not affect the browser assertions. The harness reports the failing fixture name without printing SQL output, which may contain data; debug only on a private disposable instance.
 
 ## Prerequisites
 

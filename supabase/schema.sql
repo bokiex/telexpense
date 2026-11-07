@@ -224,9 +224,28 @@ alter table public.transactions
 alter table public.transactions
   add column if not exists subcategory_id bigint references public.subcategories(id) on delete set null;
 
+-- One-time legacy repairs must not revisit rows preserved by either invariant
+-- migration: PostgreSQL rechecks NOT VALID checks on UPDATE, and budget
+-- reconstruction would delete/reinsert the historical rows. Later remediation
+-- must be explicit and audited instead.
+create temporary table schema_legacy_repairs on commit drop as
+select 1 as enabled
+where not exists (
+  select 1 from pg_catalog.pg_constraint
+  where connamespace = 'public'::regnamespace
+    and (conname like '%\_owner\_%' escape '\'
+      or conname like '%\_parent\_subcategory\_fk' escape '\'
+      or conname like '%\_subcategory\_requires\_category\_check' escape '\'
+      or conname in ('budgets_month_format_check', 'portfolio_snapshots_month_format_check',
+        'recurring_rule_runs_month_format_check', 'budgets_nonnegative_amount_check',
+        'portfolio_snapshots_nonnegative_value_check', 'recurring_rules_positive_amount_check',
+        'transactions_ungrouped_sign_check'))
+);
+
 update public.transactions t
    set subcategory_id = null
  where subcategory_id is not null
+   and exists (select 1 from schema_legacy_repairs)
    and not exists (
      select 1 from public.subcategories s where s.id = t.subcategory_id
    );
@@ -336,6 +355,9 @@ create index if not exists portfolio_snapshots_user_month_idx
 create index if not exists recurring_rules_user_idx
   on public.recurring_rules (telegram_user_id, active);
 
+create index if not exists recurring_rules_active_traversal_idx
+  on public.recurring_rules (telegram_user_id, id) where active;
+
 create index if not exists recurring_rule_runs_user_month_idx
   on public.recurring_rule_runs (telegram_user_id, month);
 
@@ -420,7 +442,8 @@ create temporary table account_merge_by_key on commit drop as
 select id, min(id) over (
   partition by telegram_user_id, public.normalize_identity(account_key)
 ) keeper
-from public.accounts;
+from public.accounts
+where exists (select 1 from schema_legacy_repairs);
 
 do $$
 begin
@@ -482,7 +505,8 @@ delete from public.accounts a using account_merge_by_key m
 where a.id = m.id and m.id <> m.keeper;
 
 update public.accounts
-set account_key = public.normalize_identity(account_key), updated_at = now();
+set account_key = public.normalize_identity(account_key), updated_at = now()
+where exists (select 1 from schema_legacy_repairs);
 
 create unique index if not exists accounts_user_canonical_key_uidx
   on public.accounts (telegram_user_id, public.normalize_identity(account_key));
@@ -498,6 +522,7 @@ from (
   union select telegram_user_id, category from public.recurring_rules
 ) source
 where btrim(source.category) <> ''
+  and exists (select 1 from schema_legacy_repairs)
   and not exists (
     select 1
     from public.categories existing
@@ -512,6 +537,7 @@ on conflict do nothing;
 update public.transactions t set category_id = c.id
 from public.categories c
 where t.category_id is null
+  and exists (select 1 from schema_legacy_repairs)
   and c.telegram_user_id = t.telegram_user_id
   and public.normalize_identity(c.source_name) = public.normalize_identity(t.category);
 
@@ -520,7 +546,7 @@ begin
   if exists (
     select 1 from information_schema.columns
     where table_schema = 'public' and table_name = 'transactions' and column_name = 'account'
-  ) then
+  ) and exists (select 1 from schema_legacy_repairs) then
     execute $sql$
       insert into public.accounts (telegram_user_id, account_key, name, account_type, color, icon)
       select distinct telegram_user_id, public.normalize_identity(account),
@@ -584,7 +610,8 @@ set opening_balance_cents = case
       when account_type in ('loan', 'card') then -abs(opening_balance_cents)
       else abs(opening_balance_cents)
     end,
-    updated_at = now();
+    updated_at = now()
+where exists (select 1 from schema_legacy_repairs);
 alter table public.accounts add constraint accounts_liability_opening_balance_check
   check (
     (account_type in ('loan', 'card') and opening_balance_cents <= 0)
@@ -607,13 +634,14 @@ begin
        public.normalize_identity(b.source_key) = public.normalize_identity(a.source_key)
        or public.normalize_identity(b.source_name) = public.normalize_identity(a.source_name)
      )
-    where public.normalize_identity(b.source_key) <> public.normalize_identity(a.source_key)
+    where exists (select 1 from schema_legacy_repairs)
+      and (public.normalize_identity(b.source_key) <> public.normalize_identity(a.source_key)
        or public.normalize_identity(b.source_name) <> public.normalize_identity(a.source_name)
        or b.name is distinct from a.name
        or b.budget_group is distinct from a.budget_group
        or b.color is distinct from a.color
        or b.icon is distinct from a.icon
-       or b.active is distinct from a.active
+       or b.active is distinct from a.active)
   ) then
     raise exception 'Cannot merge canonical duplicate categories with conflicting identity or metadata';
   end if;
@@ -623,7 +651,8 @@ create temporary table category_merge_by_key on commit drop as
 select id, min(id) over (
   partition by telegram_user_id, public.normalize_identity(source_key)
 ) keeper
-from public.categories;
+from public.categories
+where exists (select 1 from schema_legacy_repairs);
 
 update public.transactions t
 set category_id = m.keeper
@@ -643,7 +672,8 @@ create temporary table category_merge_by_name on commit drop as
 select id, min(id) over (
   partition by telegram_user_id, public.normalize_identity(source_name)
 ) keeper
-from public.categories;
+from public.categories
+where exists (select 1 from schema_legacy_repairs);
 
 update public.transactions t
 set category_id = m.keeper
@@ -662,15 +692,17 @@ where c.id = m.id and m.id <> m.keeper;
 update public.categories
 set source_name = public.normalize_identity(source_name),
     source_key = public.normalize_identity(source_key),
-    updated_at = now();
-update public.transactions set category = public.normalize_identity(category);
-update public.budgets set category = public.normalize_identity(category);
-update public.recurring_rules set category = public.normalize_identity(category);
-update public.subcategories set name = btrim(regexp_replace(name, '\s+', ' ', 'g'));
+    updated_at = now()
+where exists (select 1 from schema_legacy_repairs);
+update public.transactions set category = public.normalize_identity(category) where exists (select 1 from schema_legacy_repairs);
+update public.budgets set category = public.normalize_identity(category) where exists (select 1 from schema_legacy_repairs);
+update public.recurring_rules set category = public.normalize_identity(category) where exists (select 1 from schema_legacy_repairs);
+update public.subcategories set name = btrim(regexp_replace(name, '\s+', ' ', 'g')) where exists (select 1 from schema_legacy_repairs);
 
 delete from public.subcategories a
 using public.subcategories b
 where a.id > b.id
+  and exists (select 1 from schema_legacy_repairs)
   and a.telegram_user_id = b.telegram_user_id
   and a.category_id = b.category_id
   and public.normalize_identity(a.name) = public.normalize_identity(b.name);
@@ -679,9 +711,10 @@ with combined as (
   select telegram_user_id, public.normalize_identity(category) category, subcategory_id, month,
          sum(amount_cents)::integer amount_cents
   from public.budgets
+  where exists (select 1 from schema_legacy_repairs)
   group by telegram_user_id, public.normalize_identity(category), subcategory_id, month
 ), removed as (
-  delete from public.budgets returning *
+  delete from public.budgets where exists (select 1 from schema_legacy_repairs) returning *
 )
 insert into public.budgets (telegram_user_id, category, subcategory_id, month, amount_cents)
 select telegram_user_id, category, subcategory_id, month, amount_cents from combined;
@@ -690,6 +723,7 @@ update public.transactions t
 set category_id = c.id
 from public.categories c
 where c.telegram_user_id = t.telegram_user_id
+  and exists (select 1 from schema_legacy_repairs)
   and public.normalize_identity(c.source_name) = public.normalize_identity(t.category);
 
 create unique index if not exists categories_user_canonical_name_uidx
@@ -770,8 +804,76 @@ create or replace function public.materialize_recurring_transactions(
   batch_size integer default 100
 )
 returns table(users_processed bigint, rules_materialized bigint)
-language sql volatile security invoker set search_path = public
+language plpgsql volatile security invoker set search_path = public
 as $$
+declare
+  locked_user_id bigint;
+  locked_rule_id bigint;
+  last_user_id bigint;
+  last_rule_id bigint;
+  counted_user_id bigint;
+  claimed_users bigint;
+  claimed_count bigint;
+begin
+  -- Each command after a blocking row lock must see a new snapshot. Higher
+  -- isolation levels retain a transaction snapshot and can hide a committed run.
+  if current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'recurring materialization requires READ COMMITTED isolation'
+      using errcode = '25001';
+  end if;
+  users_processed := 0;
+  rules_materialized := 0;
+  while rules_materialized < batch_size loop
+  -- Lock in a common order across global and scoped workers. Never skip a
+  -- locked eligible rule: a short batch is interpreted by callers as done.
+  select r.telegram_user_id, r.id
+  into locked_user_id, locked_rule_id
+  from public.recurring_rules r
+    -- NOT VALID owner FKs can leave legacy cross-owner account references.
+    where (last_rule_id is null or (r.telegram_user_id, r.id) > (last_user_id, last_rule_id))
+      and r.active
+      and exists (
+        select 1 from public.accounts a
+        where a.id = r.from_account_id and a.telegram_user_id = r.telegram_user_id
+      )
+      and (r.to_account_id is null or exists (
+        select 1 from public.accounts a
+        where a.id = r.to_account_id and a.telegram_user_id = r.telegram_user_id
+      ))
+      and target_month ~ '^\d{4}-(0[1-9]|1[0-2])$'
+      and batch_size between 1 and 500
+       and (
+        target_month || '-' ||
+        lpad(least(r.day_of_month, extract(day from (
+          (target_month || '-01')::date + interval '1 month - 1 day'
+        )))::integer::text, 2, '0')
+      )::date <= current_date
+       and (r.rule_type = 'subscription' or r.to_account_id is not null)
+       and (r.rule_type = 'account_transfer' or exists (
+         select 1
+         from public.categories c
+         left join public.subcategories s on s.id = r.subcategory_id
+           and s.telegram_user_id = r.telegram_user_id
+           and s.category_id = c.id
+         where c.id = r.category_id
+           and c.telegram_user_id = r.telegram_user_id
+           and (r.subcategory_id is null or s.id is not null)
+       ))
+      and not exists (
+        select 1 from public.recurring_rule_runs existing
+        where existing.telegram_user_id = r.telegram_user_id
+          and existing.recurring_rule_id = r.id
+          and existing.month = target_month
+      )
+    order by r.telegram_user_id, r.id
+  limit 1
+  for no key update of r;
+  exit when not found;
+  last_user_id := locked_user_id;
+  last_rule_id := locked_rule_id;
+
+  -- Re-evaluate the rule and its run in a fresh statement snapshot after the
+  -- wait. This observes committed edits/claims and retries rolled-back claims.
   with candidates as (
     select r.*,
            (
@@ -782,7 +884,16 @@ as $$
              substr(md5(r.telegram_user_id::text || ':' || r.id::text || ':' || target_month), 21, 12)
            )::uuid as run_group_id
     from public.recurring_rules r
-    where r.active
+    where r.telegram_user_id = locked_user_id and r.id = locked_rule_id
+      and r.active
+      and exists (
+        select 1 from public.accounts a
+        where a.id = r.from_account_id and a.telegram_user_id = r.telegram_user_id
+      )
+      and (r.to_account_id is null or exists (
+        select 1 from public.accounts a
+        where a.id = r.to_account_id and a.telegram_user_id = r.telegram_user_id
+      ))
       and target_month ~ '^\d{4}-(0[1-9]|1[0-2])$'
       and batch_size between 1 and 500
        and (
@@ -866,7 +977,18 @@ as $$
     where not leg.destination or (r.rule_type <> 'subscription' and r.to_account_id is not null)
     returning recurring_rule_id
   )
-  select count(distinct telegram_user_id)::bigint, count(*)::bigint from claimed
+  select count(distinct telegram_user_id)::bigint, count(*)::bigint
+  into claimed_users, claimed_count from claimed;
+  if claimed_count > 0 then
+    rules_materialized := rules_materialized + claimed_count;
+    if counted_user_id is distinct from locked_user_id then
+      users_processed := users_processed + claimed_users;
+      counted_user_id := locked_user_id;
+    end if;
+  end if;
+  end loop;
+  return next;
+end;
 $$;
 
 create or replace function public.materialize_recurring_transactions_for_user(
@@ -875,9 +997,72 @@ create or replace function public.materialize_recurring_transactions_for_user(
   batch_size integer default 100
 )
 returns table(users_processed bigint, rules_materialized bigint)
-language sql volatile security invoker set search_path = public
+language plpgsql volatile security invoker set search_path = public
 as $$
-with candidates as (
+declare
+  locked_user_id bigint;
+  locked_rule_id bigint;
+  last_user_id bigint;
+  last_rule_id bigint;
+  counted_user_id bigint;
+  claimed_users bigint;
+  claimed_count bigint;
+begin
+  -- Each command after a blocking row lock must see a new snapshot. Higher
+  -- isolation levels retain a transaction snapshot and can hide a committed run.
+  if current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'recurring materialization requires READ COMMITTED isolation'
+      using errcode = '25001';
+  end if;
+  users_processed := 0;
+  rules_materialized := 0;
+  while rules_materialized < batch_size loop
+  -- Lock in a common order across global and scoped workers. Never skip a
+  -- locked eligible rule: a short batch is interpreted by callers as done.
+  select r.telegram_user_id, r.id
+  into locked_user_id, locked_rule_id
+  from public.recurring_rules r
+  where (last_rule_id is null or r.id > last_rule_id)
+    and r.telegram_user_id = target_telegram_user_id
+    and r.active
+    and exists (
+      select 1 from public.accounts a
+      where a.id = r.from_account_id and a.telegram_user_id = r.telegram_user_id
+    )
+    and (r.to_account_id is null or exists (
+      select 1 from public.accounts a
+      where a.id = r.to_account_id and a.telegram_user_id = r.telegram_user_id
+    ))
+    and target_month ~ '^\d{4}-(0[1-9]|1[0-2])$'
+    and batch_size between 1 and 500
+    and (target_month || '-' || lpad(least(r.day_of_month, extract(day from ((target_month || '-01')::date + interval '1 month - 1 day')))::integer::text, 2, '0'))::date <= current_date
+    and (r.rule_type = 'subscription' or r.to_account_id is not null)
+    and (r.rule_type = 'account_transfer' or exists (
+      select 1
+      from public.categories c
+      left join public.subcategories s on s.id = r.subcategory_id
+        and s.telegram_user_id = r.telegram_user_id
+        and s.category_id = c.id
+      where c.id = r.category_id
+        and c.telegram_user_id = r.telegram_user_id
+        and (r.subcategory_id is null or s.id is not null)
+    ))
+    and not exists (
+      select 1 from public.recurring_rule_runs x
+      where x.telegram_user_id = r.telegram_user_id
+        and x.recurring_rule_id = r.id
+        and x.month = target_month
+    )
+  order by r.id
+  limit 1
+  for no key update of r;
+  exit when not found;
+  last_user_id := locked_user_id;
+  last_rule_id := locked_rule_id;
+
+  -- Re-evaluate the rule and its run in a fresh statement snapshot after the
+  -- wait. This observes committed edits/claims and retries rolled-back claims.
+  with candidates as (
   select r.*,
          (substr(md5(r.telegram_user_id::text || ':' || r.id::text || ':' || target_month), 1, 8) || '-' ||
           substr(md5(r.telegram_user_id::text || ':' || r.id::text || ':' || target_month), 9, 4) || '-' ||
@@ -885,8 +1070,17 @@ with candidates as (
           substr(md5(r.telegram_user_id::text || ':' || r.id::text || ':' || target_month), 17, 4) || '-' ||
           substr(md5(r.telegram_user_id::text || ':' || r.id::text || ':' || target_month), 21, 12))::uuid as run_group_id
   from public.recurring_rules r
-  where r.telegram_user_id = target_telegram_user_id
+  where r.telegram_user_id = locked_user_id and r.id = locked_rule_id
+      and r.telegram_user_id = target_telegram_user_id
     and r.active
+    and exists (
+      select 1 from public.accounts a
+      where a.id = r.from_account_id and a.telegram_user_id = r.telegram_user_id
+    )
+    and (r.to_account_id is null or exists (
+      select 1 from public.accounts a
+      where a.id = r.to_account_id and a.telegram_user_id = r.telegram_user_id
+    ))
     and target_month ~ '^\d{4}-(0[1-9]|1[0-2])$'
     and batch_size between 1 and 500
     and (target_month || '-' || lpad(least(r.day_of_month, extract(day from ((target_month || '-01')::date + interval '1 month - 1 day')))::integer::text, 2, '0'))::date <= current_date
@@ -948,7 +1142,18 @@ with candidates as (
   where not leg.destination or (r.rule_type <> 'subscription' and r.to_account_id is not null)
   returning recurring_rule_id
 )
-select count(distinct telegram_user_id)::bigint, count(*)::bigint from claimed;
+select count(distinct telegram_user_id)::bigint, count(*)::bigint
+  into claimed_users, claimed_count from claimed;
+  if claimed_count > 0 then
+    rules_materialized := rules_materialized + claimed_count;
+    if counted_user_id is distinct from locked_user_id then
+      users_processed := users_processed + claimed_users;
+      counted_user_id := locked_user_id;
+    end if;
+  end if;
+  end loop;
+  return next;
+end;
 $$;
 
 revoke execute on function public.materialize_recurring_transactions(text, integer) from public;
@@ -1153,6 +1358,7 @@ set transfer_account_type = case
   else a.account_type end
 from public.accounts a
 where t.transfer_group_id is not null and t.transfer_account_type is null
+  and exists (select 1 from schema_legacy_repairs)
   and a.id = t.account_id and a.telegram_user_id = t.telegram_user_id;
 
 -- The trigger covers both ordinary grouped inserts and both recurring
@@ -1317,3 +1523,184 @@ begin
   return result_id;
 end;
 $$;
+
+-- NOT VALID preserves historical rows without silently rewriting financial data.
+-- PostgreSQL still checks every new or updated row. Audit and repair legacy rows
+-- before separately validating these constraints. Do not drop/recreate them on
+-- reruns: that would discard any validation performed by an operator.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conrelid = 'public.budgets'::regclass and conname = 'budgets_month_format_check') then
+    alter table public.budgets add constraint budgets_month_format_check
+      check (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$') not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.portfolio_snapshots'::regclass and conname = 'portfolio_snapshots_month_format_check') then
+    alter table public.portfolio_snapshots add constraint portfolio_snapshots_month_format_check
+      check (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$') not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.recurring_rule_runs'::regclass and conname = 'recurring_rule_runs_month_format_check') then
+    alter table public.recurring_rule_runs add constraint recurring_rule_runs_month_format_check
+      check (month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$') not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.budgets'::regclass and conname = 'budgets_nonnegative_amount_check') then
+    alter table public.budgets add constraint budgets_nonnegative_amount_check
+      check (amount_cents >= 0) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.portfolio_snapshots'::regclass and conname = 'portfolio_snapshots_nonnegative_value_check') then
+    alter table public.portfolio_snapshots add constraint portfolio_snapshots_nonnegative_value_check
+      check (portfolio_value_cents >= 0) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.recurring_rules'::regclass and conname = 'recurring_rules_positive_amount_check') then
+    alter table public.recurring_rules add constraint recurring_rules_positive_amount_check
+      check (amount_cents > 0) not valid;
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.transactions'::regclass and conname = 'transactions_ungrouped_sign_check') then
+    -- Bot parsing currently permits zero. Grouped legs can have different kinds
+    -- and either sign (including positive investment destination legs).
+    alter table public.transactions add constraint transactions_ungrouped_sign_check
+      check (transfer_group_id is not null or
+        (kind = 'expense' and amount_cents <= 0) or
+        (kind = 'income' and amount_cents >= 0) or
+        (kind = 'investment' and amount_cents <= 0)) not valid;
+  end if;
+end $$;
+
+-- Owner-scoped references. Existing inconsistent rows are deliberately not
+-- rewritten: audit and VALIDATE these constraints separately after remediation.
+-- PostgreSQL 15+ is required for column-list ON DELETE SET NULL.
+create unique index if not exists accounts_id_telegram_user_id_idx on public.accounts (id, telegram_user_id);
+create unique index if not exists categories_owner_reference_uidx on public.categories (id, telegram_user_id);
+create unique index if not exists subcategories_owner_reference_uidx on public.subcategories (id, telegram_user_id);
+create unique index if not exists subcategories_parent_reference_uidx on public.subcategories (id, category_id, telegram_user_id);
+create unique index if not exists recurring_rules_owner_reference_uidx on public.recurring_rules (id, telegram_user_id);
+
+-- Keep the old single-column FKs as well: they preserve delete behavior even
+-- for historical cross-owner references that these NOT VALID FKs do not cover.
+do $$
+declare r record;
+begin
+  for r in select * from (values
+    ('transactions','transactions_owner_account_fk','foreign key (account_id, telegram_user_id) references public.accounts (id, telegram_user_id) on delete set null (account_id)'),
+    ('transactions','transactions_owner_category_fk','foreign key (category_id, telegram_user_id) references public.categories (id, telegram_user_id) on delete set null (category_id)'),
+    ('transactions','transactions_owner_subcategory_fk','foreign key (subcategory_id, telegram_user_id) references public.subcategories (id, telegram_user_id) on delete set null (subcategory_id)'),
+    ('transactions','transactions_parent_subcategory_fk','foreign key (subcategory_id, category_id, telegram_user_id) references public.subcategories (id, category_id, telegram_user_id) on delete set null (subcategory_id)'),
+    ('transactions','transactions_owner_recurring_rule_fk','foreign key (recurring_rule_id, telegram_user_id) references public.recurring_rules (id, telegram_user_id) on delete set null (recurring_rule_id)'),
+    ('portfolio_snapshots','portfolio_snapshots_owner_account_fk','foreign key (account_id, telegram_user_id) references public.accounts (id, telegram_user_id) on delete cascade'),
+    ('recurring_rules','recurring_rules_owner_from_account_fk','foreign key (from_account_id, telegram_user_id) references public.accounts (id, telegram_user_id) on delete cascade'),
+    ('recurring_rules','recurring_rules_owner_to_account_fk','foreign key (to_account_id, telegram_user_id) references public.accounts (id, telegram_user_id) on delete set null (to_account_id)'),
+    ('recurring_rules','recurring_rules_owner_category_fk','foreign key (category_id, telegram_user_id) references public.categories (id, telegram_user_id) on delete set null (category_id)'),
+    ('recurring_rules','recurring_rules_owner_subcategory_fk','foreign key (subcategory_id, telegram_user_id) references public.subcategories (id, telegram_user_id) on delete set null (subcategory_id)'),
+    ('recurring_rules','recurring_rules_parent_subcategory_fk','foreign key (subcategory_id, category_id, telegram_user_id) references public.subcategories (id, category_id, telegram_user_id) on delete set null (subcategory_id)'),
+    ('recurring_rule_runs','recurring_rule_runs_owner_rule_fk','foreign key (recurring_rule_id, telegram_user_id) references public.recurring_rules (id, telegram_user_id) on delete cascade'),
+    ('subcategories','subcategories_owner_category_fk','foreign key (category_id, telegram_user_id) references public.categories (id, telegram_user_id) on delete cascade'),
+    ('pending_transaction_captures','captures_owner_account_fk','foreign key (account_id, telegram_user_id) references public.accounts (id, telegram_user_id) on delete set null (account_id)'),
+    ('pending_transaction_captures','captures_owner_category_fk','foreign key (category_id, telegram_user_id) references public.categories (id, telegram_user_id) on delete cascade'),
+    ('pending_transaction_captures','captures_owner_subcategory_fk','foreign key (subcategory_id, telegram_user_id) references public.subcategories (id, telegram_user_id) on delete cascade'),
+    ('pending_transaction_captures','captures_parent_subcategory_fk','foreign key (subcategory_id, category_id, telegram_user_id) references public.subcategories (id, category_id, telegram_user_id) on delete cascade'),
+    ('budgets','budgets_owner_subcategory_fk','foreign key (subcategory_id, telegram_user_id) references public.subcategories (id, telegram_user_id) on delete cascade')
+  ) as f(tbl, name, definition)
+  loop
+    if not exists (select 1 from pg_catalog.pg_constraint where conrelid = format('public.%I', r.tbl)::regclass and conname = r.name) then
+      execute format('alter table public.%I add constraint %I %s not valid', r.tbl, r.name, r.definition);
+    end if;
+  end loop;
+  for r in select * from (values
+    ('transactions','transactions_subcategory_requires_category_check'),
+    ('recurring_rules','recurring_rules_subcategory_requires_category_check'),
+    ('pending_transaction_captures','captures_subcategory_requires_category_check')
+  ) as c(tbl, name)
+  loop
+    if not exists (select 1 from pg_catalog.pg_constraint where conrelid = format('public.%I', r.tbl)::regclass and conname = r.name) then
+      execute format('alter table public.%I add constraint %I check (subcategory_id is null or category_id is not null) not valid', r.tbl, r.name);
+    end if;
+  end loop;
+end $$;
+
+-- Existing scalar category FKs SET NULL only category_id. Clear both identities
+-- before those RI actions, including on historically mismatched ownership.
+-- Like any RI SET NULL, these updates recheck unrelated NOT VALID CHECKs; a
+-- legacy-invalid row can block deletion until it is remediated. Do not bypass
+-- checks or silently rewrite unrelated financial fields to make deletion pass.
+create or replace function public.clear_category_child_references()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  update public.transactions set category_id = null, subcategory_id = null where category_id = old.id;
+  update public.recurring_rules set category_id = null, subcategory_id = null where category_id = old.id;
+  return old;
+end $$;
+drop trigger if exists clear_category_child_references on public.categories;
+create trigger clear_category_child_references before delete on public.categories
+  for each row execute function public.clear_category_child_references();
+
+-- A cascading account deletion can delete a rule before another account FK
+-- clears transactions.account_id. Clear rule references first so that the
+-- account SET NULL action cannot observe a temporarily missing rule.
+create or replace function public.clear_deleted_rule_references()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  update public.transactions set recurring_rule_id = null where recurring_rule_id = old.id;
+  return old;
+end $$;
+drop trigger if exists clear_deleted_rule_references on public.recurring_rules;
+create trigger clear_deleted_rule_references before delete on public.recurring_rules
+  for each row execute function public.clear_deleted_rule_references();
+
+-- Budget category is text, so ordinary FKs cannot express its relationship to
+-- the subcategory's parent. Make those parent identities immutable, even when
+-- no budget currently exists: checking for budgets in an UPDATE trigger races
+-- concurrent inserts (and is not safe with a repeatable-read snapshot).
+-- Cosmetic category names and normalized-equivalent source text can still change.
+-- Delete/recreate is required for a real identity change or reparenting.
+create or replace function public.check_subcategory_budget_reparent()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.category_id is distinct from old.category_id
+     or new.telegram_user_id is distinct from old.telegram_user_id then
+    raise foreign_key_violation using message = 'subcategory parent and owner are immutable';
+  end if;
+  return new;
+end $$;
+drop trigger if exists check_subcategory_budget_reparent on public.subcategories;
+create trigger check_subcategory_budget_reparent before update of category_id, telegram_user_id on public.subcategories
+  for each row execute function public.check_subcategory_budget_reparent();
+
+create or replace function public.check_category_budget_identity()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.telegram_user_id is distinct from old.telegram_user_id
+     or public.normalize_identity(new.source_key) is distinct from public.normalize_identity(old.source_key)
+     or public.normalize_identity(new.source_name) is distinct from public.normalize_identity(old.source_name) then
+    raise foreign_key_violation using message = 'category source identity and owner are immutable';
+  end if;
+  return new;
+end $$;
+drop trigger if exists check_category_budget_identity on public.categories;
+create trigger check_category_budget_identity before update of source_key, source_name, telegram_user_id on public.categories
+  for each row execute function public.check_category_budget_identity();
+
+-- No explicit parent row locks: immutable identities make the snapshot safe,
+-- and the owner FK on subcategory_id protects concurrent deletes. Taking locks
+-- here would invert the category -> subcategory order of cascading deletes.
+create or replace function public.check_budget_subcategory_parent()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if new.subcategory_id is null then return new; end if;
+  if left(public.normalize_identity(new.category), length('__budget_group__:')) = '__budget_group__:' then
+    raise foreign_key_violation using message = 'theme budgets cannot have a subcategory';
+  end if;
+  if not exists (
+    select 1 from public.subcategories s
+    join public.categories c on c.id = s.category_id
+    where s.id = new.subcategory_id
+      and s.telegram_user_id = new.telegram_user_id
+      and c.telegram_user_id = new.telegram_user_id
+      and (public.normalize_identity(new.category) = public.normalize_identity(c.source_name)
+           or public.normalize_identity(new.category) = public.normalize_identity(c.source_key))
+  ) then
+    raise foreign_key_violation using message = 'budget subcategory does not belong to its owner and category';
+  end if;
+  return new;
+end $$;
+drop trigger if exists check_budget_subcategory_parent on public.budgets;
+create trigger check_budget_subcategory_parent before insert or update of category, subcategory_id, telegram_user_id on public.budgets
+  for each row execute function public.check_budget_subcategory_parent();
