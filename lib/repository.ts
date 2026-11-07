@@ -158,11 +158,12 @@ export type PendingTransactionCapture = {
   accountId: number | null;
   categoryId: number | null;
   subcategoryId: number | null;
+  version: number;
 };
 
 export async function createPendingTransactionCapture(
   telegramUserId: number,
-  values: Omit<PendingTransactionCapture, "token" | "categoryId" | "subcategoryId">
+  values: Omit<PendingTransactionCapture, "token" | "version">
 ) {
   const supabase = createSupabaseAdmin();
   const token = randomUUID().replaceAll("-", "").slice(0, 16);
@@ -173,6 +174,8 @@ export async function createPendingTransactionCapture(
     description: values.description,
     amount_cents: values.amountCents,
     account_id: values.accountId,
+    category_id: values.categoryId,
+    subcategory_id: values.subcategoryId,
     expires_at: new Date(Date.now() + 15 * 60_000).toISOString()
   });
   if (error) throw error;
@@ -183,7 +186,7 @@ export async function getPendingTransactionCapture(telegramUserId: number, token
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase
     .from("pending_transaction_captures")
-    .select("token, kind, description, amount_cents, account_id, category_id, subcategory_id")
+    .select("token, kind, description, amount_cents, account_id, category_id, subcategory_id, version")
     .eq("telegram_user_id", telegramUserId)
     .eq("token", token)
     .gt("expires_at", new Date().toISOString())
@@ -197,26 +200,29 @@ export async function getPendingTransactionCapture(telegramUserId: number, token
     amountCents: data.amount_cents,
     accountId: data.account_id === null ? null : Number(data.account_id),
     categoryId: data.category_id === null ? null : Number(data.category_id),
-    subcategoryId: data.subcategory_id === null ? null : Number(data.subcategory_id)
+    subcategoryId: data.subcategory_id === null ? null : Number(data.subcategory_id),
+    version: data.version
   } satisfies PendingTransactionCapture;
 }
 
 export async function updatePendingTransactionCapture(
   telegramUserId: number,
   token: string,
-  values: { accountId?: number | null; categoryId?: number; subcategoryId?: number | null }
+  version: number,
+  values: { accountId: number | null; categoryId: number; subcategoryId: number | null }
 ) {
   const supabase = createSupabaseAdmin();
-  const update: Record<string, number | null> = {};
-  if (values.accountId !== undefined) update.account_id = values.accountId;
-  if (values.categoryId !== undefined) update.category_id = values.categoryId;
-  if (values.subcategoryId !== undefined) update.subcategory_id = values.subcategoryId;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("pending_transaction_captures")
-    .update(update)
+    .update({ account_id: values.accountId, category_id: values.categoryId, subcategory_id: values.subcategoryId, version: version + 1 })
     .eq("telegram_user_id", telegramUserId)
-    .eq("token", token);
+    .eq("token", token)
+    .eq("version", version)
+    .gt("expires_at", new Date().toISOString())
+    .select("token")
+    .maybeSingle();
   if (error) throw error;
+  return data !== null;
 }
 
 export async function consumePendingTransactionCapture(
@@ -224,7 +230,8 @@ export async function consumePendingTransactionCapture(
   token: string,
   accountId: number,
   expectedCategoryId: number,
-  expectedSubcategoryId: number | null
+  expectedSubcategoryId: number | null,
+  expectedVersion: number
 ) {
   const supabase = createSupabaseAdmin();
   const { data, error } = await supabase.rpc("consume_pending_transaction_capture", {
@@ -232,7 +239,8 @@ export async function consumePendingTransactionCapture(
     p_token: token,
     p_account_id: accountId,
     p_expected_category_id: expectedCategoryId,
-    p_expected_subcategory_id: expectedSubcategoryId
+    p_expected_subcategory_id: expectedSubcategoryId,
+    p_expected_version: expectedVersion
   });
   if (error) throw error;
   return data === null ? null : Number(data);

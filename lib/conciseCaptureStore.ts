@@ -34,8 +34,8 @@ export const supabaseConciseCaptureStore: ConciseCaptureStore = {
     return getPendingTransactionCapture(telegramUserId, token);
   },
 
-  updatePending(telegramUserId, token, selection) {
-    return updatePendingTransactionCapture(telegramUserId, token, selection);
+  updatePending(telegramUserId, token, version, selection) {
+    return updatePendingTransactionCapture(telegramUserId, token, version, selection);
   },
 
   saveResolved(telegramUserId, capture: ConciseCaptureInput, resolution) {
@@ -61,7 +61,8 @@ export const supabaseConciseCaptureStore: ConciseCaptureStore = {
         token,
         selection.accountId,
         selection.categoryId,
-        selection.subcategoryId
+        selection.subcategoryId,
+        selection.version
       );
       return transactionId === null ? { status: "already-used" } : { status: "saved", transactionId };
     } catch (error) {

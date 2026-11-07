@@ -278,6 +278,7 @@ create table if not exists public.pending_transaction_captures (
   account_id bigint references public.accounts(id) on delete set null,
   category_id bigint references public.categories(id) on delete cascade,
   subcategory_id bigint references public.subcategories(id) on delete cascade,
+  version integer not null default 0,
   expires_at timestamptz not null,
   created_at timestamptz not null default now()
 );
@@ -287,6 +288,9 @@ alter table public.pending_transaction_captures
 
 alter table public.pending_transaction_captures
   add column if not exists account_id bigint references public.accounts(id) on delete set null;
+
+alter table public.pending_transaction_captures
+  add column if not exists version integer not null default 0;
 
 alter table public.pending_transaction_captures
   drop constraint if exists pending_transaction_captures_kind_check;
@@ -373,13 +377,15 @@ alter table public.recurring_rules enable row level security;
 alter table public.recurring_rule_runs enable row level security;
 
 drop function if exists public.consume_pending_transaction_capture(bigint, text, bigint);
+drop function if exists public.consume_pending_transaction_capture(bigint, text, bigint, bigint, bigint);
 
 create or replace function public.consume_pending_transaction_capture(
   p_telegram_user_id bigint,
   p_token text,
   p_account_id bigint,
   p_expected_category_id bigint,
-  p_expected_subcategory_id bigint
+  p_expected_subcategory_id bigint,
+  p_expected_version integer
 )
 returns bigint
 language plpgsql
@@ -398,7 +404,8 @@ begin
   if not found then return null; end if;
    if capture.category_id is distinct from p_expected_category_id
       or capture.subcategory_id is distinct from p_expected_subcategory_id
-      or capture.account_id is distinct from p_account_id then
+      or capture.account_id is distinct from p_account_id
+      or capture.version is distinct from p_expected_version then
     return null;
   end if;
 
@@ -432,6 +439,8 @@ begin
   return transaction_id;
 end;
 $$;
+revoke all on function public.consume_pending_transaction_capture(bigint, text, bigint, bigint, bigint, integer) from public, anon, authenticated;
+grant execute on function public.consume_pending_transaction_capture(bigint, text, bigint, bigint, bigint, integer) to service_role;
 
 create or replace function public.normalize_identity(value text)
 returns text language sql immutable strict parallel safe

@@ -46,9 +46,9 @@ class InMemoryConciseCaptureStore implements ConciseCaptureStore {
     return this.lastUsedAccountId;
   }
 
-  async createPending(_telegramUserId: number, capture: Omit<PendingConciseCapture, "token" | "categoryId" | "subcategoryId">) {
+  async createPending(_telegramUserId: number, capture: Omit<PendingConciseCapture, "token" | "version">) {
     const token = `capture-${this.nextToken++}`;
-    this.pending.set(token, { ...capture, token, categoryId: null, subcategoryId: null });
+    this.pending.set(token, { ...capture, token, version: 0 });
     return token;
   }
 
@@ -57,12 +57,11 @@ class InMemoryConciseCaptureStore implements ConciseCaptureStore {
     return capture ? { ...capture } : null;
   }
 
-  async updatePending(_telegramUserId: number, token: string, selection: { accountId?: number; categoryId?: number; subcategoryId?: number | null }) {
+  async updatePending(_telegramUserId: number, token: string, version: number, selection: { accountId: number | null; categoryId: number; subcategoryId: number | null }) {
     const capture = this.pending.get(token);
-    if (!capture) return;
-    if (selection.accountId !== undefined) capture.accountId = selection.accountId;
-    if (selection.categoryId !== undefined) capture.categoryId = selection.categoryId;
-    if (selection.subcategoryId !== undefined) capture.subcategoryId = selection.subcategoryId;
+    if (!capture || capture.version !== version) return false;
+    this.pending.set(token, { ...capture, ...selection, version: version + 1 });
+    return true;
   }
 
   async saveResolved() {
@@ -70,13 +69,14 @@ class InMemoryConciseCaptureStore implements ConciseCaptureStore {
     return this.nextTransactionId++;
   }
 
-  async consumePending(_telegramUserId: number, token: string, selection: { accountId: number; categoryId: number; subcategoryId: number | null }) {
+  async consumePending(_telegramUserId: number, token: string, selection: { accountId: number; categoryId: number; subcategoryId: number | null; version: number }) {
     const capture = this.pending.get(token);
     if (!capture) return { status: "already-used" as const };
     if (
       capture.accountId !== selection.accountId
       || capture.categoryId !== selection.categoryId
       || capture.subcategoryId !== selection.subcategoryId
+      || capture.version !== selection.version
     ) return { status: "unavailable" as const };
     this.pending.delete(token);
     this.saved += 1;
@@ -117,7 +117,7 @@ test("category selection saves without a child when none exist", async () => {
     if (accounts.length > 1) {
       assert.equal(result.status, "choose-account");
       if (result.status !== "choose-account") continue;
-      result = await selectConciseCapture(store, userId, result.token, { kind: "account", id: 8 });
+      result = await selectConciseCapture(store, userId, result.token, { kind: "account", id: 8, version: result.version });
     }
     assert.equal(result.status, "saved");
     if (result.status === "saved") assert.equal(result.subcategoryId, null);
@@ -136,11 +136,11 @@ test("skipping a child persists through account selection", async () => {
     const categorySelected = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
     assert.equal(categorySelected.status, "choose-subcategory");
     if (categorySelected.status !== "choose-subcategory") continue;
-    let result = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: null });
+    let result = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: null, version: categorySelected.version });
     if (accounts.length > 1) {
       assert.equal(result.status, "choose-account");
       if (result.status !== "choose-account") continue;
-      result = await selectConciseCapture(store, userId, result.token, { kind: "account", id: 8 });
+      result = await selectConciseCapture(store, userId, result.token, { kind: "account", id: 8, version: result.version });
     }
     assert.equal(result.status, "saved");
     if (result.status === "saved") assert.equal(result.subcategoryId, null);
@@ -156,7 +156,7 @@ test("inferred categories survive pending account and child choices", async () =
     });
     assert.equal(started.status, "choose-account");
     if (started.status !== "choose-account") continue;
-    const result = await selectConciseCapture(accountStore, userId, started.token, { kind: "account", id: 8 });
+    const result = await selectConciseCapture(accountStore, userId, started.token, { kind: "account", id: 8, version: started.version });
     assert.equal(result.status, "saved");
     if (result.status === "saved") assert.equal(result.subcategoryId, description === "Food" ? null : 10);
   }
@@ -166,7 +166,7 @@ test("inferred categories survive pending account and child choices", async () =
   });
   assert.equal(started.status, "choose-subcategory");
   if (started.status !== "choose-subcategory") return;
-  const result = await selectConciseCapture(childStore, userId, started.token, { kind: "subcategory", id: null });
+  const result = await selectConciseCapture(childStore, userId, started.token, { kind: "subcategory", id: null, version: started.version });
   assert.equal(result.status, "saved");
   if (result.status === "saved") assert.equal(result.subcategoryId, null);
 });
@@ -196,7 +196,7 @@ test("concise capture preserves a last-used account while category selection is 
   const categorySelected = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
   assert.equal(categorySelected.status, "choose-subcategory");
   if (categorySelected.status !== "choose-subcategory") return;
-  const selected = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10 });
+  const selected = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10, version: categorySelected.version });
   assert.equal(selected.status, "saved");
   if (selected.status === "saved") assert.equal(selected.accountId, 7);
 });
@@ -214,11 +214,11 @@ test("concise capture prompts for an account after a selected category", async (
   assert.equal(categorySelected.status, "choose-subcategory");
   if (categorySelected.status !== "choose-subcategory") return;
 
-  const subcategorySelected = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10 });
+  const subcategorySelected = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10, version: categorySelected.version });
   assert.equal(subcategorySelected.status, "choose-account");
   if (subcategorySelected.status !== "choose-account") return;
 
-  const accountSelected = await selectConciseCapture(store, userId, subcategorySelected.token, { kind: "account", id: 8 });
+  const accountSelected = await selectConciseCapture(store, userId, subcategorySelected.token, { kind: "account", id: 8, version: subcategorySelected.version });
   assert.equal(accountSelected.status, "saved");
   if (accountSelected.status === "saved") assert.equal(accountSelected.accountId, 8);
 });
@@ -250,13 +250,83 @@ test("concise capture rechecks active accounts before consuming a selection", as
   assert.equal(categorySelected.status, "choose-subcategory");
   if (categorySelected.status !== "choose-subcategory") return;
 
-  const subcategorySelected = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10 });
+  const subcategorySelected = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10, version: categorySelected.version });
   assert.equal(subcategorySelected.status, "choose-account");
   if (subcategorySelected.status !== "choose-account") return;
 
   store.deactivateAccount(8);
-  const unavailable = await selectConciseCapture(store, userId, subcategorySelected.token, { kind: "account", id: 8 });
+  const unavailable = await selectConciseCapture(store, userId, subcategorySelected.token, { kind: "account", id: 8, version: subcategorySelected.version });
   assert.deepEqual(unavailable, { status: "selection-unavailable", selection: "account" });
+});
+
+test("old child and account prompts cannot act on a changed category", async () => {
+  const store = new InMemoryConciseCaptureStore([category(1, "Food"), category(2, "Transport")], [account(7), account(8, "Cash")]);
+  const started = await startConciseCapture(store, userId, { kind: "expense", description: "lunch", accountHint: null, amountCents: -420 });
+  assert.equal(started.status, "choose-category");
+  if (started.status !== "choose-category") return;
+  const food = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
+  assert.equal(food.status, "choose-subcategory");
+  if (food.status !== "choose-subcategory") return;
+  const foodAccount = await selectConciseCapture(store, userId, started.token, { kind: "subcategory", id: null, version: food.version });
+  assert.equal(foodAccount.status, "choose-account");
+  if (foodAccount.status !== "choose-account") return;
+  const transport = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 2 });
+  assert.equal(transport.status, "choose-subcategory");
+  if (transport.status !== "choose-subcategory") return;
+  assert.deepEqual(await selectConciseCapture(store, userId, started.token, { kind: "subcategory", id: null, version: food.version }), { status: "selection-unavailable", selection: "subcategory" });
+  assert.deepEqual(await selectConciseCapture(store, userId, started.token, { kind: "account", id: 8, version: foodAccount.version }), { status: "selection-unavailable", selection: "account" });
+  const transportAccount = await selectConciseCapture(store, userId, started.token, { kind: "subcategory", id: null, version: transport.version });
+  assert.equal(transportAccount.status, "choose-account");
+  if (transportAccount.status !== "choose-account") return;
+  const saved = await selectConciseCapture(store, userId, started.token, { kind: "account", id: 8, version: transportAccount.version });
+  assert.equal(saved.status, "saved");
+  if (saved.status === "saved") assert.equal(saved.categoryId, 2);
+});
+
+test("an old account prompt stays stale after reselecting the same category", async () => {
+  const store = new InMemoryConciseCaptureStore([category(1, "Food")], [account(7), account(8, "Cash")]);
+  const started = await startConciseCapture(store, userId, { kind: "expense", description: "lunch", accountHint: null, amountCents: -420 });
+  assert.equal(started.status, "choose-category");
+  if (started.status !== "choose-category") return;
+  const first = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
+  if (first.status !== "choose-subcategory") assert.fail("expected child prompt");
+  const oldAccount = await selectConciseCapture(store, userId, started.token, { kind: "subcategory", id: null, version: first.version });
+  if (oldAccount.status !== "choose-account") assert.fail("expected account prompt");
+  const second = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
+  assert.equal(second.status, "choose-subcategory");
+  assert.deepEqual(await selectConciseCapture(store, userId, started.token, { kind: "account", id: 8, version: oldAccount.version }), { status: "selection-unavailable", selection: "account" });
+  assert.equal(store.saved, 0);
+});
+
+test("a callback cannot overwrite a newer choice", async (t) => {
+  for (const accounts of [[account(7)], [account(7), account(8, "Cash")]]) {
+    const store = new InMemoryConciseCaptureStore([category(1, "Food", ["First", "Second"])], accounts);
+    const started = await startConciseCapture(store, userId, { kind: "expense", description: "lunch", accountHint: null, amountCents: -420 });
+    assert.equal(started.status, "choose-category");
+    if (started.status !== "choose-category") continue;
+    const prompt = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
+    assert.equal(prompt.status, "choose-subcategory");
+    if (prompt.status !== "choose-subcategory") continue;
+    let release!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const update = store.updatePending.bind(store);
+    const mock = t.mock.method(store, "updatePending", async (user, token, version, selection) => {
+      if (selection.subcategoryId === 10) { entered(); await gate; }
+      return update(user, token, version, selection);
+    });
+    const stale = selectConciseCapture(store, userId, started.token, { kind: "subcategory", id: 10, version: prompt.version });
+    await paused;
+    let newer = await selectConciseCapture(store, userId, started.token, { kind: "subcategory", id: 11, version: prompt.version });
+    release();
+    assert.deepEqual(await stale, { status: "selection-unavailable", selection: "subcategory" });
+    if (newer.status === "choose-account") newer = await selectConciseCapture(store, userId, started.token, { kind: "account", id: 8, version: newer.version });
+    assert.equal(newer.status, "saved");
+    if (newer.status === "saved") assert.equal(newer.subcategoryId, 11);
+    assert.equal(store.saved, 1);
+    mock.mock.restore();
+  }
 });
 
 test("concurrent concise-capture callbacks save only once", async () => {
@@ -272,10 +342,10 @@ test("concurrent concise-capture callbacks save only once", async () => {
   if (categorySelected.status !== "choose-subcategory") return;
 
   const [first, second] = await Promise.all([
-    selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10 }),
-    selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10 })
+    selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10, version: categorySelected.version }),
+    selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: 10, version: categorySelected.version })
   ]);
 
-  assert.deepEqual([first.status, second.status].sort(), ["already-used", "saved"]);
+  assert.deepEqual([first.status, second.status].sort(), ["saved", "selection-unavailable"]);
   assert.equal(store.saved, 1);
 });

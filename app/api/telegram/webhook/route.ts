@@ -152,8 +152,9 @@ async function handlePendingChoice(callbackQuery: any) {
   const callbackId = String(callbackQuery.id || "");
   const telegramUserId = Number(callbackQuery.from?.id);
   const chatId = Number(callbackQuery.message?.chat?.id);
-  const [, token, kind, idValue] = data.split(":");
+  const [, token, kind, idValue, versionValue] = data.split(":");
   const choiceId = Number(idValue);
+  const version = versionValue && /^\d+$/.test(versionValue) ? Number(versionValue) : -1;
   if (!callbackId || !telegramUserId || !chatId || !token || !["c", "s", "a"].includes(kind) || !Number.isSafeInteger(choiceId)) return;
 
   let callbackAnswered = false;
@@ -166,8 +167,8 @@ async function handlePendingChoice(callbackQuery: any) {
     const selection: ConciseCaptureSelection = kind === "c"
       ? { kind: "category", id: choiceId }
       : kind === "s"
-        ? { kind: "subcategory", id: choiceId === 0 ? null : choiceId }
-        : { kind: "account", id: choiceId };
+        ? { kind: "subcategory", id: choiceId === 0 ? null : choiceId, version }
+        : { kind: "account", id: choiceId, version };
     const outcome = await selectConciseCapture(supabaseConciseCaptureStore, telegramUserId, token, selection);
     if (outcome.status === "saved") {
       await deliverSavedConciseCaptureOutcome(telegramUserId, chatId, outcome, callbackId);
@@ -187,11 +188,11 @@ async function deliverConciseCaptureOutcome(telegramUserId: number, chatId: numb
   } else if (outcome.status === "choose-category") {
     await sendTelegramMessage(chatId, "Choose a parent category:", choiceKeyboard(outcome.categories.map((item) => [item.name, callbackData(outcome.token, "c", item.id)])));
   } else if (outcome.status === "choose-subcategory") {
-    const choices: [string, string][] = outcome.subcategories.map((item) => [item.name, callbackData(outcome.token, "s", item.id)]);
-    choices.push(["No subcategory", callbackData(outcome.token, "s", 0)]);
+    const choices: [string, string][] = outcome.subcategories.map((item) => [item.name, callbackData(outcome.token, "s", item.id, outcome.version)]);
+    choices.push(["No subcategory", callbackData(outcome.token, "s", 0, outcome.version)]);
     await sendTelegramMessage(chatId, `Choose a subcategory under ${outcome.category.name}:`, choiceKeyboard(choices));
   } else if (outcome.status === "choose-account") {
-    const rows = outcome.accounts.map((item) => [item.name, callbackData(outcome.token, "a", Number(item.id))] as [string, string]);
+    const rows = outcome.accounts.map((item) => [item.name, callbackData(outcome.token, "a", Number(item.id), outcome.version)] as [string, string]);
     await sendTelegramMessage(chatId, rows.length ? "Choose an account:" : "Add an active account in the dashboard, then send the transaction again.", choiceKeyboard(rows));
   } else if (outcome.status === "account-not-found") {
     await sendTelegramMessage(chatId, `Account "${outcome.accountHint}" was not found. Use the account name or key after @.`);
@@ -224,8 +225,8 @@ function callbackAnswer(outcome: ConciseCaptureOutcome) {
   return undefined;
 }
 
-function callbackData(token: string, kind: "c" | "s" | "a", id: number) {
-  const value = `pc:${token}:${kind}:${id}`;
+function callbackData(token: string, kind: "c" | "s" | "a", id: number, version?: number) {
+  const value = `pc:${token}:${kind}:${id}${version === undefined ? "" : `:${version}`}`;
   if (Buffer.byteLength(value, "utf8") > 64) throw new Error("Telegram callback data is too long.");
   return value;
 }
