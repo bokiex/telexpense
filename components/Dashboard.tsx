@@ -761,6 +761,16 @@ export default function Dashboard() {
     reload();
   }
 
+  async function deleteSubcategory(id: number) {
+    const response = await apiRequest(`/api/subcategories?id=${id}`, "DELETE");
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      return result?.error || "Could not delete subcategory.";
+    }
+    reload();
+    return null;
+  }
+
   async function addSubcategory(categoryId: string, name: string) {
     const category = data.categories.find((item) => item.id === categoryId);
     if (!category) return;
@@ -912,6 +922,7 @@ export default function Dashboard() {
               onEditCategory={(categoryId) => setModal({ type: "edit-category", categoryId })}
               onAddSubcategory={(categoryId) => setModal({ type: "add-subcategory", categoryId })}
               onDeleteCategory={deleteCategory}
+              onDeleteSubcategory={deleteSubcategory}
             />
           ) : null}
         </div>
@@ -1503,7 +1514,8 @@ function BudgetView({
   onAddCategory,
   onEditCategory,
   onAddSubcategory,
-  onDeleteCategory
+  onDeleteCategory,
+  onDeleteSubcategory
 }: {
   data: AppData;
   month: string;
@@ -1514,7 +1526,11 @@ function BudgetView({
   onEditCategory: (categoryId: string) => void;
   onAddSubcategory: (categoryId: string) => void;
   onDeleteCategory: (categoryId: string) => Promise<void>;
+  onDeleteSubcategory: (id: number) => Promise<string | null>;
 }) {
+  const [subcategoryToDelete, setSubcategoryToDelete] = useState<SubCategory | null>(null);
+  const [subcategoryFeedback, setSubcategoryFeedback] = useState("");
+  const [deletingSubcategory, setDeletingSubcategory] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1594,6 +1610,7 @@ function BudgetView({
 
       {summary?.spendingTrend.daily.length ? <SpendingTrend trend={summary.spendingTrend} onViewHistory={onViewHistory} /> : null}
 
+      {subcategoryFeedback ? <p role="status">{subcategoryFeedback}</p> : null}
       <section className="mini-card budget-breakdown-card" aria-label="Budget breakdown">
         <div className="section-line budget-breakdown-heading">
           <div>
@@ -1697,6 +1714,9 @@ function BudgetView({
                                     <Button className="tiny-icon" variant="icon" onClick={() => onSetBudget(category.id, subcategory.id)} aria-label={`Set ${subcategory.name} budget`}>
                                       <Pencil size={11} />
                                     </Button>
+                                    <Button className="tiny-icon" variant="icon" onClick={() => { setSubcategoryFeedback(""); setSubcategoryToDelete(subcategory); }} aria-label={`Delete ${subcategory.name} subcategory`}>
+                                      <Trash2 size={11} />
+                                    </Button>
                                   </div>
                                   <Progress label={`${subcategory.name} budget ${subPct}% used`} value={subPct} color={subPct > 90 ? "#f87171" : category.color} thin />
                                 </div>
@@ -1717,6 +1737,24 @@ function BudgetView({
 
       {!hasBudgetTargets ? <EmptyState label="No budgets set for this month yet." /> : null}
 
+      <ConfirmDialog
+        open={Boolean(subcategoryToDelete)}
+        title="Delete subcategory?"
+        description={subcategoryToDelete ? `Delete ${subcategoryToDelete.name}? It must not be used by transactions, recurring rules, budgets, or pending selections.` : ""}
+        confirmLabel="Delete subcategory"
+        pendingLabel="Deleting..."
+        pending={deletingSubcategory}
+        onOpenChange={(open) => { if (!open && !deletingSubcategory) setSubcategoryToDelete(null); }}
+        onConfirm={() => {
+          if (!subcategoryToDelete || deletingSubcategory) return;
+          const subcategory = subcategoryToDelete;
+          setDeletingSubcategory(true);
+          void onDeleteSubcategory(subcategory.storedId)
+            .then((error) => setSubcategoryFeedback(error || `${subcategory.name} deleted.`))
+            .catch(() => setSubcategoryFeedback("Could not delete subcategory."))
+            .finally(() => { setDeletingSubcategory(false); setSubcategoryToDelete(null); });
+        }}
+      />
       <ConfirmDialog
         open={Boolean(categoryToDelete)}
         title="Delete category?"
