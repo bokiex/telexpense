@@ -105,6 +105,72 @@ test("concise capture saves immediately with an exact subcategory and sole accou
   assert.equal(store.saved, 1);
 });
 
+test("category selection saves without a child when none exist", async () => {
+  for (const accounts of [[account(7)], [account(7), account(8, "Cash")]]) {
+    const store = new InMemoryConciseCaptureStore([category(1, "Food", [])], accounts);
+    const started = await startConciseCapture(store, userId, {
+      kind: "expense", description: "lunch", accountHint: null, amountCents: -420
+    });
+    assert.equal(started.status, "choose-category");
+    if (started.status !== "choose-category") continue;
+    let result = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
+    if (accounts.length > 1) {
+      assert.equal(result.status, "choose-account");
+      if (result.status !== "choose-account") continue;
+      result = await selectConciseCapture(store, userId, result.token, { kind: "account", id: 8 });
+    }
+    assert.equal(result.status, "saved");
+    if (result.status === "saved") assert.equal(result.subcategoryId, null);
+    assert.equal(store.saved, 1);
+  }
+});
+
+test("skipping a child persists through account selection", async () => {
+  for (const accounts of [[account(7)], [account(7), account(8, "Cash")]]) {
+    const store = new InMemoryConciseCaptureStore([category(1, "Food")], accounts);
+    const started = await startConciseCapture(store, userId, {
+      kind: "expense", description: "lunch", accountHint: null, amountCents: -420
+    });
+    assert.equal(started.status, "choose-category");
+    if (started.status !== "choose-category") continue;
+    const categorySelected = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
+    assert.equal(categorySelected.status, "choose-subcategory");
+    if (categorySelected.status !== "choose-subcategory") continue;
+    let result = await selectConciseCapture(store, userId, categorySelected.token, { kind: "subcategory", id: null });
+    if (accounts.length > 1) {
+      assert.equal(result.status, "choose-account");
+      if (result.status !== "choose-account") continue;
+      result = await selectConciseCapture(store, userId, result.token, { kind: "account", id: 8 });
+    }
+    assert.equal(result.status, "saved");
+    if (result.status === "saved") assert.equal(result.subcategoryId, null);
+    assert.equal(store.saved, 1);
+  }
+});
+
+test("inferred categories survive pending account and child choices", async () => {
+  const accountStore = new InMemoryConciseCaptureStore([category(1, "Food")], [account(7), account(8, "Cash")]);
+  for (const description of ["Food", "Daily"]) {
+    const started = await startConciseCapture(accountStore, userId, {
+      kind: "expense", description, accountHint: null, amountCents: -420
+    });
+    assert.equal(started.status, "choose-account");
+    if (started.status !== "choose-account") continue;
+    const result = await selectConciseCapture(accountStore, userId, started.token, { kind: "account", id: 8 });
+    assert.equal(result.status, "saved");
+    if (result.status === "saved") assert.equal(result.subcategoryId, description === "Food" ? null : 10);
+  }
+  const childStore = new InMemoryConciseCaptureStore([category(1, "Food", ["Daily", "daily"])], [account(7)]);
+  const started = await startConciseCapture(childStore, userId, {
+    kind: "expense", description: "daily", accountHint: null, amountCents: -420
+  });
+  assert.equal(started.status, "choose-subcategory");
+  if (started.status !== "choose-subcategory") return;
+  const result = await selectConciseCapture(childStore, userId, started.token, { kind: "subcategory", id: null });
+  assert.equal(result.status, "saved");
+  if (result.status === "saved") assert.equal(result.subcategoryId, null);
+});
+
 test("concise capture prefers an explicit account hint over the last-used account", async () => {
   const store = new InMemoryConciseCaptureStore([category(1, "Food", ["Eat out"])], [account(7, "Card"), account(8, "Cash")]);
   store.lastUsedAccountId = 7;

@@ -166,7 +166,7 @@ async function handlePendingChoice(callbackQuery: any) {
     const selection: ConciseCaptureSelection = kind === "c"
       ? { kind: "category", id: choiceId }
       : kind === "s"
-        ? { kind: "subcategory", id: choiceId }
+        ? { kind: "subcategory", id: choiceId === 0 ? null : choiceId }
         : { kind: "account", id: choiceId };
     const outcome = await selectConciseCapture(supabaseConciseCaptureStore, telegramUserId, token, selection);
     if (outcome.status === "saved") {
@@ -187,12 +187,12 @@ async function deliverConciseCaptureOutcome(telegramUserId: number, chatId: numb
   } else if (outcome.status === "choose-category") {
     await sendTelegramMessage(chatId, "Choose a parent category:", choiceKeyboard(outcome.categories.map((item) => [item.name, callbackData(outcome.token, "c", item.id)])));
   } else if (outcome.status === "choose-subcategory") {
-    await sendTelegramMessage(chatId, `Choose a subcategory under ${outcome.category.name}:`, choiceKeyboard(outcome.subcategories.map((item) => [item.name, callbackData(outcome.token, "s", item.id)])));
+    const choices: [string, string][] = outcome.subcategories.map((item) => [item.name, callbackData(outcome.token, "s", item.id)]);
+    choices.push(["No subcategory", callbackData(outcome.token, "s", 0)]);
+    await sendTelegramMessage(chatId, `Choose a subcategory under ${outcome.category.name}:`, choiceKeyboard(choices));
   } else if (outcome.status === "choose-account") {
     const rows = outcome.accounts.map((item) => [item.name, callbackData(outcome.token, "a", Number(item.id))] as [string, string]);
     await sendTelegramMessage(chatId, rows.length ? "Choose an account:" : "Add an active account in the dashboard, then send the transaction again.", choiceKeyboard(rows));
-  } else if (outcome.status === "no-subcategories") {
-    await sendTelegramMessage(chatId, `Add a subcategory under ${outcome.category.name} in the dashboard, then send the transaction again.`);
   } else if (outcome.status === "account-not-found") {
     await sendTelegramMessage(chatId, `Account "${outcome.accountHint}" was not found. Use the account name or key after @.`);
   }

@@ -354,11 +354,11 @@ test("a subcategory selected under another category is rejected", () => {
   if (result.status === "choose-subcategory") assert.equal(result.category.id, 2);
 });
 
-test("a category without subcategories returns explicit guidance state", () => {
+test("a category without subcategories resolves without a child", () => {
   const emptyCategory = { ...category(1, "Food", "Daily"), subcategories: [] };
   const result = resolveConciseCapture("daily", [emptyCategory], [account], 1);
-  assert.equal(result.status, "no-subcategories");
-  if (result.status === "no-subcategories") assert.equal(result.category.id, 1);
+  assert.equal(result.status, "ready");
+  if (result.status === "ready") assert.equal(result.subcategoryId, null);
 });
 
 test("unknown concise text starts category selection", () => {
