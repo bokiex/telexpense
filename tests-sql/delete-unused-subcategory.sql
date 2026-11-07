@@ -4,13 +4,13 @@ insert into public.users (telegram_user_id) values (950001), (950002);
 insert into public.categories (telegram_user_id, source_key, source_name, name) values (950001, 'delete-test', 'delete-test', 'Test');
 insert into public.accounts (telegram_user_id, account_key, name) values (950001, 'delete-test', 'Test');
 insert into public.subcategories (telegram_user_id, category_id, name)
-select 950001, id, 'Child' from public.categories where telegram_user_id = 950001;
+select 950001, id, 'Child' from public.categories where telegram_user_id = 950001 and source_key = 'delete-test';
 do $$
 declare c bigint; s bigint; a bigint; r bigint;
 begin
-  select id into c from public.categories where telegram_user_id = 950001;
-  select id into s from public.subcategories where telegram_user_id = 950001;
-  select id into a from public.accounts where telegram_user_id = 950001;
+  select id into strict c from public.categories where telegram_user_id = 950001 and source_key = 'delete-test';
+  select id into strict s from public.subcategories where telegram_user_id = 950001 and category_id = c and name = 'Child';
+  select id into strict a from public.accounts where telegram_user_id = 950001 and account_key = 'delete-test';
   if public.delete_unused_subcategory(950002, s) <> 'not_found' then raise exception 'owner isolation failed'; end if;
   insert into public.transactions (telegram_user_id, kind, category, category_id, subcategory_id, description, amount_cents)
     values (950001, 'expense', 'delete-test', c, s, 'test', -1);
