@@ -90,6 +90,12 @@ class InMemoryConciseCaptureStore implements ConciseCaptureStore {
   deactivateAccount(id: number) {
     this.accounts = this.accounts.map((item) => item.id === id ? { ...item, active: false } : item);
   }
+
+  makeCategoryUnavailable(id: number, removed: boolean) {
+    this.categories = removed
+      ? this.categories.filter((item) => item.id !== id)
+      : this.categories.map((item) => item.id === id ? { ...item, active: false } : item);
+  }
 }
 
 test("concise capture saves immediately with an exact subcategory and sole account", async () => {
@@ -257,6 +263,39 @@ test("concise capture rechecks active accounts before consuming a selection", as
   store.deactivateAccount(8);
   const unavailable = await selectConciseCapture(store, userId, subcategorySelected.token, { kind: "account", id: 8, version: subcategorySelected.version });
   assert.deepEqual(unavailable, { status: "selection-unavailable", selection: "account" });
+});
+
+test("unavailable selected categories cannot be inferred as another category", async () => {
+  for (const removed of [false, true]) {
+    for (const stage of ["account", "child", "skip"] as const) {
+      const store = new InMemoryConciseCaptureStore([category(1, "Food"), category(2, "Transport")], [account(7), account(8, "Cash")]);
+      const started = await startConciseCapture(store, userId, {
+        kind: "expense", description: stage === "account" ? "daily" : "lunch", accountHint: null, amountCents: -420
+      });
+      assert.equal(started.status, "choose-category");
+      if (started.status !== "choose-category") continue;
+      const prompt = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 1 });
+      if (stage === "account") assert.equal(prompt.status, "choose-account");
+      else assert.equal(prompt.status, "choose-subcategory");
+      if (prompt.status !== "choose-account" && prompt.status !== "choose-subcategory") continue;
+      const before = await store.getPending(userId, started.token);
+      store.makeCategoryUnavailable(1, removed);
+      const selection = stage === "account"
+        ? { kind: "account" as const, id: 8, version: prompt.version }
+        : { kind: "subcategory" as const, id: stage === "skip" ? null : 10, version: prompt.version };
+      const result = await selectConciseCapture(store, userId, started.token, selection);
+      assert.deepEqual(result, { status: "selection-unavailable", selection: "category" });
+      assert.deepEqual(await store.getPending(userId, started.token), before);
+      assert.equal(store.saved, 0);
+      const replacement = await selectConciseCapture(store, userId, started.token, { kind: "category", id: 2 });
+      assert.equal(replacement.status, stage === "account" ? "choose-account" : "choose-subcategory");
+      if (replacement.status === "choose-account") {
+        const saved = await selectConciseCapture(store, userId, started.token, { kind: "account", id: 8, version: replacement.version });
+        assert.equal(saved.status, "saved");
+        if (saved.status === "saved") assert.equal(saved.categoryId, 2);
+      }
+    }
+  }
 });
 
 test("old child and account prompts cannot act on a changed category", async () => {

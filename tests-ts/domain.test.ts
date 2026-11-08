@@ -347,6 +347,16 @@ test("duplicate subcategory names under one parent require a subcategory choice"
   }
 });
 
+test("concise capture never infers a replacement for an unavailable selected category", () => {
+  const food = category(1, "Food", "Daily");
+  const transport = category(2, "Transport", "Daily");
+  for (const categories of [[{ ...food, active: false }, transport], [transport]]) {
+    assert.deepEqual(resolveConciseCapture("daily", categories, [account], 1, 10), {
+      status: "selection-unavailable", selection: "category"
+    });
+  }
+});
+
 test("a subcategory selected under another category is rejected", () => {
   const categories = [category(1, "Food", "Daily"), category(2, "Transport", "Train")];
   const result = resolveConciseCapture("daily", categories, [account], 2, 10);
