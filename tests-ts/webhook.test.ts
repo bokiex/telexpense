@@ -20,13 +20,13 @@ test("Telegram offers and accepts a category-only choice", async (t) => {
     ],
     accounts: [{ id: 7, accountKey: "card", name: "Card", active: true }, { id: 8, accountKey: "cash", name: "Cash", active: true }]
   }));
-  t.mock.method(supabaseConciseCaptureStore, "updatePending", async (_user, _token, version, selection) => {
+  t.mock.method(supabaseConciseCaptureStore, "updatePending", async (...[_user, _token, version, selection]: Parameters<typeof supabaseConciseCaptureStore.updatePending>) => {
     if (version !== pending.version) return false;
     pending = { ...pending, ...selection, version: version + 1 };
     return true;
   });
   const messages: { text?: string; reply_markup?: { inline_keyboard: { text: string; callback_data?: string }[][] } }[] = [];
-  t.mock.method(globalThis, "fetch", async (_url, init) => {
+  t.mock.method(globalThis, "fetch", async (...[_url, init]: Parameters<typeof fetch>) => {
     messages.push(JSON.parse(String(init?.body)));
     return Response.json({ ok: true });
   });
@@ -64,7 +64,7 @@ test("predeployment child and account buttons ask users to resend", async (t) =>
     assert.fail("versionless buttons must not access the pending capture");
   });
   const answers: { callback_query_id?: string; text?: string }[] = [];
-  t.mock.method(globalThis, "fetch", async (_url, init) => {
+  t.mock.method(globalThis, "fetch", async (...[_url, init]: Parameters<typeof fetch>) => {
     answers.push(JSON.parse(String(init?.body)));
     return Response.json({ ok: true });
   });
@@ -97,7 +97,7 @@ test("failed capture transitions give safe recovery instructions on retry", asyn
           { id: 7, accountKey: "card", name: "Card", active: true }, { id: 8, accountKey: "cash", name: "Cash", active: true }
         ]
       }));
-      t.mock.method(supabaseConciseCaptureStore, "updatePending", async (_user, _token, version, selection) => {
+      t.mock.method(supabaseConciseCaptureStore, "updatePending", async (...[_user, _token, version, selection]: Parameters<typeof supabaseConciseCaptureStore.updatePending>) => {
         if (version !== pending.version) return false;
         pending = { ...pending, ...selection, version: version + 1 };
         return true;
@@ -109,7 +109,7 @@ test("failed capture transitions give safe recovery instructions on retry", asyn
       });
       const answers: string[] = [];
       let failed = false;
-      t.mock.method(globalThis, "fetch", async (url, init) => {
+      t.mock.method(globalThis, "fetch", async (...[url, init]: Parameters<typeof fetch>) => {
         const isAnswer = String(url).endsWith("/answerCallbackQuery");
         const body = JSON.parse(String(init?.body));
         if (isAnswer && body.text) answers.push(body.text);

@@ -349,13 +349,13 @@ test("a delayed category callback cannot consume a final account choice", async 
     if (!held && accountId === 8) { held = true; entered(); await gate; }
   };
   const update = store.updatePending.bind(store);
-  t.mock.method(store, "updatePending", async (user, token, version, selection) => {
+  t.mock.method(store, "updatePending", async (...[user, token, version, selection]: Parameters<typeof update>) => {
     const result = await update(user, token, version, selection);
     await pause(selection.accountId);
     return result;
   });
   const consume = store.consumePending.bind(store);
-  t.mock.method(store, "consumePending", async (user, token, selection) => {
+  t.mock.method(store, "consumePending", async (...[user, token, selection]: Parameters<typeof consume>) => {
     const result = await consume(user, token, selection);
     await pause(selection.accountId);
     return result;
@@ -386,11 +386,11 @@ test("a callback cannot overwrite a newer choice", async (t) => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const update = store.updatePending.bind(store);
     const consume = store.consumePending.bind(store);
-    const updateMock = t.mock.method(store, "updatePending", async (user, token, version, selection) => {
+    const updateMock = t.mock.method(store, "updatePending", async (...[user, token, version, selection]: Parameters<typeof update>) => {
       if (selection.subcategoryId === 10) { entered(); await gate; }
       return update(user, token, version, selection);
     });
-    const consumeMock = t.mock.method(store, "consumePending", async (user, token, selection) => {
+    const consumeMock = t.mock.method(store, "consumePending", async (...[user, token, selection]: Parameters<typeof consume>) => {
       if (selection.subcategoryId === 10) { entered(); await gate; }
       return consume(user, token, selection);
     });
