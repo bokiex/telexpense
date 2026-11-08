@@ -147,19 +147,21 @@ export async function selectConciseCapture(
   );
   if (resolution.status === "selection-unavailable") return resolution;
   if (resolution.status === "choose-category") return outcomeForResolution(token, pending.version, resolution);
-  const updated = await store.updatePending(telegramUserId, token, pending.version, {
-    categoryId: resolution.category.id,
-    subcategoryId: resolution.status === "choose-subcategory" ? null : resolution.subcategoryId,
-    accountId: resolution.status === "ready" ? Number(resolution.account.id) : pending.accountId
-  });
-  if (!updated) return { status: "selection-unavailable", selection: selection.kind };
-  if (resolution.status !== "ready") return outcomeForResolution(token, pending.version + 1, resolution);
+  if (resolution.status !== "ready") {
+    const updated = await store.updatePending(telegramUserId, token, pending.version, {
+      categoryId: resolution.category.id,
+      subcategoryId: resolution.status === "choose-subcategory" ? null : resolution.subcategoryId,
+      accountId: pending.accountId
+    });
+    if (!updated) return { status: "selection-unavailable", selection: selection.kind };
+    return outcomeForResolution(token, pending.version + 1, resolution);
+  }
 
   const committed = await store.consumePending(telegramUserId, token, {
     accountId: Number(resolution.account.id),
     categoryId: resolution.category.id,
     subcategoryId: resolution.subcategoryId,
-    version: pending.version + 1
+    version: pending.version
   });
   if (committed.status === "saved") return savedOutcome(committed.transactionId, resolution, pending.amountCents);
   if (committed.status === "already-used") return { status: "already-used" };

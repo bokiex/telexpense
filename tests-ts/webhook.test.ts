@@ -125,10 +125,10 @@ test("failed capture transitions give safe recovery instructions on retry", asyn
         body: JSON.stringify({ callback_query: { id: "callback", data, from: { id: 42 }, message: { chat: { id: 42 } } } })
       }));
       assert.equal((await callback()).status, 200);
-      assert.equal(pending.version, 1);
+      assert.equal(pending.version, mode.startsWith("consume") ? 0 : 1);
       assert.equal((await callback()).status, 200);
-      assert.equal(pending.version, 1);
-      assert.equal(consumeCalls, mode.startsWith("consume") ? 1 : 0);
+      assert.equal(pending.version, mode.startsWith("consume") ? 0 : 1);
+      assert.equal(consumeCalls, mode.startsWith("consume") ? 2 : 0);
       assert.ok(answers.some((text) => text.includes("Check recent transactions before sending again.")));
       assert.ok(answers.every((text) => !text.includes("Could not save")));
     });
