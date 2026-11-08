@@ -182,7 +182,7 @@ async function handlePendingChoice(callbackQuery: any) {
     await deliverConciseCaptureOutcome(telegramUserId, chatId, outcome);
   } catch (error) {
     console.error("Telegram pending choice failed", error);
-    if (!callbackAnswered) await answerTelegramCallback(callbackId, "Could not save that choice.");
+    if (!callbackAnswered) await answerTelegramCallback(callbackId, "Could not confirm. Check recent transactions before sending again.");
   }
 }
 
@@ -223,9 +223,9 @@ function choiceKeyboard(choices: [string, string][]) {
 
 function callbackAnswer(outcome: ConciseCaptureOutcome) {
   if (outcome.status === "saved") return "Saving…";
-  if (outcome.status === "expired") return "This selection expired. Send the transaction again.";
-  if (outcome.status === "already-used") return "This selection was already used or expired.";
-  if (outcome.status === "selection-unavailable") return `This ${outcome.selection} is not available.`;
+  if (outcome.status === "expired") return "This selection expired. Check recent transactions before sending again.";
+  if (outcome.status === "already-used") return "This selection was used or expired. Check recent transactions before sending again.";
+  if (outcome.status === "selection-unavailable") return `This ${outcome.selection} is not available. Check recent transactions before sending again.`;
   return undefined;
 }
 
