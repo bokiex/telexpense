@@ -154,7 +154,7 @@ async function handlePendingChoice(callbackQuery: any) {
   const chatId = Number(callbackQuery.message?.chat?.id);
   const [, token, kind, idValue, versionValue] = data.split(":");
   const choiceId = Number(idValue);
-  const version = versionValue && /^\d+$/.test(versionValue) ? Number(versionValue) : -1;
+  const version = versionValue && /^\d+$/.test(versionValue) ? Number(versionValue) : NaN;
   if (!callbackId || !telegramUserId || !chatId || !token || !["c", "s", "a"].includes(kind) || !Number.isSafeInteger(choiceId)) return;
 
   let callbackAnswered = false;
@@ -164,6 +164,10 @@ async function handlePendingChoice(callbackQuery: any) {
   };
 
   try {
+    if (kind !== "c" && !Number.isSafeInteger(version)) {
+      await answerCallback(callbackAnswer({ status: "expired" }));
+      return;
+    }
     const selection: ConciseCaptureSelection = kind === "c"
       ? { kind: "category", id: choiceId }
       : kind === "s"

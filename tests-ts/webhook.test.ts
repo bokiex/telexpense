@@ -53,6 +53,33 @@ test("Telegram offers and accepts a category-only choice", async (t) => {
   assert.ok(messages.some((message) => message.text === "This account is not available."));
 });
 
+test("predeployment child and account buttons ask users to resend", async (t) => {
+  const oldToken = process.env.TELEGRAM_BOT_TOKEN;
+  process.env.TELEGRAM_BOT_TOKEN = "test-token";
+  t.after(() => {
+    if (oldToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+    else process.env.TELEGRAM_BOT_TOKEN = oldToken;
+  });
+  t.mock.method(supabaseConciseCaptureStore, "getPending", async () => {
+    assert.fail("versionless buttons must not access the pending capture");
+  });
+  const answers: { callback_query_id?: string; text?: string }[] = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    answers.push(JSON.parse(String(init?.body)));
+    return Response.json({ ok: true });
+  });
+  for (const data of ["pc:abc:s:10", "pc:abc:s:0", "pc:abc:a:8"]) {
+    const response = await POST(new NextRequest("https://example.test/api/telegram/webhook", {
+      method: "POST",
+      body: JSON.stringify({ callback_query: { id: "callback", data, from: { id: 42 }, message: { chat: { id: 42 } } } })
+    }));
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(answers, Array.from({ length: 3 }, () => ({
+    callback_query_id: "callback", text: "This selection expired. Send the transaction again."
+  })));
+});
+
 test("Telegram webhook accepts an update without a webhook secret", async () => {
   const response = await POST(new NextRequest("https://example.test/api/telegram/webhook", {
     method: "POST",
