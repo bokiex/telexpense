@@ -28,13 +28,14 @@ export type PendingConciseCapture = Omit<ConciseCaptureInput, "accountHint"> & {
   accountId: number | null;
   categoryId: number | null;
   subcategoryId: number | null;
+  version: number;
 };
 
 export type ConciseCaptureResolution =
   | { status: "ready"; category: CaptureCategory; subcategoryId: number | null; account: CaptureAccount }
   | { status: "choose-category"; categories: CaptureCategory[] }
+  | { status: "selection-unavailable"; selection: "category" }
   | { status: "choose-subcategory"; category: CaptureCategory; subcategories: CaptureCategory["subcategories"] }
-  | { status: "no-subcategories"; category: CaptureCategory }
   | { status: "choose-account"; category: CaptureCategory; subcategoryId: number | null; accounts: CaptureAccount[] };
 
 export type PendingCaptureCommit =
@@ -45,19 +46,18 @@ export type PendingCaptureCommit =
 export type ConciseCaptureStore = {
   getCatalog(telegramUserId: number): Promise<{ categories: CaptureCategory[]; accounts: CaptureAccount[] }>;
   getLastUsedAccountId(telegramUserId: number): Promise<number | null>;
-  createPending(telegramUserId: number, capture: Omit<PendingConciseCapture, "token" | "categoryId" | "subcategoryId">): Promise<string>;
+  createPending(telegramUserId: number, capture: Omit<PendingConciseCapture, "token" | "version">): Promise<string>;
   getPending(telegramUserId: number, token: string): Promise<PendingConciseCapture | null>;
-  updatePending(telegramUserId: number, token: string, selection: { accountId?: number; categoryId?: number; subcategoryId?: number | null }): Promise<void>;
+  updatePending(telegramUserId: number, token: string, version: number, selection: { accountId: number | null; categoryId: number; subcategoryId: number | null }): Promise<boolean>;
   saveResolved(telegramUserId: number, capture: ConciseCaptureInput, resolution: Extract<ConciseCaptureResolution, { status: "ready" }>): Promise<number>;
-  consumePending(telegramUserId: number, token: string, selection: { accountId: number; categoryId: number; subcategoryId: number | null }): Promise<PendingCaptureCommit>;
+  consumePending(telegramUserId: number, token: string, selection: { accountId: number; categoryId: number; subcategoryId: number | null; version: number }): Promise<PendingCaptureCommit>;
 };
 
 export type ConciseCaptureOutcome =
   | { status: "saved"; transactionId: number; categoryId: number; subcategoryId: number | null; accountId: number; amountCents: number }
   | { status: "choose-category"; token: string; categories: CaptureCategory[] }
-  | { status: "choose-subcategory"; token: string; category: CaptureCategory; subcategories: CaptureCategory["subcategories"] }
-  | { status: "choose-account"; token: string; accounts: CaptureAccount[] }
-  | { status: "no-subcategories"; category: CaptureCategory }
+  | { status: "choose-subcategory"; token: string; version: number; category: CaptureCategory; subcategories: CaptureCategory["subcategories"] }
+  | { status: "choose-account"; token: string; version: number; accounts: CaptureAccount[] }
   | { status: "account-not-found"; accountHint: string }
   | { status: "expired" }
   | { status: "selection-unavailable"; selection: "category" | "subcategory" | "account" }
@@ -65,8 +65,8 @@ export type ConciseCaptureOutcome =
 
 export type ConciseCaptureSelection =
   | { kind: "category"; id: number }
-  | { kind: "subcategory"; id: number }
-  | { kind: "account"; id: number };
+  | { kind: "subcategory"; id: number | null; version: number }
+  | { kind: "account"; id: number; version: number };
 
 export async function startConciseCapture(
   store: ConciseCaptureStore,
@@ -93,13 +93,16 @@ export async function startConciseCapture(
     const transactionId = await store.saveResolved(telegramUserId, capture, resolution);
     return savedOutcome(transactionId, resolution, capture.amountCents);
   }
+  if (resolution.status === "selection-unavailable") return resolution;
   const token = await store.createPending(telegramUserId, {
     kind: capture.kind,
     description: capture.description,
     amountCents: capture.amountCents,
-    accountId: accountId ?? lastUsedAccountId ?? null
+    accountId: accountId ?? lastUsedAccountId ?? null,
+    categoryId: resolution.status === "choose-category" ? null : resolution.category.id,
+    subcategoryId: resolution.status === "choose-account" ? resolution.subcategoryId : null
   });
-  return outcomeForResolution(token, resolution);
+  return outcomeForResolution(token, 0, resolution);
 }
 
 export async function selectConciseCapture(
@@ -110,27 +113,27 @@ export async function selectConciseCapture(
 ): Promise<ConciseCaptureOutcome> {
   const pending = await store.getPending(telegramUserId, token);
   if (!pending) return { status: "expired" };
+  if (selection.kind !== "category" && selection.version !== pending.version) {
+    return { status: "selection-unavailable", selection: selection.kind };
+  }
 
   const { categories, accounts } = await store.getCatalog(telegramUserId);
   if (selection.kind === "category") {
     const category = categories.find((item) => item.active && item.id === selection.id);
     if (!category) return { status: "selection-unavailable", selection: "category" };
-    await store.updatePending(telegramUserId, token, { categoryId: category.id, subcategoryId: null });
     pending.categoryId = category.id;
     pending.subcategoryId = null;
   } else if (selection.kind === "subcategory") {
     const category = categories.find((item) => item.active && item.id === pending.categoryId);
-    if (!category?.subcategories.some((item) => item.id === selection.id)) {
+    if (!category) return { status: "selection-unavailable", selection: "category" };
+    if (selection.id !== null && !category.subcategories.some((item) => item.id === selection.id)) {
       return { status: "selection-unavailable", selection: "subcategory" };
     }
-    await store.updatePending(telegramUserId, token, { subcategoryId: selection.id });
     pending.subcategoryId = selection.id;
   } else {
     const account = accounts.find((item) => item.active && item.id === selection.id);
     if (!account) return { status: "selection-unavailable", selection: "account" };
-    const accountId = Number(account.id);
-    await store.updatePending(telegramUserId, token, { accountId });
-    pending.accountId = accountId;
+    pending.accountId = Number(account.id);
   }
 
   const resolution = resolveConciseCapture(
@@ -138,16 +141,27 @@ export async function selectConciseCapture(
     categories,
     accounts,
     pending.categoryId ?? undefined,
-    pending.subcategoryId ?? undefined,
+    selection.kind === "subcategory" || (selection.kind === "account" && pending.categoryId !== null)
+      ? pending.subcategoryId : pending.subcategoryId ?? undefined,
     pending.accountId ?? undefined
   );
-  if (resolution.status !== "ready") return outcomeForResolution(token, resolution);
+  if (resolution.status === "selection-unavailable") return resolution;
+  if (resolution.status === "choose-category") return outcomeForResolution(token, pending.version, resolution);
+  if (resolution.status !== "ready") {
+    const updated = await store.updatePending(telegramUserId, token, pending.version, {
+      categoryId: resolution.category.id,
+      subcategoryId: resolution.status === "choose-subcategory" ? null : resolution.subcategoryId,
+      accountId: pending.accountId
+    });
+    if (!updated) return { status: "selection-unavailable", selection: selection.kind };
+    return outcomeForResolution(token, pending.version + 1, resolution);
+  }
 
-  await store.updatePending(telegramUserId, token, { accountId: Number(resolution.account.id) });
   const committed = await store.consumePending(telegramUserId, token, {
     accountId: Number(resolution.account.id),
     categoryId: resolution.category.id,
-    subcategoryId: resolution.subcategoryId
+    subcategoryId: resolution.subcategoryId,
+    version: pending.version
   });
   if (committed.status === "saved") return savedOutcome(committed.transactionId, resolution, pending.amountCents);
   if (committed.status === "already-used") return { status: "already-used" };
@@ -159,14 +173,15 @@ export function resolveConciseCapture(
   categories: CaptureCategory[],
   accounts: CaptureAccount[],
   selectedCategoryId?: number,
-  selectedSubcategoryId?: number,
+  selectedSubcategoryId?: number | null,
   selectedAccountId?: number
 ): ConciseCaptureResolution {
   const activeCategories = categories.filter((category) => category.active);
   const activeAccounts = accounts.filter((account) => account.active && account.id !== null);
-  let category = selectedCategoryId
+  let category = selectedCategoryId !== undefined
     ? activeCategories.find((item) => item.id === selectedCategoryId)
     : undefined;
+  if (selectedCategoryId !== undefined && !category) return { status: "selection-unavailable", selection: "category" };
   let subcategoryId = selectedSubcategoryId ?? null;
   let categoryOnly = false;
 
@@ -202,16 +217,12 @@ export function resolveConciseCapture(
     subcategoryId = null;
   }
 
-  if (subcategoryId === null) {
-    if (!categoryOnly && category.subcategories.length === 0) {
-      return { status: "no-subcategories", category };
-    } else if (!categoryOnly) {
-      const matches = category.subcategories.filter(
-        (subcategory) => normalizeIdentity(subcategory.name) === normalizeIdentity(description)
-      );
-      if (matches.length === 1) subcategoryId = matches[0].id;
-      else return { status: "choose-subcategory", category, subcategories: category.subcategories };
-    }
+  if (subcategoryId === null && selectedSubcategoryId !== null && !categoryOnly && category.subcategories.length > 0) {
+    const matches = category.subcategories.filter(
+      (subcategory) => normalizeIdentity(subcategory.name) === normalizeIdentity(description)
+    );
+    if (matches.length === 1) subcategoryId = matches[0].id;
+    else return { status: "choose-subcategory", category, subcategories: category.subcategories };
   }
 
   const selectedAccount = selectedAccountId
@@ -234,11 +245,10 @@ export function resolveConciseAccount(accountHint: string | null, accounts: Capt
   return matches.length === 1 ? Number(matches[0].id) : undefined;
 }
 
-function outcomeForResolution(token: string, resolution: Exclude<ConciseCaptureResolution, { status: "ready" }>): ConciseCaptureOutcome {
+function outcomeForResolution(token: string, version: number, resolution: Exclude<ConciseCaptureResolution, { status: "ready" } | { status: "selection-unavailable" }>): ConciseCaptureOutcome {
   if (resolution.status === "choose-category") return { ...resolution, token };
-  if (resolution.status === "choose-subcategory") return { ...resolution, token };
-  if (resolution.status === "choose-account") return { status: "choose-account", token, accounts: resolution.accounts };
-  return resolution;
+  if (resolution.status === "choose-subcategory") return { ...resolution, token, version };
+  return { status: "choose-account", token, version, accounts: resolution.accounts };
 }
 
 function savedOutcome(

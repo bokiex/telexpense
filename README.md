@@ -191,11 +191,10 @@ the Mini App. The concise `amount subcategory` form infers the parent category
 and reuses the last-used active account. An explicit `@account` overrides it.
 Unknown or ambiguous subcategories and multiple accounts are resolved with
 inline keyboard choices; duplicate subcategory names require an explicit
-parent-category choice.
-Selections expire after 15 minutes. If the selected category has no
-subcategories, the bot asks you to add one from the Budget tab and retry.
-Confirmations show the category/subcategory breadcrumb with Edit and Undo
-actions.
+parent-category choice. When prompted for a subcategory, you can choose
+"No subcategory"; a category with no children needs no subcategory selection.
+Selections expire after 15 minutes. Confirmations show the category/subcategory
+breadcrumb with Edit and Undo actions.
 
 The `/budget` bot command sets parent-category monthly budgets. Use the Mini
 App budget tab to set or delete budgets for Needs, Wants, and Savings themes,
@@ -230,10 +229,13 @@ dashboard.
   and subcategory budgets can be set or deleted for the selected month; rows
   without a target show activity amount only. Parent category rows are visible
   by default and child subcategories expand on demand. Category management is
-  part of this tab: add, edit, delete, and add subcategories directly beside
-  the budget rows. Overall dashboard totals count a theme budget when one
-  exists, otherwise they count parent budgets or roll up child budgets so
-  subcategory targets are not double-counted. The budget overview donut uses
+  part of this tab: add, edit, or delete categories and add or delete
+  subcategories beside the budget rows. A subcategory can be deleted only when
+  no transactions, recurring rules, budgets, or pending selection records
+  reference it; expired pending records also block deletion. Overall dashboard
+  totals count a theme budget when one exists, otherwise they count parent
+  budgets or roll up child budgets so subcategory targets are not double-counted.
+  The budget overview donut uses
   Needs, Wants, and Savings progress to show monthly budget left or overage;
   ordinary Needs/Wants spending is reported separately from Savings allocated
   through Savings-category expenses and investment transactions.

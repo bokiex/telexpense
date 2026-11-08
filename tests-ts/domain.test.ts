@@ -347,6 +347,16 @@ test("duplicate subcategory names under one parent require a subcategory choice"
   }
 });
 
+test("concise capture never infers a replacement for an unavailable selected category", () => {
+  const food = category(1, "Food", "Daily");
+  const transport = category(2, "Transport", "Daily");
+  for (const categories of [[{ ...food, active: false }, transport], [transport]]) {
+    assert.deepEqual(resolveConciseCapture("daily", categories, [account], 1, 10), {
+      status: "selection-unavailable", selection: "category"
+    });
+  }
+});
+
 test("a subcategory selected under another category is rejected", () => {
   const categories = [category(1, "Food", "Daily"), category(2, "Transport", "Train")];
   const result = resolveConciseCapture("daily", categories, [account], 2, 10);
@@ -354,11 +364,11 @@ test("a subcategory selected under another category is rejected", () => {
   if (result.status === "choose-subcategory") assert.equal(result.category.id, 2);
 });
 
-test("a category without subcategories returns explicit guidance state", () => {
+test("a category without subcategories resolves without a child", () => {
   const emptyCategory = { ...category(1, "Food", "Daily"), subcategories: [] };
   const result = resolveConciseCapture("daily", [emptyCategory], [account], 1);
-  assert.equal(result.status, "no-subcategories");
-  if (result.status === "no-subcategories") assert.equal(result.category.id, 1);
+  assert.equal(result.status, "ready");
+  if (result.status === "ready") assert.equal(result.subcategoryId, null);
 });
 
 test("unknown concise text starts category selection", () => {
